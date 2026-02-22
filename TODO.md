@@ -1,0 +1,4 @@
+- [ ] Update API_URL in frontend/services/api.ts to 'http://10.173.189.79:5000/api'
+- [ ] Update IP_ADDRESS in frontend/services/config.ts to '10.173.189.79'
+- [ ] Start the backend server by running the server.js file
+- [ ] Test the API connection to ensure the network error is resolved

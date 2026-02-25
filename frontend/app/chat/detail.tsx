@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
@@ -29,18 +29,25 @@ interface Message {
   editedAt?: string;
   unsentAt?: string;
   unsentBy?: string;
-  content?: string; // Legacy support
+  content?: string;
   createdAt: string;
-  read?: boolean;
+  readBy: string[];
 }
+
+// Type for items in the flatlist (messages or date separators)
+type ListItem = 
+  | { type: 'message'; data: Message }
+  | { type: 'dateSeparator'; date: string; dateKey: string };
 
 export default function ChatDetailScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [groupedMessages, setGroupedMessages] = useState<ListItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
   const flatListRef = useRef<FlatList>(null);
   const socketRef = useRef<Socket | null>(null);
   const router = useRouter();
@@ -49,16 +56,85 @@ export default function ChatDetailScreen() {
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
 
+  // Helper to format date for separator
+  const formatDateSeparator = (dateString: string): { display: string; key: string } => {
+    const messageDate = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const isToday = messageDate.toDateString() === today.toDateString();
+    const isYesterday = messageDate.toDateString() === yesterday.toDateString();
+
+    if (isToday) {
+      return { display: 'Today', key: 'today' };
+    } else if (isYesterday) {
+      return { display: 'Yesterday', key: 'yesterday' };
+    } else {
+      return { display: messageDate.toLocaleDateString(), key: messageDate.toDateString() };
+    }
+  };
+
+  // Group messages by date and add separators
+  const groupMessagesByDate = useCallback((msgs: Message[]): ListItem[] => {
+    const result: ListItem[] = [];
+    let currentDateKey = '';
+
+    msgs.forEach((message) => {
+      const { display, key } = formatDateSeparator(message.createdAt);
+      
+      if (key !== currentDateKey) {
+        result.push({ type: 'dateSeparator', date: display, dateKey: key });
+        currentDateKey = key;
+      }
+      result.push({ type: 'message', data: message });
+    });
+
+    return result;
+  }, []);
+
+  // Fetch user online status
+  const fetchUserStatus = async () => {
+    if (!otherUserId) return;
+    try {
+      const data = await get(`/chats/user-status/${otherUserId}`);
+      setOtherUserStatus({
+        isOnline: data.isOnline || false,
+        lastSeen: data.lastSeen || null
+      });
+    } catch (error) {
+      console.log('Error fetching user status:', error);
+    }
+  };
+
+  // Format last seen display
+  const formatLastSeen = (lastSeen: string | null): string => {
+    if (!lastSeen) return 'Last seen unknown';
+    
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffMin < 1) return 'Last seen just now';
+    if (diffMin < 60) return `Last seen ${diffMin}m ago`;
+    if (diffHour < 24) return `Last seen ${diffHour}h ago`;
+    if (diffDay < 7) return `Last seen ${diffDay}d ago`;
+    
+    return `Last seen ${date.toLocaleDateString()}`;
+  };
+
   useEffect(() => {
     const initialize = async () => {
-      // Reset state when chatId changes
       setMessages([]);
       setLoading(true);
+      setGroupedMessages([]);
 
       const userId = await AsyncStorage.getItem('userId');
       setCurrentUserId(userId);
 
-      // Initialize socket connection
       const token = await AsyncStorage.getItem('token');
       const newSocket = io(SOCKET_URL, {
         auth: { token }
@@ -67,7 +143,6 @@ export default function ChatDetailScreen() {
       socketRef.current = newSocket;
       setSocket(newSocket);
 
-      // Socket event listeners
       newSocket.on('connect', () => {
         console.log('Connected to socket');
         setSocketConnected(true);
@@ -81,19 +156,29 @@ export default function ChatDetailScreen() {
       });
 
       newSocket.on('message received', (message: Message) => {
-        // Check if message already exists to prevent duplicates
         setMessages(prev => {
           const exists = prev.some(m => m._id === message._id);
           if (exists) return prev;
-          return [...prev, message];
+          const updated = [...prev, message];
+          return updated;
         });
-        // Scroll to bottom when new message arrives
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
       });
 
+      // Listen for online status changes
+      newSocket.on('user online', (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
+        if (data.userId === otherUserId) {
+          setOtherUserStatus({
+            isOnline: data.isOnline,
+            lastSeen: data.lastSeen || (data.isOnline ? null : new Date().toISOString())
+          });
+        }
+      });
+
       fetchMessages();
+      fetchUserStatus();
     };
 
     initialize();
@@ -103,21 +188,53 @@ export default function ChatDetailScreen() {
         socketRef.current.off('connect');
         socketRef.current.off('disconnect');
         socketRef.current.off('message received');
+        socketRef.current.off('user online');
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, [chatId]);
+  }, [chatId, otherUserId]);
+
+  // Update grouped messages when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      setGroupedMessages(groupMessagesByDate(messages));
+    }
+  }, [messages, groupMessagesByDate]);
+
+  // Refresh user status periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!otherUserStatus.isOnline) {
+        fetchUserStatus();
+      }
+    }, 30000); // Every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [otherUserStatus.isOnline]);
 
   const fetchMessages = async () => {
     try {
-      setLoading(true); // Ensure loading is true at the start of fetch
+      setLoading(true);
       const data = await get(`/chats/${chatId}/messages`);
       setMessages(data.messages);
+      setGroupedMessages(groupMessagesByDate(data.messages));
+      
+      if (chatId && currentUserId) {
+        markAllAsRead();
+      }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to fetch messages');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      await post('/chats/read-all', { chatId });
+    } catch (error) {
+      console.log('Error marking messages as read:', error);
     }
   };
 
@@ -129,27 +246,14 @@ export default function ChatDetailScreen() {
         sender: currentUserId,
         receiver: otherUserId,
         chat: chatId,
+        bodyText: newMessage.trim(),
         content: newMessage.trim(),
         msgType: 'text'
       };
 
-      // Send via socket
       socketRef.current.emit('new message', messageData);
+      setNewMessage('');
 
-      // Optimistically add to UI
-      // const tempMessage: Message = {
-      //   _id: Date.now().toString(),
-      //   sender: { _id: currentUserId, username: 'You', profilePicture: '' },
-      //   receiver: { _id: otherUserId, username: otherUsername, profilePicture: '' },
-      //   content: newMessage.trim(),
-      //   createdAt: new Date().toISOString(),
-      //   msgType: ''
-      // };
-
-      // setMessages(prev => [...prev, tempMessage]);
-      // setNewMessage('');
-
-      // Scroll to bottom
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -159,40 +263,49 @@ export default function ChatDetailScreen() {
     }
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isOwnMessage = item.sender._id === currentUserId;
+  const isMessageRead = (message: Message) => {
+    if (message.sender._id === currentUserId) {
+      return message.readBy?.includes(otherUserId);
+    }
+    return false;
+  };
+
+  const renderItem = ({ item }: { item: ListItem }) => {
+    if (item.type === 'dateSeparator') {
+      return (
+        <View style={styles.dateSeparator}>
+          <Text style={styles.dateSeparatorText}>{item.date}</Text>
+        </View>
+      );
+    }
+
+    const message = item.data;
+    const isOwnMessage = message.sender._id === currentUserId;
+    const isRead = isMessageRead(message);
 
     return (
       <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
         <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
-          {item.unsentAt ? '[Message unsent]' : (item.bodyText || item.content)}
+          {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
         </Text>
-        {item.editedAt && !item.unsentAt && (
+        {message.editedAt && !message.unsentAt && (
           <Text style={[styles.editedText, isOwnMessage ? styles.ownEditedText : styles.otherEditedText]}>
             (edited)
           </Text>
         )}
         <View style={styles.timestampContainer}>
           <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
-            {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
           {isOwnMessage && (
-            <Text style={styles.readStatus}>
-              {item.read ? '✓✓' : '✓'}
+            <Text style={[styles.readStatus, isRead ? styles.readStatusBlue : styles.readStatusGray]}>
+              {isRead ? '✓✓' : '✓'}
             </Text>
           )}
         </View>
       </View>
     );
   };
-
-  if (loading) {
-    return (
-      <ThemedView style={styles.container}>
-        <Text>Loading messages...</Text>
-      </ThemedView>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -201,17 +314,25 @@ export default function ChatDetailScreen() {
       keyboardVerticalOffset={90}
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButtonContainer}>
           <Text style={styles.backButton}>←</Text>
         </TouchableOpacity>
-        <ThemedText type="subtitle">{otherUsername}</ThemedText>
+        <View style={styles.headerInfo}>
+          <ThemedText type="subtitle">{otherUsername}</ThemedText>
+          <Text style={[
+            styles.statusText,
+            otherUserStatus.isOnline ? styles.onlineStatus : styles.offlineStatus
+          ]}>
+            {otherUserStatus.isOnline ? 'Online' : formatLastSeen(otherUserStatus.lastSeen)}
+          </Text>
+        </View>
       </View>
 
       <FlatList
         ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item._id}
+        data={groupedMessages}
+        renderItem={renderItem}
+        keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}` : `msg-${item.data._id}`}
         style={styles.messagesList}
         contentContainerStyle={styles.messagesContainer}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
@@ -224,8 +345,11 @@ export default function ChatDetailScreen() {
           value={newMessage}
           onChangeText={setNewMessage}
           placeholder="Type a message..."
-          placeholderTextColor="#666"
+          placeholderTextColor="#999"
           multiline
+          onSubmitEditing={sendMessage}
+          returnKeyType="send"
+          blurOnSubmit
         />
         <TouchableOpacity
           style={[styles.sendButton, (!socketConnected || !newMessage.trim()) && styles.sendButtonDisabled]}
@@ -244,24 +368,54 @@ export default function ChatDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#151718',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#333',
+    backgroundColor: '#1a1a1a',
+  },
+  backButtonContainer: {
+    marginRight: 12,
   },
   backButton: {
     fontSize: 24,
-    marginRight: 16,
     color: '#007AFF',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  statusText: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  onlineStatus: {
+    color: '#34C759',
+  },
+  offlineStatus: {
+    color: '#8E8E93',
   },
   messagesList: {
     flex: 1,
   },
   messagesContainer: {
     padding: 16,
+  },
+  dateSeparator: {
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dateSeparatorText: {
+    backgroundColor: '#333',
+    color: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    fontSize: 12,
+    overflow: 'hidden',
   },
   messageContainer: {
     maxWidth: '80%',
@@ -275,7 +429,7 @@ const styles = StyleSheet.create({
   },
   otherMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#333',
   },
   messageText: {
     fontSize: 16,
@@ -284,7 +438,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   otherMessageText: {
-    color: '#000',
+    color: '#fff',
   },
   timestamp: {
     fontSize: 12,
@@ -295,7 +449,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   otherTimestamp: {
-    color: '#666',
+    color: '#aaa',
   },
   timestampContainer: {
     flexDirection: 'row',
@@ -304,8 +458,13 @@ const styles = StyleSheet.create({
   },
   readStatus: {
     fontSize: 12,
-    color: '#e0e0e0',
     marginLeft: 8,
+  },
+  readStatusBlue: {
+    color: '#34B7F1',
+  },
+  readStatusGray: {
+    color: '#e0e0e0',
   },
   editedText: {
     fontSize: 12,
@@ -321,18 +480,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#333',
+    backgroundColor: '#1a1a1a',
   },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#444',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginRight: 12,
     maxHeight: 100,
-    color: '#000', // Default text color
+    color: '#fff',
+    backgroundColor: '#2a2a2a',
   },
   sendButton: {
     backgroundColor: '#007AFF',
@@ -342,13 +503,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#444',
   },
   sendButtonText: {
     color: '#fff',
     fontWeight: 'bold',
   },
   sendButtonTextDisabled: {
-    color: '#999',
+    color: '#888',
   },
 });
+

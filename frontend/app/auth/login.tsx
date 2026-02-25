@@ -23,11 +23,15 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const data = await post('/auth/login', { email, password });
+      
+      // Store token and userId before navigation
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('userId', data._id);
+      
+      // Navigate only after storage operations complete
       router.replace('/(tabs)');
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Login failed');
+      Alert.alert('Error', error.response?.data?.message || 'Login failed. Please check your credentials and try again.');
     } finally {
       setLoading(false);
     }

@@ -33,7 +33,11 @@ const chatSchema = new mongoose.Schema({
     participants: [participantSchema],
     lastMessage: {
         text: String,
-        createdAt: Date
+        createdAt: Date,
+        sender: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }
     },
     unreadCount: {
         type: Map,

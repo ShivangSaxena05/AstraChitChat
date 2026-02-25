@@ -56,12 +56,26 @@ const io = new Server(server, {
 
 // Setup Socket.io Connection Handler
 io.on('connection', (socket) => {
+    const User = require('./models/User');
     console.log('A user connected via socket.');
 
     // User joins their own room for private messaging
-    socket.on('setup', (userData) => {
+    socket.on('setup', async (userData) => {
         socket.join(userData._id);
         socket.emit('connected');
+        
+        // Update user online status
+        try {
+            await User.findByIdAndUpdate(userData._id, {
+                isOnline: true,
+                lastSeen: new Date()
+            });
+            
+            // Emit user online status to all connected clients
+            io.emit('user online', { userId: userData._id, isOnline: true });
+        } catch (error) {
+            console.error('Error updating user online status:', error);
+        }
     });
 
     // User joins a chat room
@@ -85,24 +99,52 @@ io.on('connection', (socket) => {
                 msgType: newMessageReceived.msgType || newMessageReceived.chatType || 'text',
                 attachments: newMessageReceived.attachments || [],
                 quotedMsgId: newMessageReceived.quotedMsgId,
-                readBy: [{ user: newMessageReceived.sender, readAt: new Date() }] // sender has read their own message
+                readBy: [{ user: newMessageReceived.sender, readAt: new Date() }]
             });
 
             // Populate sender and receiver details
             await message.populate('sender', 'name username profilePicture');
             await message.populate('receiver', 'name username profilePicture');
 
-            // Update chat's lastMessage
+            // Get sender details for lastMessage
+            const senderDoc = await User.findById(newMessageReceived.sender).select('name username profilePicture');
+
+            // Prepare lastMessage object
+            const lastMessageData = {
+                text: newMessageReceived.bodyText || newMessageReceived.content || (newMessageReceived.attachments && newMessageReceived.attachments.length ? 'Attachment' : ''),
+                createdAt: new Date(),
+                sender: {
+                    _id: senderDoc._id,
+                    username: senderDoc.username,
+                    profilePicture: senderDoc.profilePicture
+                }
+            };
+
+            // Update chat's lastMessage with populated sender
             await Chat.findByIdAndUpdate(newMessageReceived.chat, {
-                lastMessage: {
-                    text: newMessageReceived.bodyText || newMessageReceived.content || (newMessageReceived.attachments && newMessageReceived.attachments.length ? 'Attachment' : ''),
-                    createdAt: new Date()
-                },
+                lastMessage: lastMessageData,
                 updatedAt: new Date()
             });
 
             // Emit to chat room so all participants receive the message (including sender)
             io.to(newMessageReceived.chat).emit('message received', message);
+
+            // Emit conversationUpdated event to both users (sender and receiver)
+            // This is the O(1) update - no refetch needed
+            const conversationUpdate = {
+                conversationId: newMessageReceived.chat,
+                lastMessage: lastMessageData,
+                updatedAt: new Date().toISOString(),
+                senderId: newMessageReceived.sender,
+                isNewMessage: true
+            };
+
+            // Send to receiver
+            io.to(newMessageReceived.receiver).emit('conversationUpdated', conversationUpdate);
+            
+            // Send to sender (so their list also updates and re-sorts)
+            io.to(newMessageReceived.sender).emit('conversationUpdated', conversationUpdate);
+
         } catch (error) {
             console.error('Error saving message:', error);
             socket.emit('error', 'Failed to send message');
@@ -114,8 +156,28 @@ io.on('connection', (socket) => {
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
     // Handle disconnect
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         console.log('User disconnected');
+        
+        // Get userId from socket and update online status
+        if (socket.handshake.auth && socket.handshake.auth.token) {
+            try {
+                const jwt = require('jsonwebtoken');
+                const decoded = jwt.verify(socket.handshake.auth.token, process.env.JWT_SECRET || 'your-secret-key');
+                
+                if (decoded && decoded.id) {
+                    await User.findByIdAndUpdate(decoded.id, {
+                        isOnline: false,
+                        lastSeen: new Date()
+                    });
+                    
+                    // Emit user offline status to all connected clients
+                    io.emit('user online', { userId: decoded.id, isOnline: false, lastSeen: new Date() });
+                }
+            } catch (error) {
+                console.log('Error updating offline status:', error);
+            }
+        }
     });
 });
 

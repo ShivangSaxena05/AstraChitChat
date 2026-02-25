@@ -6,12 +6,14 @@ const {
     searchChats,
     sendMessage,
     markMessageAsRead,
+    markAllMessagesAsRead,
     addReaction,
     removeReaction,
     editMessage,
     unsendMessage,
     getMessageReceipts,
-    getMessageReactions
+    getMessageReactions,
+    getUserStatus
 } = require('../controllers/chatController');
 
 // const {
@@ -40,6 +42,9 @@ router.post('/', protect, sendMessage);
 // Search chats by participant username or name
 router.get('/search', protect, searchChats);
 
+// Get user online status
+router.get('/user-status/:userId', protect, getUserStatus);
+
 // Get messages for a specific chat
 router.get('/:chatId/messages', protect, getChatMessages);
 
@@ -49,6 +54,9 @@ router.post('/:chatId/messages', protect, sendMessage);
 // Message-specific routes
 // Mark message as read
 router.post('/messages/:messageId/read', protect, markMessageAsRead);
+
+// Mark all messages in a chat as read
+router.post('/read-all', protect, markAllMessagesAsRead);
 
 // Edit message
 router.put('/messages/:messageId', protect, editMessage);

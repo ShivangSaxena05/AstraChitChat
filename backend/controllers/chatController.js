@@ -69,6 +69,7 @@ async function getChats(req, res) {
     // Find chats where current user is participant
     const chats = await Chat.find({ 'participants.user': toObjectId(userId) })
       .populate('participants.user', 'name username profilePicture')
+      .populate('lastMessage.sender', 'name username profilePicture')
       .lean();
 
     // For each chat compute unreadCount using participants.lastReadMsgId
@@ -267,7 +268,8 @@ async function sendMessage(req, res) {
     // Update chat.lastMessage to show preview & time
     chat.lastMessage = {
       text: createdMessage.bodyText || (createdMessage.attachments && createdMessage.attachments.length ? 'Attachment' : ''),
-      createdAt: createdMessage.createdAt
+      createdAt: createdMessage.createdAt,
+      sender: createdMessage.sender
     };
 
     // Update chat participants' lastReadMsgId
@@ -638,6 +640,29 @@ async function searchChats(req, res) {
   }
 }
 
+/**
+ * GET /api/chats/user-status/:userId
+ * Get user's online status and last seen
+ */
+async function getUserStatus(req, res) {
+  try {
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId).select('isOnline lastSeen');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    return res.json({
+      isOnline: user.isOnline || false,
+      lastSeen: user.lastSeen || null
+    });
+  } catch (error) {
+    console.error('getUserStatus error:', error);
+    return res.status(500).json({ message: 'Server error: could not get user status', error: error.message });
+  }
+}
+
 module.exports = {
   getChats,
   getChatMessages,
@@ -651,5 +676,6 @@ module.exports = {
   removeReaction,
   getMessageReceipts,
   getMessageReactions,
-  searchChats
+  searchChats,
+  getUserStatus
 };

@@ -34,6 +34,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         maxlength: 500,
         default: ''
+    },
+    isOnline: {
+        type: Boolean,
+        default: false
+    },
+    lastSeen: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true // Adds createdAt and updatedAt fields

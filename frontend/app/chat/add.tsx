@@ -46,7 +46,7 @@ export default function AddChatScreen() {
     try {
       const currentUserId = await AsyncStorage.getItem('userId');
       if (!currentUserId) throw new Error('User not logged in');
-      const { data } = await post('/chats', { participants: [currentUserId, user._id] });
+      const { data } = await post('/chats/create', { participants: [currentUserId, user._id] });
       router.push({
         pathname: '/chat/detail',
         params: {

@@ -153,6 +153,32 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
     }
   };
 
+  const handleFollowersPress = () => {
+    if (userId) {
+      router.push({
+        pathname: '/followers-list',
+        params: { 
+          userId: userId, 
+          username: user?.username || '',
+          type: 'followers'
+        }
+      });
+    }
+  };
+
+  const handleFollowingPress = () => {
+    if (userId) {
+      router.push({
+        pathname: '/followers-list',
+        params: { 
+          userId: userId, 
+          username: user?.username || '',
+          type: 'following'
+        }
+      });
+    }
+  };
+
   const getFilteredPosts = () => {
     switch (activeTab) {
       case 'posts':
@@ -378,14 +404,14 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.stat} onPress={handleFollowingPress}>
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 

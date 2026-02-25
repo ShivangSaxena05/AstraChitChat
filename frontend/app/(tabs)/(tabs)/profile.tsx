@@ -6,6 +6,7 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme } from 'react-native';
 
 interface UserProfile {
+  _id?: string;
   username: string;
   profilePicture: string;
   bio: string;
@@ -63,12 +64,50 @@ export default function ProfileScreen() {
 
   const handleShareProfile = async () => {
     try {
-      await Share.share({
-        message: `Check out ${user?.username}'s profile!`,
-        url: `https://yourapp.com/profile/${user?.username}`,
+      const profileUrl = `https://astrachitchat.onrender.com/profile/${user?.username}`;
+      const shareMessage = user?.bio 
+        ? `Check out ${user?.username}'s profile on Astra!\n\n"${user.bio}"\n\nView profile: ${profileUrl}`
+        : `Check out ${user?.username}'s profile on Astra!\n\nView profile: ${profileUrl}`;
+      
+      const result = await Share.share({
+        message: shareMessage,
+        title: `${user?.username}'s Profile`
       });
+
+      if (result.action === Share.sharedAction) {
+        console.log('Profile shared successfully');
+      }
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to share profile');
+      console.error('Share error:', error);
+      if (error.message !== 'User did not share') {
+        Alert.alert('Error', 'Failed to share profile');
+      }
+    }
+  };
+
+  const handleFollowersPress = () => {
+    if (user) {
+      router.push({
+        pathname: '/followers-list',
+        params: { 
+          userId: user._id || 'me', 
+          username: user.username,
+          type: 'followers'
+        }
+      });
+    }
+  };
+
+  const handleFollowingPress = () => {
+    if (user) {
+      router.push({
+        pathname: '/followers-list',
+        params: { 
+          userId: user._id || 'me', 
+          username: user.username,
+          type: 'following'
+        }
+      });
     }
   };
 
@@ -273,14 +312,14 @@ export default function ProfileScreen() {
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.stat} onPress={handleFollowingPress}>
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
-          </View>
+          </TouchableOpacity>
         </View>
       </View>
 

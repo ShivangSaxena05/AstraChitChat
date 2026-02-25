@@ -24,6 +24,7 @@ export default function TabLayout() {
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="user-profile" options={{ headerShown: false, presentation: 'modal' }} />
+      <Stack.Screen name="followers-list" options={{ headerShown: true, presentation: 'modal', title: 'Followers' }} />
       <Stack.Screen name="chat" options={{ headerShown: false, presentation: 'modal' }} />
     </Stack>
   );

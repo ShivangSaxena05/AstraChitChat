@@ -1,0 +1,373 @@
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { get } from '@/services/api';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  Share,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  useColorScheme,
+  Platform,
+} from 'react-native';
+
+interface UserProfile {
+  _id?: string;
+  username: string;
+  profilePicture: string;
+  bio: string;
+  stats: {
+    posts: number;
+    followers: number;
+    following: number;
+  };
+}
+
+interface UserPost {
+  _id: string;
+  mediaUrl: string;
+  mediaType: string;
+}
+
+type TabType = 'posts' | 'videos' | 'reels';
+
+const { width } = Dimensions.get('window');
+const GRID_ITEM_SIZE = (width - 4) / 3;
+
+export default function ProfileScreen() {
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabType>('posts');
+
+  const router = useRouter();
+  const colorScheme = useColorScheme();
+
+  // ================= FETCH DATA =================
+  useFocusEffect(
+    useCallback(() => {
+      const fetchData = async () => {
+        try {
+          setLoading(true);
+          const [userData, postsData] = await Promise.all([
+            get('/profile/me'),
+            get('/posts/me'),
+          ]);
+          setUser(userData);
+          setPosts(postsData.posts);
+        } catch (error: any) {
+          console.error('Profile fetch error:', error);
+          Alert.alert(
+            'Error',
+            error?.response?.data?.message || 'Failed to fetch profile data.'
+          );
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchData();
+    }, [])
+  );
+
+  // ================= SHARE PROFILE =================
+  const handleShareProfile = async () => {
+    if (!user) return;
+
+    const profileUrl = `https://astrachitchat.onrender.com/profile/${user.username}`;
+
+    const shareMessage = user.bio
+      ? `Check out ${user.username}'s profile on Astra!\n\n"${user.bio}"\n\n${profileUrl}`
+      : `Check out ${user.username}'s profile on Astra!\n\n${profileUrl}`;
+
+    try {
+      if (Platform.OS === 'web') {
+        if (navigator.share) {
+          await navigator.share({
+            title: `${user.username}'s Profile`,
+            text: shareMessage,
+            url: profileUrl,
+          });
+        } else {
+          await navigator.clipboard.writeText(profileUrl);
+          Alert.alert('Copied!', 'Profile link copied to clipboard.');
+        }
+      } else {
+        await Share.share({
+          message: shareMessage,
+        });
+      }
+    } catch (error) {
+      console.log('Share error:', error);
+    }
+  };
+
+  // ================= FOLLOWERS NAVIGATION =================
+  const handleFollowersPress = () => {
+    if (!user) return;
+    router.push({
+      pathname: '/followers-list',
+      params: {
+        userId: user._id || 'me',
+        username: user.username,
+        type: 'followers',
+      },
+    });
+  };
+
+  const handleFollowingPress = () => {
+    if (!user) return;
+    router.push({
+      pathname: '/followers-list',
+      params: {
+        userId: user._id || 'me',
+        username: user.username,
+        type: 'following',
+      },
+    });
+  };
+
+  // ================= FILTER POSTS (OPTIMIZED) =================
+  const filteredPosts = useMemo(() => {
+    switch (activeTab) {
+      case 'posts':
+        return posts.filter((post) => post.mediaType === 'image');
+      case 'videos':
+        return posts.filter((post) => post.mediaType === 'video');
+      case 'reels':
+        return posts.filter((post) => post.mediaType === 'reel');
+      default:
+        return posts;
+    }
+  }, [posts, activeTab]);
+
+  // ================= RENDER POST =================
+  const renderPostItem = ({ item }: { item: UserPost }) => (
+    <TouchableOpacity style={styles.gridItem}>
+      <Image source={{ uri: item.mediaUrl }} style={styles.gridImage} />
+      {(item.mediaType === 'video' || item.mediaType === 'reel') && (
+        <View style={styles.mediaIndicator}>
+          <ThemedText style={styles.mediaIcon}>
+            {item.mediaType === 'video' ? '▶' : '🎬'}
+          </ThemedText>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <ThemedText style={styles.emptyText}>
+        {activeTab === 'posts' && 'No posts yet'}
+        {activeTab === 'videos' && 'No videos yet'}
+        {activeTab === 'reels' && 'No reels yet'}
+      </ThemedText>
+    </View>
+  );
+
+  // ================= STYLES =================
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: { flex: 1 },
+        loadingContainer: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+        },
+        header: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          padding: 16,
+        },
+        profileImage: {
+          width: 80,
+          height: 80,
+          borderRadius: 40,
+        },
+        statsContainer: {
+          flex: 1,
+          flexDirection: 'row',
+          justifyContent: 'space-around',
+        },
+        stat: { alignItems: 'center' },
+        statNumber: { fontSize: 18, fontWeight: 'bold' },
+        statLabel: {
+          fontSize: 14,
+          color: colorScheme === 'dark' ? '#ccc' : 'gray',
+        },
+        bioContainer: {
+          paddingHorizontal: 16,
+          marginBottom: 16,
+        },
+        username: { fontWeight: 'bold', marginBottom: 4 },
+        buttonContainer: {
+          flexDirection: 'row',
+          justifyContent: 'space-around',
+          paddingHorizontal: 16,
+          marginBottom: 16,
+        },
+        button: {
+          flex: 1,
+          marginHorizontal: 4,
+          backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef',
+          paddingVertical: 8,
+          borderRadius: 8,
+          alignItems: 'center',
+        },
+        buttonText: {
+          fontWeight: 'bold',
+          color: colorScheme === 'dark' ? '#fff' : '#000',
+        },
+        tabContainer: {
+          flexDirection: 'row',
+          paddingHorizontal: 16,
+          marginBottom: 16,
+        },
+        tab: {
+          flex: 1,
+          paddingVertical: 8,
+          borderRadius: 8,
+          alignItems: 'center',
+        },
+        activeTab: { backgroundColor: '#4ADDAE' },
+        tabText: {
+          fontSize: 16,
+          color: colorScheme === 'dark' ? '#ccc' : 'gray',
+        },
+        activeTabText: { color: '#fff', fontWeight: 'bold' },
+        grid: { flex: 1 },
+        gridItem: {
+          width: GRID_ITEM_SIZE,
+          height: GRID_ITEM_SIZE,
+          margin: 1,
+        },
+        gridImage: { width: '100%', height: '100%' },
+        mediaIndicator: {
+          position: 'absolute',
+          top: 5,
+          right: 5,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          borderRadius: 10,
+          paddingHorizontal: 4,
+          paddingVertical: 2,
+        },
+        mediaIcon: { fontSize: 12, color: '#fff' },
+        emptyContainer: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 20,
+        },
+        emptyText: {
+          fontSize: 18,
+          color: colorScheme === 'dark' ? '#ccc' : '#666',
+          textAlign: 'center',
+        },
+      }),
+    [colorScheme]
+  );
+
+  // ================= LOADING STATES =================
+  if (loading) {
+    return (
+      <ThemedView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" />
+      </ThemedView>
+    );
+  }
+
+  if (!user) {
+    return (
+      <ThemedView style={styles.loadingContainer}>
+        <ThemedText>Could not load profile.</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // ================= UI =================
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <Image
+          source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }}
+          style={styles.profileImage}
+        />
+        <View style={styles.statsContainer}>
+          <View style={styles.stat}>
+            <ThemedText style={styles.statNumber}>
+              {user.stats.posts}
+            </ThemedText>
+            <ThemedText style={styles.statLabel}>Posts</ThemedText>
+          </View>
+
+          <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
+            <ThemedText style={styles.statNumber}>
+              {user.stats.followers}
+            </ThemedText>
+            <ThemedText style={styles.statLabel}>Followers</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.stat} onPress={handleFollowingPress}>
+            <ThemedText style={styles.statNumber}>
+              {user.stats.following}
+            </ThemedText>
+            <ThemedText style={styles.statLabel}>Following</ThemedText>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.bioContainer}>
+        <ThemedText style={styles.username}>{user.username}</ThemedText>
+        <ThemedText>{user.bio}</ThemedText>
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => router.push('/profile/edit')}
+        >
+          <ThemedText style={styles.buttonText}>Edit Profile</ThemedText>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.button} onPress={handleShareProfile}>
+          <ThemedText style={styles.buttonText}>Share Profile</ThemedText>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tabContainer}>
+        {(['posts', 'videos', 'reels'] as TabType[]).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.activeTab]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <ThemedText
+              style={[
+                styles.tabText,
+                activeTab === tab && styles.activeTabText,
+              ]}
+            >
+              {tab.toUpperCase()}
+            </ThemedText>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <FlatList
+        data={filteredPosts}
+        renderItem={renderPostItem}
+        keyExtractor={(item) => item._id}
+        numColumns={3}
+        style={styles.grid}
+        ListEmptyComponent={renderEmptyState}
+      />
+    </ThemedView>
+  );
+}

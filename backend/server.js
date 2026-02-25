@@ -12,6 +12,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Debugging middleware to log requests
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
 // Serve static files from the uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -49,7 +58,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
     pingTimeout: 60000,
     cors: {
-        origin: 'http://localhost:8081', // Expo client URL
+        origin: process.env.CLIENT_URL || "*", // Allow configured client or all
         methods: ['GET', 'POST'],
     },
 });

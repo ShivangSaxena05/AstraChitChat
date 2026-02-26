@@ -153,31 +153,97 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleFollow = async () => {
-    if (!selectedUserId) return;
+  const fetchSelectedUserFollowers = async (userId: string) => {
     try {
-      await post(`/follow/${selectedUserId}`, {});
-      const updatedUserData = await get(`/users/${selectedUserId}`);
-      const followStatus = await get(`/follow/${selectedUserId}/check`);
-      setSelectedUser(updatedUserData);
-      setIsFollowing(followStatus.isFollowing);
-    } catch (error: any) {
-      console.error('Follow error:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to follow user');
+      setListLoading(true);
+      const data = await get(`/follow/${userId}/followers`);
+      setFollowersList(data.followers || []);
+    } catch (error) {
+      Alert.alert("Error", "Failed to fetch followers");
+    } finally {
+      setListLoading(false);
     }
   };
 
-  const handleUnfollow = async () => {
-    if (!selectedUserId) return;
+  const fetchSelectedUserFollowing = async (userId: string) => {
     try {
-      await del(`/follow/${selectedUserId}`);
-      const updatedUserData = await get(`/users/${selectedUserId}`);
-      const followStatus = await get(`/follow/${selectedUserId}/check`);
+      setListLoading(true);
+      const data = await get(`/follow/${userId}/following`);
+      setFollowingList(data.following || []);
+    } catch (error) {
+      Alert.alert("Error", "Failed to fetch following");
+    } finally {
+      setListLoading(false);
+    }
+  };
+
+  // const handleFollow = async () => {
+  //   if (!selectedUserId) return;
+  //   try {
+  //     await post(`/follow/${selectedUserId}`, {});
+  //     const updatedUserData = await get(`/users/${selectedUserId}`);
+  //     const followStatus = await get(`/follow/${selectedUserId}/check`);
+  //     setSelectedUser(updatedUserData);
+  //     setIsFollowing(followStatus.isFollowing);
+  //   } catch (error: any) {
+  //     console.error('Follow error:', error);
+  //     Alert.alert('Error', error.response?.data?.message || 'Failed to follow user');
+  //   }
+  // };
+
+  const handleFollow = async () => {
+    if (!selectedUserId) return;
+
+    try {
+      await post(`/follow/${selectedUserId}`, {});
+
+      const [updatedUserData, followStatus, updatedMe] = await Promise.all([
+        get(`/users/${selectedUserId}`),
+        get(`/follow/${selectedUserId}/check`),
+        get(`/profile/me`)
+      ]);
+
       setSelectedUser(updatedUserData);
       setIsFollowing(followStatus.isFollowing);
+      setUser(updatedMe);
+
     } catch (error: any) {
-      console.error('Unfollow error:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to unfollow user');
+      Alert.alert("Error", error.response?.data?.message || "Failed to follow user");
+    }
+  };
+
+  // const handleUnfollow = async () => {
+  //   if (!selectedUserId) return;
+  //   try {
+  //     await del(`/follow/${selectedUserId}`);
+  //     const updatedUserData = await get(`/users/${selectedUserId}`);
+  //     const followStatus = await get(`/follow/${selectedUserId}/check`);
+  //     setSelectedUser(updatedUserData);
+  //     setIsFollowing(followStatus.isFollowing);
+  //   } catch (error: any) {
+  //     console.error('Unfollow error:', error);
+  //     Alert.alert('Error', error.response?.data?.message || 'Failed to unfollow user');
+  //   }
+  // };
+
+  const handleUnfollow = async () => {
+    if (!selectedUserId) return;
+
+    try {
+      await del(`/follow/${selectedUserId}`);
+
+      const [updatedUserData, followStatus, updatedMe] = await Promise.all([
+        get(`/users/${selectedUserId}`),
+        get(`/follow/${selectedUserId}/check`),
+        get(`/profile/me`)
+      ]);
+
+      setSelectedUser(updatedUserData);
+      setIsFollowing(followStatus.isFollowing);
+      setUser(updatedMe);
+
+    } catch (error: any) {
+      Alert.alert("Error", error.response?.data?.message || "Failed to unfollow user");
     }
   };
 
@@ -254,6 +320,7 @@ export default function ProfileScreen() {
   };
 
   const handleCloseProfileModal = () => {
+    setSelectedUserActiveTab('posts');
     setProfileModalVisible(false);
     setSelectedUserId(null);
     setSelectedUser(null);
@@ -679,10 +746,10 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.profileImage} />
         <View style={styles.statsContainer}>
-          <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
+          <View style={styles.stat}>
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
-          </TouchableOpacity>
+          </View>
           <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
@@ -844,11 +911,21 @@ export default function ProfileScreen() {
                     <ThemedText style={styles.profileStatNumber}>{selectedUser.stats.posts}</ThemedText>
                     <ThemedText style={styles.profileStatLabel}>Posts</ThemedText>
                   </View>
-                  <TouchableOpacity style={styles.profileStat} onPress={() => { handleCloseProfileModal(); setFollowersModalVisible(true); }}>
+                  <TouchableOpacity style={styles.profileStat} onPress={() => {
+                        if (selectedUserId) {
+                          fetchSelectedUserFollowers(selectedUserId);
+                          setFollowersModalVisible(true);
+                        }
+                      }}>
                     <ThemedText style={styles.profileStatNumber}>{selectedUser.stats.followers}</ThemedText>
                     <ThemedText style={styles.profileStatLabel}>Followers</ThemedText>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.profileStat} onPress={() => { handleCloseProfileModal(); setFollowingModalVisible(true); }}>
+                  <TouchableOpacity style={styles.profileStat} onPress={() => {
+  if (selectedUserId) {
+    fetchSelectedUserFollowing(selectedUserId);
+    setFollowingModalVisible(true);
+  }
+}}>
                     <ThemedText style={styles.profileStatNumber}>{selectedUser.stats.following}</ThemedText>
                     <ThemedText style={styles.profileStatLabel}>Following</ThemedText>
                   </TouchableOpacity>

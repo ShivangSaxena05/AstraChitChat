@@ -9,6 +9,7 @@ import { Alert, FlatList, Modal, StyleSheet, Text, TouchableOpacity, View } from
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
+import { useSocket } from '@/contexts/SocketContext';
 
 // Import all required UI components for the header structure
 import SearchBarComponent from '@/components/SearchBarComponent';
@@ -28,6 +29,10 @@ interface Chat {
   lastMessage: {
     text: string;
     createdAt: string;
+    sender?: {
+      _id: string;
+      username: string;
+    };
   };
   unreadCount: number;
 }
@@ -46,7 +51,8 @@ interface UserProfile {
 
 // --- HOME SCREEN COMPONENT ---
 export default function HomeScreen() {
-  const [chats, setChats] = useState<Chat[]>([]);
+  const { conversations, setConversations, currentUserId: socketUserId } = useSocket();
+  const chats = conversations as Chat[];
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -73,7 +79,15 @@ export default function HomeScreen() {
   const fetchChats = async () => {
     try {
       const data = await get('/chats'); // Assuming this endpoint exists
-      setChats(data.chats);
+      if (data && data.chats) {
+        // Sort chats by most recent message First so the Home list is correct initially
+        const sorted = data.chats.sort((a: Chat, b: Chat) => {
+          const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+          const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+          return bTime - aTime;
+        });
+        setConversations(sorted);
+      }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to fetch chats');
     } finally {
@@ -83,6 +97,16 @@ export default function HomeScreen() {
 
   const renderChat = ({ item }: { item: Chat }) => {
     const otherParticipant = item.participants.find(p => p._id !== currentUserId);
+
+    const isFromMe = String(item.lastMessage?.sender?._id) === String(currentUserId);
+    const formatLastMessage = () => {
+      if (!item.lastMessage?.text) return 'No messages yet';
+      if (!isFromMe && item.lastMessage?.sender && item.participants.length > 2) {
+        // Only prefix with username in group chats (if needed) or when preferred
+        return `${item.lastMessage.text}`; 
+      }
+      return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
+    };
 
     return (
       <TouchableOpacity
@@ -98,7 +122,9 @@ export default function HomeScreen() {
       >
         <View style={styles.chatContent}>
           <ThemedText type="subtitle">{otherParticipant?.username || 'Unknown'}</ThemedText>
-          <Text style={styles.lastMessage}>{item.lastMessage?.text || 'No messages yet'}</Text>
+          <Text style={[styles.lastMessage, item.unreadCount > 0 && { color: '#fff', fontWeight: 'bold' }]} numberOfLines={1}>
+            {formatLastMessage()}
+          </Text>
         </View>
         {item.unreadCount > 0 && (
           <View style={styles.unreadBadge}>

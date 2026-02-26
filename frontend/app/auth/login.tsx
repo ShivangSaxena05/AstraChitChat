@@ -3,12 +3,14 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'reac
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
+import { useSocket } from '@/contexts/SocketContext';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { connect } = useSocket();
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -27,6 +29,9 @@ export default function LoginScreen() {
       // Store token and userId before navigation
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('userId', data._id);
+      
+      // Connect to socket before navigation
+      await connect();
       
       // Navigate only after storage operations complete
       router.replace('/(tabs)');

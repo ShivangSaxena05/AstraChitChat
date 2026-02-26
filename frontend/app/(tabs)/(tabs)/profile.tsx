@@ -140,10 +140,10 @@ export default function ProfileScreen() {
       setSelectedUserLoading(true);
       const userData = await get(`/users/${userId}`);
       setSelectedUser(userData);
-      
+
       const followStatus = await get(`/follow/${userId}/check`);
       setIsFollowing(followStatus.isFollowing);
-      
+
       setSelectedUserPosts([]);
     } catch (error: any) {
       console.error('Fetch user profile error:', error);
@@ -250,30 +250,22 @@ export default function ProfileScreen() {
   const handleMessage = async () => {
     if (!selectedUserId || !selectedUser) return;
     try {
-      let chatId = null;
-      let chatData;
-
-      try {
-        const existingChat = await get(`/chats/find/${selectedUserId}`);
-        chatId = existingChat.chat._id;
-      } catch (findError) {
-        const currentUserId = await AsyncStorage.getItem('userId');
-        if (!currentUserId) throw new Error('Current user not found');
-        if (currentUserId === selectedUserId) {
-          Alert.alert('Error', 'You cannot start a chat with yourself.');
-          return;
-        }
-        const data = await post('/chats/create', { participants: [currentUserId, selectedUserId] });
-        chatId = data._id;
-        chatData = data;
+      const currentUserId = await AsyncStorage.getItem('userId');
+      if (!currentUserId) throw new Error('Current user not found');
+      if (currentUserId === selectedUserId) {
+        Alert.alert('Error', 'You cannot start a chat with yourself.');
+        return;
       }
 
-      const data = chatData || { _id: chatId };
+      // POST /chats/create already handles find-or-create (returns existing chat if one exists)
+      const data = await post('/chats/create', { participants: [currentUserId, selectedUserId] });
+      const chatId = data._id;
+
       setProfileModalVisible(false);
       router.push({
         pathname: '/chat/detail',
         params: {
-          chatId: data._id,
+          chatId,
           otherUserId: selectedUserId,
           otherUsername: selectedUser.username || ''
         }
@@ -334,7 +326,7 @@ export default function ProfileScreen() {
       case 'videos':
         return posts.filter(post => post.mediaType === 'video');
       case 'reels':
-        return posts.filter(post => post.mediaType === 'reel');
+        return posts.filter(post => post.mediaType === 'flick'); // Post model uses 'flick' not 'reel'
       default:
         return posts;
     }
@@ -347,7 +339,7 @@ export default function ProfileScreen() {
       case 'videos':
         return selectedUserPosts.filter(post => post.mediaType === 'video');
       case 'reels':
-        return selectedUserPosts.filter(post => post.mediaType === 'reel');
+        return selectedUserPosts.filter(post => post.mediaType === 'flick'); // Post model uses 'flick' not 'reel'
       default:
         return selectedUserPosts;
     }
@@ -370,13 +362,13 @@ export default function ProfileScreen() {
   );
 
   const renderUserItem = ({ item }: { item: ListUser }) => (
-    <TouchableOpacity 
-      style={styles.userItem} 
+    <TouchableOpacity
+      style={styles.userItem}
       onPress={() => handleUserPress(item._id)}
     >
-      <Image 
-        source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} 
-        style={styles.avatar} 
+      <Image
+        source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }}
+        style={styles.avatar}
       />
       <View style={styles.userInfo}>
         <ThemedText style={styles.username}>{item.username}</ThemedText>
@@ -391,8 +383,8 @@ export default function ProfileScreen() {
         {type === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
       </ThemedText>
       <ThemedText style={styles.emptySubtext}>
-        {type === 'followers' 
-          ? 'When someone follows you, they will appear here.' 
+        {type === 'followers'
+          ? 'When someone follows you, they will appear here.'
           : 'Start following people to see them here.'}
       </ThemedText>
     </View>
@@ -818,7 +810,7 @@ export default function ProfileScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <ThemedText style={styles.modalTitle}>Followers</ThemedText>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setFollowersModalVisible(false)}
             >
@@ -853,7 +845,7 @@ export default function ProfileScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <ThemedText style={styles.modalTitle}>Following</ThemedText>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setFollowingModalVisible(false)}
             >
@@ -889,14 +881,14 @@ export default function ProfileScreen() {
           <View style={styles.profileModalHeader}>
             <View style={{ width: 40 }} />
             <ThemedText style={styles.modalTitle}>Profile</ThemedText>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.profileModalCloseButton}
               onPress={handleCloseProfileModal}
             >
               <ThemedText style={styles.profileModalCloseText}>✕</ThemedText>
             </TouchableOpacity>
           </View>
-          
+
           {selectedUserLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" />
@@ -912,20 +904,20 @@ export default function ProfileScreen() {
                     <ThemedText style={styles.profileStatLabel}>Posts</ThemedText>
                   </View>
                   <TouchableOpacity style={styles.profileStat} onPress={() => {
-                        if (selectedUserId) {
-                          fetchSelectedUserFollowers(selectedUserId);
-                          setFollowersModalVisible(true);
-                        }
-                      }}>
+                    if (selectedUserId) {
+                      fetchSelectedUserFollowers(selectedUserId);
+                      setFollowersModalVisible(true);
+                    }
+                  }}>
                     <ThemedText style={styles.profileStatNumber}>{selectedUser.stats.followers}</ThemedText>
                     <ThemedText style={styles.profileStatLabel}>Followers</ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.profileStat} onPress={() => {
-  if (selectedUserId) {
-    fetchSelectedUserFollowing(selectedUserId);
-    setFollowingModalVisible(true);
-  }
-}}>
+                    if (selectedUserId) {
+                      fetchSelectedUserFollowing(selectedUserId);
+                      setFollowingModalVisible(true);
+                    }
+                  }}>
                     <ThemedText style={styles.profileStatNumber}>{selectedUser.stats.following}</ThemedText>
                     <ThemedText style={styles.profileStatLabel}>Following</ThemedText>
                   </TouchableOpacity>

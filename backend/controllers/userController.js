@@ -13,8 +13,9 @@ const searchUsers = async (req, res) => {
             return res.status(400).json({ message: 'Search query is required' });
         }
 
-        // Search users by username or name (case insensitive)
+        // Search users by username or name (case insensitive), excluding self
         const users = await User.find({
+            _id: { $ne: req.user._id },
             $or: [
                 { username: { $regex: q, $options: 'i' } },
                 { name: { $regex: q, $options: 'i' } }

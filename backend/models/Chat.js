@@ -48,7 +48,6 @@ const chatSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Ensure only one direct chat between two users
-chatSchema.index({ participants: 1 }, { unique: true, partialFilterExpression: { convoType: 'direct', participants: { $size: 2 } } });
 
 module.exports = mongoose.model('Chat', chatSchema);
+

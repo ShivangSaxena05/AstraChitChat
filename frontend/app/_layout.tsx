@@ -7,6 +7,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { SocketProvider } from '@/contexts/SocketContext';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -31,26 +32,12 @@ export default function RootLayout() {
         return;
       }
 
-      // Validate token by checking if it exists and is not expired
-      // Decode the JWT to check expiration
-      const tokenParts = token.split('.');
-      if (tokenParts.length === 3) {
-        // atob() is not available in React Native — use Buffer instead
-        const base64 = tokenParts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
-        const currentTime = Date.now() / 1000;
-
-        if (payload.exp && payload.exp < currentTime) {
-          // Token is expired, remove it and set as not authenticated
-          await AsyncStorage.removeItem('token');
-          await AsyncStorage.removeItem('userId');
-          setIsAuthenticated(false);
-        } else {
-          // Token is valid
-          setIsAuthenticated(true);
-        }
+      // Simply check if token exists - if it does, user is authenticated
+      // The server will validate the token on API calls anyway
+      // This avoids issues with JWT decoding in React Native
+      if (token && token.length > 0) {
+        setIsAuthenticated(true);
       } else {
-        // Invalid token format
         await AsyncStorage.removeItem('token');
         await AsyncStorage.removeItem('userId');
         setIsAuthenticated(false);
@@ -75,13 +62,15 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        {isAuthenticated && <Stack.Screen name="(tabs)" options={{ headerShown: false }} />}
-        {isAuthenticated && <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />}
-        {!isAuthenticated && <Stack.Screen name="auth/login" options={{ headerShown: false }} />}
-        {!isAuthenticated && <Stack.Screen name="auth/signup" options={{ headerShown: false }} />}
-      </Stack>
-      <StatusBar style="auto" />
+      <SocketProvider>
+        <Stack>
+          {isAuthenticated && <Stack.Screen name="(tabs)" options={{ headerShown: false }} />}
+          {isAuthenticated && <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />}
+          {!isAuthenticated && <Stack.Screen name="auth/login" options={{ headerShown: false }} />}
+          {!isAuthenticated && <Stack.Screen name="auth/signup" options={{ headerShown: false }} />}
+        </Stack>
+        <StatusBar style="auto" />
+      </SocketProvider>
     </ThemeProvider>
   );
 }

@@ -46,16 +46,7 @@ export default function AddChatScreen() {
     try {
       const currentUserId = await AsyncStorage.getItem('userId');
       if (!currentUserId) throw new Error('User not logged in');
-      
-      console.log('Creating chat with participants:', [currentUserId, user._id]);
-      console.log('User selected:', user.username);
-
-      const { data } = await post('/chats/create', { 
-        participants: [currentUserId, user._id] 
-      });
-
-      console.log('Chat created with ID:', data._id);
-      
+      const { data } = await post('/chats', { participants: [currentUserId, user._id] });
       router.push({
         pathname: '/chat/detail',
         params: {
@@ -65,8 +56,6 @@ export default function AddChatScreen() {
         }
       });
     } catch (error: any) {
-      console.error('Error creating chat:', error);
-      console.error('Error response:', error.response?.data);
       Alert.alert('Error', error.response?.data?.message || 'Failed to start chat');
     }
   };

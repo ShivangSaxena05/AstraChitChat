@@ -59,10 +59,14 @@ const chatSchema = new mongoose.Schema({
     timestamps: true
 });
 
+<<<<<<< HEAD
 // Compound index for efficient chat list queries with sorting
 chatSchema.index({ participants: 1, lastActivityTimestamp: -1 });
 
 // Index for direct chat uniqueness
 chatSchema.index({ participants: 1 }, { unique: true, partialFilterExpression: { convoType: 'direct', participants: { $size: 2 } } });
+=======
+>>>>>>> 2465fd89ff970f72159d1511c976467eb47bbf49
 
 module.exports = mongoose.model('Chat', chatSchema);
+

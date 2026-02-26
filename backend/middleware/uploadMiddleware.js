@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 
 // Define the base directory for all uploads
-const uploadBaseDir = 'C:/Users/shiva/Downloads/uploads';
+// Use a relative path that works on both local and production (Render.com)
+const uploadBaseDir = path.join(__dirname, '..', 'uploads');
 
 // Set up storage engine for multer
 const storage = multer.diskStorage({

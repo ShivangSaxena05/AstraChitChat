@@ -17,15 +17,15 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // MongoDB Atlas Connection Options
 const mongoOptions = {
-  maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
 };
 
 // Connect to MongoDB Atlas
 mongoose.connect(process.env.MONGO_URI, mongoOptions)
-  .then(() => console.log('MongoDB Atlas connected'))
-  .catch(err => console.error('MongoDB connection error:', err));
+    .then(() => console.log('MongoDB Atlas connected'))
+    .catch(err => console.error('MongoDB connection error:', err));
 
 // Use auth routes
 app.use('/api/auth', require('./routes/auth'));
@@ -39,7 +39,7 @@ app.use('/api/report', require('./routes/reportRoutes'));
 
 // Basic route
 app.get('/', (req, res) => {
-  res.send('Hello World');
+    res.send('Hello World');
 });
 
 // Create HTTP server from Express app
@@ -57,25 +57,25 @@ const io = new Server(server, {
 // Setup Socket.io Connection Handler
 io.on('connection', (socket) => {
     const User = require('./models/User');
-    
+
     // Require Chat model here to avoid circular dependencies
     // This is needed for the lastMessage update in 'new message' handler
     const Chat = require('./models/Chat');
-    
+
     console.log('A user connected via socket.');
 
     // User joins their own room for private messaging
     socket.on('setup', async (userData) => {
         socket.join(userData._id);
         socket.emit('connected');
-        
+
         // Update user online status
         try {
             await User.findByIdAndUpdate(userData._id, {
                 isOnline: true,
                 lastSeen: new Date()
             });
-            
+
             // Emit user online status to all connected clients
             io.emit('user online', { userId: userData._id, isOnline: true });
         } catch (error) {
@@ -164,7 +164,7 @@ io.on('connection', (socket) => {
             // The frontend listens for 'conversationUpdated' and updates the
             // chat list without needing to refetch from the server.
             // ========================================================================
-            
+
             const conversationUpdate = {
                 conversationId: newMessageReceived.chat,
                 lastMessage: lastMessageForSocket, // Now has proper sender data!
@@ -173,11 +173,15 @@ io.on('connection', (socket) => {
                 isNewMessage: true
             };
 
+            // Ensure room IDs are strictly strings
+            const receiverRoomId = newMessageReceived.receiver ? newMessageReceived.receiver.toString() : '';
+            const senderRoomId = newMessageReceived.sender ? newMessageReceived.sender.toString() : '';
+
             // Send to receiver (so their chat list updates)
-            io.to(newMessageReceived.receiver).emit('conversationUpdated', conversationUpdate);
-            
+            if (receiverRoomId) io.to(receiverRoomId).emit('conversationUpdated', conversationUpdate);
+
             // Send to sender (so their list also updates and re-sorts)
-            io.to(newMessageReceived.sender).emit('conversationUpdated', conversationUpdate);
+            if (senderRoomId) io.to(senderRoomId).emit('conversationUpdated', conversationUpdate);
 
         } catch (error) {
             console.error('Error saving message:', error);
@@ -189,22 +193,25 @@ io.on('connection', (socket) => {
     socket.on('typing', (room) => socket.in(room).emit('typing'));
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
+    // Handle real-time read receipts (Blue Ticks)
+    socket.on('read messages', (room) => socket.in(room).emit('messages read'));
+
     // Handle disconnect
     socket.on('disconnect', async () => {
         console.log('User disconnected');
-        
+
         // Get userId from socket and update online status
         if (socket.handshake.auth && socket.handshake.auth.token) {
             try {
                 const jwt = require('jsonwebtoken');
                 const decoded = jwt.verify(socket.handshake.auth.token, process.env.JWT_SECRET || 'your-secret-key');
-                
+
                 if (decoded && decoded.id) {
                     await User.findByIdAndUpdate(decoded.id, {
                         isOnline: false,
                         lastSeen: new Date()
                     });
-                    
+
                     // Emit user offline status to all connected clients
                     io.emit('user online', { userId: decoded.id, isOnline: false, lastSeen: new Date() });
                 }

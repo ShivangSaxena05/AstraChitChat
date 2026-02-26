@@ -193,6 +193,9 @@ io.on('connection', (socket) => {
     socket.on('typing', (room) => socket.in(room).emit('typing'));
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
+    // Handle real-time read receipts (Blue Ticks)
+    socket.on('read messages', (room) => socket.in(room).emit('messages read'));
+
     // Handle disconnect
     socket.on('disconnect', async () => {
         console.log('User disconnected');

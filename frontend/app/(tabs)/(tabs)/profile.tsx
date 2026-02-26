@@ -2,8 +2,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { del, get, post } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Modal, Platform, Share, StyleSheet, TouchableOpacity, View, useColorScheme, ScrollView, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Modal, Platform, Share, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, View, useColorScheme, ScrollView, RefreshControl } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface UserProfile {
@@ -44,9 +44,9 @@ export default function ProfileScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
 
-  // Modal states
-  const [followersModalVisible, setFollowersModalVisible] = useState(false);
-  const [followingModalVisible, setFollowingModalVisible] = useState(false);
+  // Overlay card state – null = hidden, 'followers' | 'following' = visible
+  const [overlayType, setOverlayType] = useState<'followers' | 'following' | null>(null);
+  const overlayAnim = useRef(new Animated.Value(0)).current;
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -55,6 +55,21 @@ export default function ProfileScreen() {
   const [followingList, setFollowingList] = useState<ListUser[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Derived helpers – keep legacy names so existing handler calls still work
+  const followersModalVisible = overlayType === 'followers';
+  const followingModalVisible = overlayType === 'following';
+  const setFollowersModalVisible = (v: boolean) => openOverlay(v ? 'followers' : null);
+  const setFollowingModalVisible = (v: boolean) => openOverlay(v ? 'following' : null);
+
+  const openOverlay = (type: 'followers' | 'following' | null) => {
+    if (type) {
+      setOverlayType(type);
+      Animated.spring(overlayAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 11 }).start();
+    } else {
+      Animated.timing(overlayAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setOverlayType(null));
+    }
+  };
 
   // Selected user profile state
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -552,30 +567,148 @@ export default function ProfileScreen() {
       color: colorScheme === 'dark' ? '#999' : '#999',
       textAlign: 'center',
     },
-    // Modal styles
-    modalContainer: {
-      flex: 1,
-      backgroundColor: colorScheme === 'dark' ? '#0d0f14' : '#fff',
+    // ── Overlay card styles ──
+    overlayBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.55)',
     },
-    modalHeader: {
+    overlayCard: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: '72%',
+      backgroundColor: colorScheme === 'dark' ? '#111318' : '#ffffff',
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -4 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 20,
+      overflow: 'hidden',
+    },
+    overlayHandle: {
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colorScheme === 'dark' ? '#444' : '#ddd',
+      alignSelf: 'center',
+      marginTop: 10,
+      marginBottom: 6,
+    },
+    overlayHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: colorScheme === 'dark' ? '#333' : '#e0e0e0',
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colorScheme === 'dark' ? '#2a2a2a' : '#ebebeb',
     },
-    modalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
+    overlayTitle: {
+      fontSize: 18,
+      fontWeight: '700',
     },
-    closeButton: {
-      padding: 8,
+    overlayCloseBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colorScheme === 'dark' ? '#2a2a2a' : '#f0f0f0',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    closeButtonText: {
-      fontSize: 24,
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+    overlayCloseText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colorScheme === 'dark' ? '#aaa' : '#555',
     },
+    overlayCountRow: {
+      paddingHorizontal: 20,
+      paddingVertical: 8,
+    },
+    overlayCountBadge: {
+      alignSelf: 'flex-start',
+      backgroundColor: colorScheme === 'dark' ? '#1e2a25' : '#edfaf5',
+      borderRadius: 20,
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+    },
+    overlayCountText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#4ADDAE',
+    },
+    overlayUserRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colorScheme === 'dark' ? '#1e1e1e' : '#f2f2f2',
+    },
+    overlayAvatarRing: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      borderWidth: 2,
+      borderColor: '#4ADDAE',
+      padding: 2,
+      marginRight: 14,
+    },
+    overlayAvatar: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 22,
+    },
+    overlayUserInfo: {
+      flex: 1,
+    },
+    overlayUserName: {
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    overlayUserSub: {
+      fontSize: 13,
+      color: colorScheme === 'dark' ? '#888' : '#999',
+      marginTop: 1,
+    },
+    overlayChevron: {
+      fontSize: 22,
+      color: colorScheme === 'dark' ? '#555' : '#ccc',
+      fontWeight: '300',
+    },
+    overlayLoadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    overlayLoadingText: {
+      color: colorScheme === 'dark' ? '#888' : '#999',
+      fontSize: 14,
+    },
+    overlayEmptyContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 40,
+      gap: 10,
+    },
+    overlayEmptyIcon: {
+      fontSize: 40,
+    },
+    overlayEmptyText: {
+      fontSize: 16,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    overlayEmptySubtext: {
+      fontSize: 13,
+      color: colorScheme === 'dark' ? '#666' : '#999',
+      textAlign: 'center',
+    },
+    // Legacy user-item styles (still used by renderUserItem in the profile-view modal)
     userItem: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -601,6 +734,16 @@ export default function ProfileScreen() {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
+    },
+    // Profile modal header / title (used by selected-user profile modal)
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+    },
+    closeButton: { padding: 8 },
+    closeButtonText: {
+      fontSize: 24,
+      color: colorScheme === 'dark' ? '#fff' : '#000',
     },
     // Profile modal styles
     profileModalContainer: {
@@ -801,74 +944,131 @@ export default function ProfileScreen() {
         ListEmptyComponent={renderEmptyState}
       />
 
-      {/* Followers Modal */}
+      {/* ── Followers / Following Overlay Card ── */}
       <Modal
-        visible={followersModalVisible}
-        animationType="slide"
-        onRequestClose={() => setFollowersModalVisible(false)}
+        visible={overlayType !== null}
+        transparent
+        animationType="none"
+        onRequestClose={() => openOverlay(null)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <ThemedText style={styles.modalTitle}>Followers</ThemedText>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setFollowersModalVisible(false)}
-            >
-              <ThemedText style={styles.closeButtonText}>✕</ThemedText>
-            </TouchableOpacity>
-          </View>
-          {listLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" />
-            </View>
-          ) : (
-            <FlatList
-              data={followersList}
-              renderItem={renderUserItem}
-              keyExtractor={(item) => item._id}
-              ListEmptyComponent={() => renderEmptyList('followers')}
-              refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={() => handleRefreshList('followers')} />
-              }
-              contentContainerStyle={followersList.length === 0 ? styles.listEmptyContainer : undefined}
-            />
-          )}
-        </View>
-      </Modal>
+        <TouchableWithoutFeedback onPress={() => openOverlay(null)}>
+          <Animated.View
+            style={[
+              styles.overlayBackdrop,
+              { opacity: overlayAnim }
+            ]}
+          />
+        </TouchableWithoutFeedback>
 
-      {/* Following Modal */}
-      <Modal
-        visible={followingModalVisible}
-        animationType="slide"
-        onRequestClose={() => setFollowingModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <ThemedText style={styles.modalTitle}>Following</ThemedText>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setFollowingModalVisible(false)}
-            >
-              <ThemedText style={styles.closeButtonText}>✕</ThemedText>
+        <Animated.View
+          style={[
+            styles.overlayCard,
+            {
+              transform: [{
+                translateY: overlayAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [500, 0],
+                })
+              }]
+            }
+          ]}
+        >
+          {/* Handle bar */}
+          <View style={styles.overlayHandle} />
+
+          {/* Header */}
+          <View style={styles.overlayHeader}>
+            <ThemedText style={styles.overlayTitle}>
+              {overlayType === 'followers' ? 'Followers' : 'Following'}
+            </ThemedText>
+            <TouchableOpacity onPress={() => openOverlay(null)} style={styles.overlayCloseBtn}>
+              <ThemedText style={styles.overlayCloseText}>✕</ThemedText>
             </TouchableOpacity>
           </View>
+
+          {/* Count badge */}
+          <View style={styles.overlayCountRow}>
+            <View style={styles.overlayCountBadge}>
+              <ThemedText style={styles.overlayCountText}>
+                {overlayType === 'followers'
+                  ? `${followersList.length} follower${followersList.length !== 1 ? 's' : ''}`
+                  : `${followingList.length} following`}
+              </ThemedText>
+            </View>
+          </View>
+
+          {/* List */}
           {listLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" />
+            <View style={styles.overlayLoadingContainer}>
+              <ActivityIndicator size="large" color="#4ADDAE" />
+              <ThemedText style={styles.overlayLoadingText}>Loading...</ThemedText>
             </View>
           ) : (
             <FlatList
-              data={followingList}
-              renderItem={renderUserItem}
+              data={overlayType === 'followers' ? followersList : followingList}
               keyExtractor={(item) => item._id}
-              ListEmptyComponent={() => renderEmptyList('following')}
+              showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={() => handleRefreshList('following')} />
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => overlayType && handleRefreshList(overlayType)}
+                  tintColor="#4ADDAE"
+                />
               }
-              contentContainerStyle={followingList.length === 0 ? styles.listEmptyContainer : undefined}
+              contentContainerStyle={
+                (overlayType === 'followers' ? followersList : followingList).length === 0
+                  ? styles.overlayEmptyContainer
+                  : { paddingBottom: 20 }
+              }
+              ListEmptyComponent={() => (
+                <View style={styles.overlayEmptyContainer}>
+                  <ThemedText style={styles.overlayEmptyIcon}>
+                    {overlayType === 'followers' ? '👥' : '🔍'}
+                  </ThemedText>
+                  <ThemedText style={styles.overlayEmptyText}>
+                    {overlayType === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+                  </ThemedText>
+                  <ThemedText style={styles.overlayEmptySubtext}>
+                    {overlayType === 'followers'
+                      ? 'When people follow you, they\'ll appear here.'
+                      : 'Start following people to see them here.'}
+                  </ThemedText>
+                </View>
+              )}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.overlayUserRow}
+                  onPress={() => {
+                    openOverlay(null);
+                    setTimeout(() => handleUserPress(item._id), 250);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  {/* Avatar with teal ring */}
+                  <View style={styles.overlayAvatarRing}>
+                    <Image
+                      source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150?u=' + item._id }}
+                      style={styles.overlayAvatar}
+                    />
+                  </View>
+
+                  {/* Text */}
+                  <View style={styles.overlayUserInfo}>
+                    <ThemedText style={styles.overlayUserName}>
+                      {item.username || item.name}
+                    </ThemedText>
+                    {item.username && item.name && item.username !== item.name && (
+                      <ThemedText style={styles.overlayUserSub}>{item.name}</ThemedText>
+                    )}
+                  </View>
+
+                  {/* Chevron */}
+                  <ThemedText style={styles.overlayChevron}>›</ThemedText>
+                </TouchableOpacity>
+              )}
             />
           )}
-        </View>
+        </Animated.View>
       </Modal>
 
       {/* User Profile Modal */}

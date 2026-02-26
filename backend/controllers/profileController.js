@@ -20,6 +20,7 @@ const getUserProfile = async (req, res) => {
         const followingCount = await Follow.countDocuments({ follower: req.user._id });
 
         res.json({
+            _id: user._id,
             username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
             profilePicture: user.profilePicture,
             bio: user.bio || '',

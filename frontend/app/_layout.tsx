@@ -24,7 +24,7 @@ export default function RootLayout() {
   const checkAuthStatus = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      
+
       if (!token) {
         setIsAuthenticated(false);
         setIsLoading(false);
@@ -35,9 +35,11 @@ export default function RootLayout() {
       // Decode the JWT to check expiration
       const tokenParts = token.split('.');
       if (tokenParts.length === 3) {
-        const payload = JSON.parse(atob(tokenParts[1]));
+        // atob() is not available in React Native — use Buffer instead
+        const base64 = tokenParts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
         const currentTime = Date.now() / 1000;
-        
+
         if (payload.exp && payload.exp < currentTime) {
           // Token is expired, remove it and set as not authenticated
           await AsyncStorage.removeItem('token');

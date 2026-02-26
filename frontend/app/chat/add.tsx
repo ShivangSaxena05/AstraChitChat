@@ -49,10 +49,11 @@ export default function AddChatScreen() {
       
       console.log('Creating chat with participants:', [currentUserId, user._id]);
       console.log('User selected:', user.username);
-      
-      // Use /chats/create endpoint to create chat without sending a message
-      const data = await post('/chats/create', { participants: [currentUserId, user._id] });
-      
+
+      const { data } = await post('/chats/create', { 
+        participants: [currentUserId, user._id] 
+      });
+
       console.log('Chat created with ID:', data._id);
       
       router.push({

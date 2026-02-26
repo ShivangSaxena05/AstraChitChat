@@ -1,12 +1,11 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { get, post } from '@/services/api';
-import { SOCKET_URL } from '@/services/config';
+import { useSocket } from '@/contexts/SocketContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { io, Socket } from 'socket.io-client';
 
 interface Message {
   _id: string;
@@ -20,6 +19,7 @@ interface Message {
     username: string;
     profilePicture: string;
   };
+  chat?: string | { _id: string };
   msgType: string;
   bodyText?: string;
   mediaUrl?: string;
@@ -39,22 +39,73 @@ type ListItem =
   | { type: 'message'; data: Message }
   | { type: 'dateSeparator'; date: string; dateKey: string };
 
+// Memoized message item to prevent re-rendering all messages when user types
+const MessageItem = memo(({ 
+  item, 
+  currentUserId,
+  isMessageRead
+}: { 
+  item: ListItem; 
+  currentUserId: string | null;
+  isMessageRead: (message: Message, currentId: string | null) => boolean;
+}) => {
+  if (item.type === 'dateSeparator') {
+    return (
+      <View style={styles.dateSeparator}>
+        <Text style={styles.dateSeparatorText}>{item.date}</Text>
+      </View>
+    );
+  }
+
+  const message = item.data;
+  const isOwnMessage = String(message.sender._id) === String(currentUserId);
+  const isRead = isMessageRead(message, currentUserId);
+
+  return (
+    <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
+      <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
+        {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
+      </Text>
+      {message.editedAt && !message.unsentAt && (
+        <Text style={[styles.editedText, isOwnMessage ? styles.ownEditedText : styles.otherEditedText]}>
+          (edited)
+        </Text>
+      )}
+      <View style={styles.timestampContainer}>
+        <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
+          {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+        {isOwnMessage && (
+          <Text style={[styles.readStatus, isRead ? styles.readStatusBlue : styles.readStatusGray]}>
+            {isRead ? '✓✓' : '✓'}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+});
+
 export default function ChatDetailScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [groupedMessages, setGroupedMessages] = useState<ListItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [socketConnected, setSocketConnected] = useState(false);
+  const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flatListRef = useRef<FlatList>(null);
-  const socketRef = useRef<Socket | null>(null);
   const router = useRouter();
   const params = useLocalSearchParams();
   const chatId = params.chatId as string;
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
+  
+  // Use shared socket and conversations from context
+  const { socket, isConnected: socketConnected, setConversations, updateConversation, setActiveChatId } = useSocket();
+
+  // Use a Set to track message IDs for O(1) deduplication
+  const messageIdsRef = useRef<Set<string>>(new Set());
 
   // Helper to format date for separator
   const formatDateSeparator = (dateString: string): { display: string; key: string } => {
@@ -126,74 +177,122 @@ export default function ChatDetailScreen() {
     return `Last seen ${date.toLocaleDateString()}`;
   };
 
+  // Initialize and set up socket listeners
   useEffect(() => {
-    const initialize = async () => {
+    const init = async () => {
+      // Clear previous message IDs when entering a new chat ONLY if we're actually clearing messages
+      messageIdsRef.current.clear();
       setMessages([]);
-      setLoading(true);
+      // Do not set loading to true here to avoid the aggressive spinner blocking the UI mount
       setGroupedMessages([]);
 
       const userId = await AsyncStorage.getItem('userId');
       setCurrentUserId(userId);
 
-      const token = await AsyncStorage.getItem('token');
-      const newSocket = io(SOCKET_URL, {
-        auth: { token }
-      });
+      fetchMessages();
+      fetchUserStatus();
 
-      socketRef.current = newSocket;
-      setSocket(newSocket);
+      // Instantly clear the unread count for this active chat in the global list
+      setConversations(prev => prev.map(c => 
+        String(c._id) === String(chatId) ? { ...c, unreadCount: 0 } : c
+      ));
+      
+      setActiveChatId(chatId);
+    };
 
-      newSocket.on('connect', () => {
-        console.log('Connected to socket');
-        setSocketConnected(true);
-        newSocket.emit('setup', { _id: userId });
-        newSocket.emit('join chat', chatId);
-      });
+    init();
+    
+    return () => {
+      setActiveChatId(null);
+    };
+  }, [chatId, otherUserId, setActiveChatId]);
 
-      newSocket.on('disconnect', () => {
-        console.log('Disconnected from socket');
-        setSocketConnected(false);
-      });
+  // Set up socket event listeners
+  useEffect(() => {
+    if (!socket || !chatId) return;
 
-      newSocket.on('message received', (message: Message) => {
+    // Join the chat room
+    socket.emit('join chat', chatId);
+
+    // ========================================================================
+    // FIX: Proper message deduplication using Set for O(1) lookup
+    // ========================================================================
+    const handleMessageReceived = (message: Message) => {
+      // Get the chat ID from the message (handle both string and object)
+      const messageChatId = typeof message.chat === 'object' ? message.chat?._id : message.chat;
+      
+      // Only handle messages for this chat
+      if (String(messageChatId) === String(chatId)) {
+        // FIX: Use Set for O(1) deduplication instead of array.some()
+        const messageId = message._id;
+        
+        if (messageIdsRef.current.has(messageId)) {
+          console.log('Chat detail: Duplicate message ignored:', messageId);
+          return;
+        }
+        
+        // Add to set and update state
+        messageIdsRef.current.add(messageId);
+        
         setMessages(prev => {
-          const exists = prev.some(m => m._id === message._id);
-          if (exists) return prev;
+          // Double-check deduplication
+          if (prev.some(m => m._id === messageId)) {
+            return prev;
+          }
           const updated = [...prev, message];
           return updated;
         });
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      });
 
-      // Listen for online status changes
-      newSocket.on('user online', (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
-        if (data.userId === otherUserId) {
-          setOtherUserStatus({
-            isOnline: data.isOnline,
-            lastSeen: data.lastSeen || (data.isOnline ? null : new Date().toISOString())
-          });
+        // Auto-mark as read if the message is from the other user
+        if (message.sender._id !== currentUserId) {
+          markAllAsRead();
+          // Instantly clear the unread count in the global context so the list doesn't show a ghost badge
+          setConversations(prev => prev.map(c => 
+            String(c._id) === String(chatId) ? { ...c, unreadCount: 0 } : c
+          ));
         }
-      });
-
-      fetchMessages();
-      fetchUserStatus();
-    };
-
-    initialize();
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.off('connect');
-        socketRef.current.off('disconnect');
-        socketRef.current.off('message received');
-        socketRef.current.off('user online');
-        socketRef.current.disconnect();
-        socketRef.current = null;
       }
     };
-  }, [chatId, otherUserId]);
+
+    // Listen for online status changes
+    const handleUserOnline = (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
+      if (data.userId === otherUserId) {
+        setOtherUserStatus({
+          isOnline: data.isOnline,
+          lastSeen: data.lastSeen || (data.isOnline ? null : new Date().toISOString())
+        });
+      }
+    };
+
+    // Listen for typing indicators
+    const handleRemoteTyping = () => setOtherUserTyping(true);
+    const handleRemoteStopTyping = () => setOtherUserTyping(false);
+
+    // Listen for real-time read receipts (Blue Ticks)
+    const handleMessagesRead = () => {
+      setMessages(prev => prev.map(m => {
+        // If it's a message we sent, and it hasn't been marked read by the other user locally yet
+        if (String(m.sender._id) === String(currentUserId) && !m.readBy?.includes(otherUserId)) {
+          return { ...m, readBy: [...(m.readBy || []), otherUserId] };
+        }
+        return m;
+      }));
+    };
+
+    socket.on('message received', handleMessageReceived);
+    socket.on('user online', handleUserOnline);
+    socket.on('typing', handleRemoteTyping);
+    socket.on('stop typing', handleRemoteStopTyping);
+    socket.on('messages read', handleMessagesRead);
+
+    return () => {
+      socket.off('message received', handleMessageReceived);
+      socket.off('user online', handleUserOnline);
+      socket.off('typing', handleRemoteTyping);
+      socket.off('stop typing', handleRemoteStopTyping);
+      socket.off('messages read', handleMessagesRead);
+    };
+  }, [socket, chatId, otherUserId, currentUserId]);
 
   // Update grouped messages when messages change
   useEffect(() => {
@@ -215,8 +314,16 @@ export default function ChatDetailScreen() {
 
   const fetchMessages = async () => {
     try {
-      setLoading(true);
+      if (messages.length === 0) setLoading(true); // Only show spinner if we have absolutely nothing
       const data = await get(`/chats/${chatId}/messages`);
+      
+      // Initialize message IDs set with existing messages for deduplication
+      if (data.messages && data.messages.length > 0) {
+        data.messages.forEach((msg: Message) => {
+          messageIdsRef.current.add(msg._id);
+        });
+      }
+      
       setMessages(data.messages);
       setGroupedMessages(groupMessagesByDate(data.messages));
       
@@ -233,13 +340,16 @@ export default function ChatDetailScreen() {
   const markAllAsRead = async () => {
     try {
       await post('/chats/read-all', { chatId });
+      if (socket && socketConnected) {
+        socket.emit('read messages', chatId);
+      }
     } catch (error) {
       console.log('Error marking messages as read:', error);
     }
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !currentUserId || !socketRef.current || !socketConnected) return;
+    if (!newMessage.trim() || !currentUserId || !socket || !socketConnected) return;
 
     try {
       const messageData = {
@@ -251,61 +361,63 @@ export default function ChatDetailScreen() {
         msgType: 'text'
       };
 
-      socketRef.current.emit('new message', messageData);
+      socket.emit('new message', messageData);
+      
+      // Update global context immediately so ChatList re-sorts with the new message
+      updateConversation({
+        conversationId: chatId,
+        lastMessage: {
+          text: newMessage.trim(),
+          createdAt: new Date().toISOString(),
+          sender: {
+            _id: currentUserId,
+            username: 'You', // This gets formatted by ChatList's isFromMe logic anyway
+            profilePicture: ''
+          }
+        },
+        updatedAt: new Date().toISOString(),
+        senderId: currentUserId,
+        isNewMessage: true
+      });
+
       setNewMessage('');
-
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      socket.emit('stop typing', chatId);
+      // Inverted FlatList handles scrolling automatically
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to send message');
     }
   };
 
-  const isMessageRead = (message: Message) => {
-    if (message.sender._id === currentUserId) {
+  const handleTyping = (text: string) => {
+    setNewMessage(text);
+    if (!socketConnected || !socket) return;
+    
+    socket.emit('typing', chatId);
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit('stop typing', chatId);
+    }, 2000);
+  };
+
+  const isMessageRead = useCallback((message: Message, currentId: string | null) => {
+    if (String(message.sender._id) === String(currentId)) {
       return message.readBy?.includes(otherUserId);
     }
     return false;
-  };
+  }, [otherUserId]);
 
-  const renderItem = ({ item }: { item: ListItem }) => {
-    if (item.type === 'dateSeparator') {
-      return (
-        <View style={styles.dateSeparator}>
-          <Text style={styles.dateSeparatorText}>{item.date}</Text>
-        </View>
-      );
-    }
-
-    const message = item.data;
-    const isOwnMessage = message.sender._id === currentUserId;
-    const isRead = isMessageRead(message);
-
-    return (
-      <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
-        <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
-          {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
-        </Text>
-        {message.editedAt && !message.unsentAt && (
-          <Text style={[styles.editedText, isOwnMessage ? styles.ownEditedText : styles.otherEditedText]}>
-            (edited)
-          </Text>
-        )}
-        <View style={styles.timestampContainer}>
-          <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
-            {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-          {isOwnMessage && (
-            <Text style={[styles.readStatus, isRead ? styles.readStatusBlue : styles.readStatusGray]}>
-              {isRead ? '✓✓' : '✓'}
-            </Text>
-          )}
-        </View>
-      </View>
-    );
-  };
+  const renderItem = useCallback(({ item }: { item: ListItem }) => (
+    <MessageItem 
+      item={item} 
+      currentUserId={currentUserId} 
+      isMessageRead={isMessageRead} 
+    />
+  ), [currentUserId, isMessageRead]);
 
   return (
     <KeyboardAvoidingView
@@ -321,29 +433,32 @@ export default function ChatDetailScreen() {
           <ThemedText type="subtitle">{otherUsername}</ThemedText>
           <Text style={[
             styles.statusText,
-            otherUserStatus.isOnline ? styles.onlineStatus : styles.offlineStatus
+            (otherUserTyping || otherUserStatus.isOnline) ? styles.onlineStatus : styles.offlineStatus
           ]}>
-            {otherUserStatus.isOnline ? 'Online' : formatLastSeen(otherUserStatus.lastSeen)}
+            {otherUserTyping ? 'typing...' : (otherUserStatus.isOnline ? 'Online' : formatLastSeen(otherUserStatus.lastSeen))}
           </Text>
         </View>
       </View>
 
       <FlatList
         ref={flatListRef}
-        data={groupedMessages}
+        data={[...groupedMessages].reverse()}
+        inverted
         renderItem={renderItem}
         keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}` : `msg-${item.data._id}`}
         style={styles.messagesList}
         contentContainerStyle={styles.messagesContainer}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        initialNumToRender={20}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        removeClippedSubviews={Platform.OS === 'android'}
       />
 
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
           value={newMessage}
-          onChangeText={setNewMessage}
+          onChangeText={handleTyping}
           placeholder="Type a message..."
           placeholderTextColor="#999"
           multiline
@@ -403,42 +518,52 @@ const styles = StyleSheet.create({
   },
   messagesContainer: {
     padding: 16,
+    paddingTop: 8,
   },
   dateSeparator: {
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 12,
   },
   dateSeparatorText: {
-    backgroundColor: '#333',
-    color: '#fff',
+    backgroundColor: '#2b2b2b',
+    color: '#aaa',
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     fontSize: 12,
     overflow: 'hidden',
   },
   messageContainer: {
-    maxWidth: '80%',
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 16,
+    maxWidth: '85%',
+    marginBottom: 8,
+    padding: 10,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    elevation: 1, // subtle shadow for Android
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
   },
   ownMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#005c4b', // WhatsApp Dark Mode Green
+    borderBottomRightRadius: 4,
   },
   otherMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#333',
+    backgroundColor: '#202c33', // WhatsApp Dark Mode Gray
+    borderBottomLeftRadius: 4,
   },
   messageText: {
-    fontSize: 16,
+    fontSize: 15,
+    lineHeight: 20,
   },
   ownMessageText: {
-    color: '#fff',
+    color: '#e9edef',
   },
   otherMessageText: {
-    color: '#fff',
+    color: '#e9edef',
   },
   timestamp: {
     fontSize: 12,
@@ -478,39 +603,45 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 16,
+    padding: 8,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
-    borderTopColor: '#333',
-    backgroundColor: '#1a1a1a',
+    borderTopColor: '#202c33',
+    backgroundColor: '#1f2c34', // WhatsApp dark mode input bg
+    alignItems: 'flex-end',
   },
   input: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#444',
-    borderRadius: 20,
+    borderWidth: 0,
+    borderRadius: 24,
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 12,
-    maxHeight: 100,
-    color: '#fff',
-    backgroundColor: '#2a2a2a',
+    paddingTop: 12,
+    paddingBottom: 12,
+    marginRight: 8,
+    maxHeight: 120,
+    color: '#e9edef',
+    backgroundColor: '#2a3942', // WhatsApp dark mode input field inside
+    fontSize: 16,
   },
   sendButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 20,
+    backgroundColor: '#00a884', // WhatsApp dark mode teal
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
   },
   sendButtonDisabled: {
-    backgroundColor: '#444',
+    backgroundColor: '#3b4a54',
   },
   sendButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+    fontSize: 14,
   },
   sendButtonTextDisabled: {
-    color: '#888',
+    color: '#8b9a9f',
   },
 });
 

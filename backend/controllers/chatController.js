@@ -123,16 +123,29 @@ async function getChats(req, res) {
 
 /**
  * GET /api/chats/:chatId/messages
- * Get messages for a specific chat (oldest -> newest).
+ * Get messages for a specific chat with pagination support.
+ * 
+ * Query params:
+ * - limit: Number of messages to fetch (default 20, max 50)
+ * - beforeMessageId: Get messages older than this messageId (for infinite scroll)
+ * 
  * Also updates the participant's lastReadMsgId to the last message and marks the last message's readBy for current user.
  *
  * Response:
- * { messages: [ { ... message ... with sender minimal info and readBy as simple array } ] }
+ * { 
+ *   messages: [ { ... message ... with sender minimal info and readBy as simple array } ],
+ *   hasMore: boolean,
+ *   nextCursor: string|null (messageId of oldest message for next fetch)
+ * }
  */
 async function getChatMessages(req, res) {
   try {
     const { chatId } = req.params;
     const userId = req.user._id.toString();
+    
+    // Pagination params
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50); // Default 20, max 50
+    const beforeMessageId = req.query.beforeMessageId;
 
     const chat = await Chat.findById(chatId).populate('participants.user', 'name username profilePicture');
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
@@ -144,14 +157,37 @@ async function getChatMessages(req, res) {
     });
     if (participantIndex === -1) return res.status(403).json({ message: 'Not authorized to view this chat' });
 
-    // fetch messages
-    const messages = await Message.find({ chat: toObjectId(chatId) })
+    // Build query for messages
+    const messageQuery = { chat: toObjectId(chatId) };
+    
+    // If beforeMessageId is provided, get older messages
+    if (beforeMessageId) {
+      messageQuery._id = { $lt: toObjectId(beforeMessageId) };
+    }
+
+    // fetch messages with pagination (oldest first for proper ordering, then reverse for response)
+    let messages = await Message.find(messageQuery)
       .populate('sender', 'name username profilePicture')
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 }) // Get newest first for pagination
+      .limit(limit + 1) // Fetch one extra to check if there are more
       .lean();
 
-    // Update lastReadMsgId to last message (if any)
-    if (messages.length > 0) {
+    // Check if there are more messages
+    const hasMore = messages.length > limit;
+    if (hasMore) {
+      messages = messages.slice(0, limit); // Remove the extra message
+    }
+
+    // Get the oldest message ID for next cursor (reverse order - oldest is last)
+    const nextCursor = hasMore && messages.length > 0 
+      ? messages[messages.length - 1]._id.toString() 
+      : null;
+
+    // Reverse to get oldest-first order for display
+    messages = messages.reverse();
+
+    // Update lastReadMsgId to last message (if this is the first load - no beforeMessageId)
+    if (!beforeMessageId && messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
 
       // Update participant.lastReadMsgId only if different
@@ -170,7 +206,7 @@ async function getChatMessages(req, res) {
       }
     }
 
-    // convert readBy structure to simple array of userIds for API (per your request)
+    // convert readBy structure to simple array of userIds for API
     const responseMessages = messages.map(m => {
       const simpleReadBy = Array.isArray(m.readBy) ? m.readBy.map(r => (r.user ? r.user.toString() : r.toString())) : [];
       return {
@@ -179,7 +215,11 @@ async function getChatMessages(req, res) {
       };
     });
 
-    return res.json({ messages: responseMessages });
+    return res.json({ 
+      messages: responseMessages,
+      hasMore,
+      nextCursor
+    });
   } catch (error) {
     console.error('getMessages error:', error);
     return res.status(500).json({ message: 'Server error: could not fetch messages', error: error.message });
@@ -234,7 +274,7 @@ async function sendMessage(req, res) {
         'participants.user': { $all: [toObjectId(senderId), toObjectId(receiverId)] }
       }).populate('participants.user', 'name username profilePicture');
 
-      // If chat not found, create it
+    // If chat not found, create it
       if (!chat) {
         const participantObjects = [
           { user: toObjectId(senderId), role: 'member', joinedAt: new Date() },
@@ -289,8 +329,18 @@ async function sendMessage(req, res) {
       response.readBy = readByToSimple(createdMessage.readBy);
       return res.status(201).json(response);
     } else {
-      // For new chat creation, return the chat with _id
-      return res.status(201).json({ _id: chat._id });
+      // For new chat creation, return the full chat object with participants
+      await chat.populate('participants.user', 'name username profilePicture');
+      const otherParticipant = chat.participants.find(p => p.user.toString() !== senderId);
+      return res.status(201).json({
+        _id: chat._id,
+        convoType: chat.convoType,
+        title: otherParticipant ? (otherParticipant.user.username || otherParticipant.user.name) : null,
+        participants: chat.participants.map(p => minimalUser(p.user)),
+        lastMessage: chat.lastMessage,
+        unreadCount: 0,
+        updatedAt: chat.updatedAt
+      });
     }
   } catch (error) {
     console.error('sendMessage error:', error);

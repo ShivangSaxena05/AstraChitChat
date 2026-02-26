@@ -1,3 +1,4 @@
+
 // Load environment variables from the backend folder's .env file regardless of the current working directory
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -9,23 +10,40 @@ const { Server } = require('socket.io');
 
 const app = express();
 
+// Performance optimizations
 app.use(cors());
-app.use(express.json());
 
-// Serve static files from the uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Optimize JSON parsing - increase limit for media uploads
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// MongoDB Atlas Connection Options
+// Serve static files from the uploads directory with caching
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    maxAge: '1d',
+    etag: true
+}));
+
+// MongoDB Atlas Connection Options - optimized for performance
 const mongoOptions = {
-    maxPoolSize: 10,
+    maxPoolSize: 20, // Increased from 10 for better concurrency
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
+    bufferCommands: false, // Disable mongoose buffering
 };
 
 // Connect to MongoDB Atlas
 mongoose.connect(process.env.MONGO_URI, mongoOptions)
     .then(() => console.log('MongoDB Atlas connected'))
     .catch(err => console.error('MongoDB connection error:', err));
+
+// Handle mongoose connection events
+mongoose.connection.on('error', (err) => {
+    console.error('MongoDB connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB disconnected');
+});
 
 // Use auth routes
 app.use('/api/auth', require('./routes/auth'));
@@ -45,23 +63,28 @@ app.get('/', (req, res) => {
 // Create HTTP server from Express app
 const server = http.createServer(app);
 
-// Attach Socket.io to the server
+// Attach Socket.io to the server with optimized settings
 const io = new Server(server, {
     pingTimeout: 60000,
+    pingInterval: 25000,
+    transports: ['websocket', 'polling'],
     cors: {
-        origin: 'http://localhost:8081', // Expo client URL
+        origin: '*', // Allow all origins for development
         methods: ['GET', 'POST'],
+    },
+    // Performance: optimize memory usage
+    perMessageDeflate: {
+        threshold: 1024,
     },
 });
 
+// Cache models outside of connection handler for performance
+const User = require('./models/User');
+const Chat = require('./models/Chat');
+const Message = require('./models/Message');
+
 // Setup Socket.io Connection Handler
 io.on('connection', (socket) => {
-    const User = require('./models/User');
-
-    // Require Chat model here to avoid circular dependencies
-    // This is needed for the lastMessage update in 'new message' handler
-    const Chat = require('./models/Chat');
-
     console.log('A user connected via socket.');
 
     // User joins their own room for private messaging
@@ -91,8 +114,6 @@ io.on('connection', (socket) => {
 
     // Handle sending messages
     socket.on('new message', async (newMessageReceived) => {
-        const Message = require('./models/Message');
-
         try {
             // Save message to database
             const message = await Message.create({
@@ -113,37 +134,21 @@ io.on('connection', (socket) => {
             // Get sender details for lastMessage
             const senderDoc = await User.findById(newMessageReceived.sender).select('name username profilePicture');
 
-            // ========================================================================
-            // FIX EXPLANATION:
-            // The Chat model's lastMessage.sender field is defined as:
-            //   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
-            // 
-            // This means MongoDB expects an ObjectId (reference), NOT a plain object.
-            // Previously, we were storing sender as: { _id, username, profilePicture }
-            // which caused the schema mismatch and prevented proper population.
-            //
-            // Solution: Store sender as ObjectId in the database, then fetch the
-            // populated data separately for the socket event.
-            // ========================================================================
-
-            // STEP 1: Update chat's lastMessage with sender as ObjectId reference
-            // This is schema-compliant and allows proper population when fetching
+            // Update chat's lastMessage with sender as ObjectId reference
             await Chat.findByIdAndUpdate(newMessageReceived.chat, {
                 lastMessage: {
                     text: newMessageReceived.bodyText || newMessageReceived.content || (newMessageReceived.attachments && newMessageReceived.attachments.length ? 'Attachment' : ''),
                     createdAt: message.createdAt,
-                    sender: message.sender._id // IMPORTANT: Store as ObjectId, not object
+                    sender: message.sender._id
                 },
                 updatedAt: new Date()
             });
 
-            // STEP 2: Fetch the updated chat with populated sender for socket event
-            // We need the populated data (username, profilePicture) for the frontend
+            // Fetch the updated chat with populated sender for socket event
             const updatedChat = await Chat.findById(newMessageReceived.chat)
                 .populate('lastMessage.sender', 'name username profilePicture');
 
-            // STEP 3: Create properly formatted lastMessage for socket event
-            // This object contains all the data the frontend needs to display the preview
+            // Create properly formatted lastMessage for socket event
             const lastMessageForSocket = {
                 text: updatedChat.lastMessage.text,
                 createdAt: updatedChat.lastMessage.createdAt,
@@ -157,17 +162,10 @@ io.on('connection', (socket) => {
             // Emit to chat room so all participants receive the message (including sender)
             io.to(newMessageReceived.chat).emit('message received', message);
 
-            // ========================================================================
-            // Emit conversationUpdated event to both users (sender and receiver)
-            // This is the key to real-time chat list updates!
-            // 
-            // The frontend listens for 'conversationUpdated' and updates the
-            // chat list without needing to refetch from the server.
-            // ========================================================================
-
+            // Emit conversationUpdated event to both users
             const conversationUpdate = {
                 conversationId: newMessageReceived.chat,
-                lastMessage: lastMessageForSocket, // Now has proper sender data!
+                lastMessage: lastMessageForSocket,
                 updatedAt: new Date().toISOString(),
                 senderId: newMessageReceived.sender,
                 isNewMessage: true
@@ -224,3 +222,4 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server and Socket.io running on port ${PORT}`));
+

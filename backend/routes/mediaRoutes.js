@@ -13,8 +13,7 @@ router.post('/upload', protect, upload.single('media'), (req, res) => {
 
     // Use hardcoded domain for production to avoid proxy issues
     // In production (Render.com), req.protocol may return http instead of https
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
-    const baseUrl = isProduction 
+    const baseUrl = process.env.NODE_ENV === 'production' 
         ? 'https://astrachitchat.onrender.com' 
         : `${req.protocol}://${req.get('host')}`;
     
@@ -23,3 +22,4 @@ router.post('/upload', protect, upload.single('media'), (req, res) => {
 });
 
 module.exports = router;
+

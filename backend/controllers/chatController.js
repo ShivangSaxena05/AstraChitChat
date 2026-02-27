@@ -83,8 +83,8 @@ async function getChats(req, res) {
       const lastReadMsgId = participant && participant.lastReadMsgId ? participant.lastReadMsgId : null;
 
       // Extract unreadCount from the O(1) Map, defaulting to 0
-      const unreadCount = chat.unreadCount && chat.unreadCount.get(userId)
-        ? parseInt(chat.unreadCount.get(userId))
+      const unreadCount = chat.unreadCount && chat.unreadCount[userId] !== undefined
+        ? parseInt(chat.unreadCount[userId])
         : 0;
 
       // prepare participants minimal array

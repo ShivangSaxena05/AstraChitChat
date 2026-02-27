@@ -11,8 +11,13 @@ router.post('/upload', protect, upload.single('media'), (req, res) => {
         return res.status(400).json({ message: 'Please upload a file.' });
     }
 
-    // Construct the URL relative to the server root.
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.user._id.toString()}/${req.file.filename}`;
+    // Use hardcoded domain for production to avoid proxy issues
+    // In production (Render.com), req.protocol may return http instead of https
+    const baseUrl = process.env.NODE_ENV === 'production' 
+        ? 'https://astrachitchat.onrender.com' 
+        : `${req.protocol}://${req.get('host')}`;
+    
+    const fileUrl = `${baseUrl}/uploads/${req.user._id.toString()}/${req.file.filename}`;
     res.status(200).json({ url: fileUrl });
 });
 

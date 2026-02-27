@@ -1,27 +1,18 @@
-# TODO: Implement Overlay for Followers/Following
+# TODO: Merge changes from AstraChitChat-master to AstraChitChat
 
-## Task
-In profile section, when clicking on followers or following, show an overlay card instead of navigating to another page.
+## Task: Merge recent changes from server.js and detail.tsx
 
-## Steps Completed:
+## Steps:
 
-- [x] 1. Add state management for overlay visibility (followersModalVisible, followingModalVisible)
-- [x] 2. Add state for selected user profile modal (selectedUserId, profileModalVisible)
-- [x] 3. Add state for user list data (followersList, followingList)
-- [x] 4. Create fetch functions for followers and following data
-- [x] 5. Replace router.push navigation with setVisible(true) for modals
-- [x] 6. Add Followers/Following List Modal component
-- [x] 7. Add User Profile Overlay Modal component
-- [x] 8. Style the overlay modals properly
+### Step 1: Merge server.js changes
+- [ ] Add detailed FIX EXPLANATION comments (from master)
+- [ ] Add more sophisticated 'read messages' handler with JWT verification
+- [ ] Keep current performance optimizations (bufferCommands, maxPoolSize, perMessageDeflate, production detection)
 
-## File Edited:
-- frontend/app/(tabs)/(tabs)/profile.tsx
-
-## Implementation Details:
-- Added Modal components for followers and following lists
-- Added Modal component for user profile overlay
-- Added fetch functions to get followers/following data
-- Added functionality to view user profiles from the list
-- Added follow/unfollow and message functionality in the overlay
-- Supports pull-to-refresh on the list modals
+### Step 2: Merge detail.tsx changes
+- [ ] Add refs for currentUserIdRef, otherUserIdRef, chatIdRef
+- [ ] Add inputRef for TextInput
+- [ ] Add autoFocus={true} and blurOnSubmit={false} to TextInput
+- [ ] Update handleMessagesRead with refs to avoid stale closures
+- [ ] Add updates to local message read status in markAllAsRead
 

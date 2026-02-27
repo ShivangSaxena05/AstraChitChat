@@ -123,16 +123,31 @@ async function getChats(req, res) {
 
 /**
  * GET /api/chats/:chatId/messages
- * Get messages for a specific chat (oldest -> newest).
+ * Get messages for a specific chat with pagination support.
+ * 
+ * Query params:
+ * - limit: number of messages to return (default 30)
+ * - beforeMessageId: optional - get messages older than this messageId
+ * 
+ * If beforeMessageId is provided, returns older messages (for infinite scroll up).
+ * If not provided, returns most recent messages.
+ * 
  * Also updates the participant's lastReadMsgId to the last message and marks the last message's readBy for current user.
  *
  * Response:
- * { messages: [ { ... message ... with sender minimal info and readBy as simple array } ] }
+ * { 
+ *   messages: [ { ... message ... with sender minimal info and readBy as simple array } ],
+ *   hasMore: boolean,
+ *   oldestMessageId: string | null
+ * }
  */
 async function getChatMessages(req, res) {
   try {
     const { chatId } = req.params;
+    const { limit, beforeMessageId } = req.query;
     const userId = req.user._id.toString();
+    
+    const pageSize = Math.min(parseInt(limit) || 30, 100); // Default 30, max 100
 
     const chat = await Chat.findById(chatId).populate('participants.user', 'name username profilePicture');
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
@@ -144,14 +159,45 @@ async function getChatMessages(req, res) {
     });
     if (participantIndex === -1) return res.status(403).json({ message: 'Not authorized to view this chat' });
 
-    // fetch messages
-    const messages = await Message.find({ chat: toObjectId(chatId) })
+    // Build query for messages
+    let messageQuery = { chat: toObjectId(chatId) };
+    
+    // If beforeMessageId is provided, get messages older than this one
+    if (beforeMessageId) {
+      const beforeMsg = await Message.findById(beforeMessageId);
+      if (beforeMsg) {
+        messageQuery.createdAt = { $lt: beforeMsg.createdAt };
+      }
+    }
+    
+    // Fetch messages - if loading older messages, sort by createdAt descending (newest first in batch)
+    // If initial load, we want oldest first for the inverted FlatList
+    const sortOrder = beforeMessageId ? { createdAt: -1 } : { createdAt: 1 };
+    
+    const messages = await Message.find(messageQuery)
       .populate('sender', 'name username profilePicture')
-      .sort({ createdAt: 1 })
+      .sort(sortOrder)
+      .limit(pageSize + 1) // Fetch one extra to check if there are more
       .lean();
 
-    // Update lastReadMsgId to last message (if any)
+    // Check if there are more messages
+    let hasMore = false;
+    let oldestMessageId = null;
+    
+    if (messages.length > pageSize) {
+      hasMore = true;
+      messages.pop(); // Remove the extra message
+    }
+    
+    // Get the oldest message ID (last in array for initial load, first for paginated load)
     if (messages.length > 0) {
+      oldestMessageId = beforeMessageId 
+        ? messages[0]._id.toString()  // For paginated (older) loads, first message is oldest
+        : messages[messages.length - 1]._id.toString(); // For initial load, last message is oldest
+    }
+
+    // Only update lastReadMsgId on initial load (not when fetching older messages)
+    if (!beforeMessageId && messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
 
       // Update participant.lastReadMsgId only if different
@@ -179,7 +225,11 @@ async function getChatMessages(req, res) {
       };
     });
 
-    return res.json({ messages: responseMessages });
+    return res.json({ 
+      messages: responseMessages, 
+      hasMore,
+      oldestMessageId
+    });
   } catch (error) {
     console.error('getMessages error:', error);
     return res.status(500).json({ message: 'Server error: could not fetch messages', error: error.message });

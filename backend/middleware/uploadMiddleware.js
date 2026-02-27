@@ -4,7 +4,13 @@ const fs = require('fs');
 
 // Define the base directory for all uploads
 // Use a relative path that works on both local and production (Render.com)
-const uploadBaseDir = path.join(__dirname, '..', 'uploads');
+// On Render, __dirname is typically /app/src, so we go up to /app
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+const baseDir = isProduction ? '/app' : path.join(__dirname, '..');
+const uploadBaseDir = path.join(baseDir, 'uploads');
+
+// Log the upload directory for debugging
+console.log('Upload base directory:', uploadBaseDir);
 
 // Set up storage engine for multer
 const storage = multer.diskStorage({

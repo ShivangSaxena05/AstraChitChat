@@ -82,11 +82,10 @@ async function getChats(req, res) {
 
       const lastReadMsgId = participant && participant.lastReadMsgId ? participant.lastReadMsgId : null;
 
-      // count messages in this chat sent by others and newer than lastReadMsgId
-      const filter = { chat: toObjectId(chat._id), sender: { $ne: toObjectId(userId) } };
-      if (lastReadMsgId) filter._id = { $gt: toObjectId(lastReadMsgId) };
-
-      const unreadCount = await Message.countDocuments(filter);
+      // Extract unreadCount from the O(1) Map, defaulting to 0
+      const unreadCount = chat.unreadCount && chat.unreadCount.get(userId)
+        ? parseInt(chat.unreadCount.get(userId))
+        : 0;
 
       // prepare participants minimal array
       const participantsMinimal = chat.participants.map(p => minimalUser(p.user));
@@ -146,7 +145,7 @@ async function getChatMessages(req, res) {
     const { chatId } = req.params;
     const { limit, beforeMessageId } = req.query;
     const userId = req.user._id.toString();
-    
+
     const pageSize = Math.min(parseInt(limit) || 30, 100); // Default 30, max 100
 
     const chat = await Chat.findById(chatId).populate('participants.user', 'name username profilePicture');
@@ -161,7 +160,7 @@ async function getChatMessages(req, res) {
 
     // Build query for messages
     let messageQuery = { chat: toObjectId(chatId) };
-    
+
     // If beforeMessageId is provided, get messages older than this one
     if (beforeMessageId) {
       const beforeMsg = await Message.findById(beforeMessageId);
@@ -169,11 +168,10 @@ async function getChatMessages(req, res) {
         messageQuery.createdAt = { $lt: beforeMsg.createdAt };
       }
     }
-    
-    // Fetch messages - if loading older messages, sort by createdAt descending (newest first in batch)
-    // If initial load, we want oldest first for the inverted FlatList
-    const sortOrder = beforeMessageId ? { createdAt: -1 } : { createdAt: 1 };
-    
+
+    // Fetch messages - always sort by createdAt descending to get the newest messages in the range
+    const sortOrder = { createdAt: -1 };
+
     const messages = await Message.find(messageQuery)
       .populate('sender', 'name username profilePicture')
       .sort(sortOrder)
@@ -183,17 +181,19 @@ async function getChatMessages(req, res) {
     // Check if there are more messages
     let hasMore = false;
     let oldestMessageId = null;
-    
+
     if (messages.length > pageSize) {
       hasMore = true;
-      messages.pop(); // Remove the extra message
+      messages.pop(); // Remove the extra older message
     }
-    
-    // Get the oldest message ID (last in array for initial load, first for paginated load)
+
+    // Reverse the array so it's in chronological order (oldest to newest)
+    // The frontend FlatList inverted expects chronological order to group dates properly
+    messages.reverse();
+
+    // Get the oldest message ID (now it's always the first element after reversing)
     if (messages.length > 0) {
-      oldestMessageId = beforeMessageId 
-        ? messages[0]._id.toString()  // For paginated (older) loads, first message is oldest
-        : messages[messages.length - 1]._id.toString(); // For initial load, last message is oldest
+      oldestMessageId = messages[0]._id.toString();
     }
 
     // Only update lastReadMsgId on initial load (not when fetching older messages)
@@ -204,8 +204,18 @@ async function getChatMessages(req, res) {
       const existingLastRead = chat.participants[participantIndex].lastReadMsgId;
       if (!existingLastRead || existingLastRead.toString() !== lastMsg._id.toString()) {
         chat.participants[participantIndex].lastReadMsgId = toObjectId(lastMsg._id);
-        await chat.save();
+        chat.markModified('participants');
       }
+
+      // Reset the unreadCount badge for this user using Map
+      if (chat.unreadCount && chat.unreadCount.has(userId) && chat.unreadCount.get(userId) > 0) {
+        chat.unreadCount.set(userId, 0);
+      } else if (!chat.unreadCount) {
+        chat.unreadCount = new Map();
+        chat.unreadCount.set(userId, 0);
+      }
+
+      await chat.save();
 
       // Add current user to last message's readBy (if not present)
       const lastMsgDoc = await Message.findById(lastMsg._id);
@@ -225,8 +235,8 @@ async function getChatMessages(req, res) {
       };
     });
 
-    return res.json({ 
-      messages: responseMessages, 
+    return res.json({
+      messages: responseMessages,
       hasMore,
       oldestMessageId
     });
@@ -327,6 +337,13 @@ async function sendMessage(req, res) {
     const senderParticipant = chat.participants.find(p => p.user.toString() === senderId.toString());
     if (senderParticipant) senderParticipant.lastReadMsgId = createdMessage._id;
 
+    // Increment unread count for receiver using Map
+    if (!chat.unreadCount) {
+      chat.unreadCount = new Map();
+    }
+    const currentCount = chat.unreadCount.get(receiverId.toString()) || 0;
+    chat.unreadCount.set(receiverId.toString(), currentCount + 1);
+
     // Receiver's lastReadMsgId should remain unchanged (so it counts as unread until they open)
     await chat.save();
 
@@ -385,11 +402,26 @@ async function markMessageAsRead(req, res) {
       const uid = p.user && p.user._id ? p.user._id.toString() : (p.user ? p.user.toString() : null);
       return uid === userId;
     });
+    let needsSave = false;
     if (participant) {
       if (!participant.lastReadMsgId || toObjectId(participant.lastReadMsgId).toString() !== toObjectId(messageId).toString()) {
         participant.lastReadMsgId = toObjectId(messageId);
-        await chat.save();
+        chat.markModified('participants');
+        needsSave = true;
       }
+    }
+
+    // Decrement or clear unread count for this user when marking read
+    if (chat.unreadCount && chat.unreadCount.has(userId)) {
+      const current = chat.unreadCount.get(userId);
+      if (current > 0) {
+        chat.unreadCount.set(userId, Math.max(0, current - 1));
+        needsSave = true;
+      }
+    }
+
+    if (needsSave) {
+      await chat.save();
     }
 
     return res.json({ message: 'Message marked as read' });
@@ -434,6 +466,16 @@ async function markAllMessagesAsRead(req, res) {
 
     // Update participant.lastReadMsgId to last message
     participant.lastReadMsgId = lastMsg._id;
+    chat.markModified('participants');
+
+    // Clear unread count for this user
+    if (chat.unreadCount) {
+      chat.unreadCount.set(userId, 0);
+    } else {
+      chat.unreadCount = new Map();
+      chat.unreadCount.set(userId, 0);
+    }
+
     await chat.save();
 
     return res.json({ message: 'All messages marked as read' });
@@ -697,12 +739,12 @@ async function searchChats(req, res) {
 async function getUserStatus(req, res) {
   try {
     const { userId } = req.params;
-    
+
     const user = await User.findById(userId).select('isOnline lastSeen');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
+
     return res.json({
       isOnline: user.isOnline || false,
       lastSeen: user.lastSeen || null

@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'reac
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
+import { useSocket } from '@/contexts/SocketContext';
 
 export default function SignupScreen() {
   const [name, setName] = useState('');
@@ -10,6 +11,7 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { connect } = useSocket();
 
   const handleSignup = async () => {
     if (!name.trim() || !email.trim() || !password.trim()) {
@@ -30,6 +32,7 @@ export default function SignupScreen() {
       const data = await post('/auth/register', { name, email, password });
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('userId', data._id);
+      await connect();
       router.replace('/(tabs)');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Signup failed');

@@ -226,12 +226,14 @@ async function getChatMessages(req, res) {
       }
     }
 
-    // convert readBy structure to simple array of userIds for API (per your request)
+    // convert readBy and deliveredTo structure to simple array of userIds for API (per your request)
     const responseMessages = messages.map(m => {
       const simpleReadBy = Array.isArray(m.readBy) ? m.readBy.map(r => (r.user ? r.user.toString() : r.toString())) : [];
+      const simpleDeliveredTo = Array.isArray(m.deliveredTo) ? m.deliveredTo.map(r => (r.user ? r.user.toString() : r.toString())) : [];
       return {
         ...m,
-        readBy: simpleReadBy
+        readBy: simpleReadBy,
+        deliveredTo: simpleDeliveredTo
       };
     });
 
@@ -319,7 +321,8 @@ async function sendMessage(req, res) {
       bodyText: bodyText ? bodyText.trim() : '',
       attachments: attachments || [],
       quotedMsgId: quotedMsgId ? toObjectId(quotedMsgId) : undefined,
-      readBy: [{ user: toObjectId(senderId), readAt: new Date() }] // sender has read their own message
+      readBy: [{ user: toObjectId(senderId), readAt: new Date() }], // sender has read their own message
+      deliveredTo: [{ user: toObjectId(senderId), deliveredAt: new Date() }] // implicitly delivered to self
     };
 
     // Save message
@@ -354,6 +357,7 @@ async function sendMessage(req, res) {
       // For existing chat, return the message
       const response = createdMessage.toObject();
       response.readBy = readByToSimple(createdMessage.readBy);
+      response.deliveredTo = readByToSimple(createdMessage.deliveredTo);
       return res.status(201).json(response);
     } else {
       // For new chat creation, return the chat with _id
@@ -508,9 +512,10 @@ async function editMessage(req, res) {
     message.editedAt = new Date();
     await message.save();
 
-    // Return message with simple readBy array
+    // Return message with simple readBy and deliveredTo array
     const response = message.toObject();
     response.readBy = readByToSimple(message.readBy);
+    response.deliveredTo = readByToSimple(message.deliveredTo);
 
     return res.json(response);
   } catch (error) {

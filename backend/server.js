@@ -18,7 +18,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files from the uploads directory with caching
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+// On Render.com, the app runs from /app directory
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+const uploadsPath = isProduction ? '/app/uploads' : path.join(__dirname, 'uploads');
+console.log('Serving static files from:', uploadsPath);
+app.use('/uploads', express.static(uploadsPath, {
     maxAge: '1d',
     etag: true
 }));
@@ -192,7 +196,17 @@ io.on('connection', (socket) => {
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
     // Handle real-time read receipts (Blue Ticks)
-    socket.on('read messages', (room) => socket.in(room).emit('messages read'));
+    socket.on('read messages', (room) => {
+        // Emit to the chat room for all participants
+        socket.in(room).emit('messages read');
+        
+        // Also emit to the sender's personal room so they can update their own message status
+        const userId = socket.handshake.auth?.token ? 
+            require('jsonwebtoken').verify(socket.handshake.auth.token, process.env.JWT_SECRET || 'your-secret-key')?.id : null;
+        if (userId) {
+            socket.to(userId).emit('messages read', { chatId: room, readerId: userId });
+        }
+    });
 
     // Handle disconnect
     socket.on('disconnect', async () => {

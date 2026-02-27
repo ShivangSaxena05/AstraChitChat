@@ -90,11 +90,15 @@ export default function ChatDetailScreen() {
   const [groupedMessages, setGroupedMessages] = useState<ListItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [oldestMessageId, setOldestMessageId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const inputRef = useRef<TextInput>(null);
   const router = useRouter();
   const params = useLocalSearchParams();
   const chatId = params.chatId as string;
@@ -103,6 +107,24 @@ export default function ChatDetailScreen() {
   
   // Use shared socket and conversations from context
   const { socket, isConnected: socketConnected, setConversations, updateConversation, setActiveChatId } = useSocket();
+
+  // Use refs to avoid dependency issues in socket listeners
+  const currentUserIdRef = useRef<string | null>(null);
+  const otherUserIdRef = useRef<string | null>(null);
+  const chatIdRef = useRef<string | null>(null);
+  
+  // Update refs when values change
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+  
+  useEffect(() => {
+    otherUserIdRef.current = otherUserId;
+  }, [otherUserId]);
+  
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
 
   // Use a Set to track message IDs for O(1) deduplication
   const messageIdsRef = useRef<Set<string>>(new Set());
@@ -185,6 +207,9 @@ export default function ChatDetailScreen() {
       setMessages([]);
       // Do not set loading to true here to avoid the aggressive spinner blocking the UI mount
       setGroupedMessages([]);
+      // Reset pagination state
+      setHasMore(true);
+      setOldestMessageId(null);
 
       const userId = await AsyncStorage.getItem('userId');
       setCurrentUserId(userId);
@@ -269,11 +294,22 @@ export default function ChatDetailScreen() {
     const handleRemoteStopTyping = () => setOtherUserTyping(false);
 
     // Listen for real-time read receipts (Blue Ticks)
-    const handleMessagesRead = () => {
+    // Use refs to avoid stale closure issues
+    const handleMessagesRead = (data?: { chatId?: string; readerId?: string }) => {
+      const currentOtherUserId = otherUserIdRef.current;
+      const currentUser = currentUserIdRef.current;
+      
+      // Only update if the read receipt is from the other user in this chat
+      if (data?.readerId && String(data.readerId) !== String(currentUser)) {
+        return;
+      }
+      
       setMessages(prev => prev.map(m => {
         // If it's a message we sent, and it hasn't been marked read by the other user locally yet
-        if (String(m.sender._id) === String(currentUserId) && !m.readBy?.includes(otherUserId)) {
-          return { ...m, readBy: [...(m.readBy || []), otherUserId] };
+        if (String(m.sender._id) === String(currentUser) && 
+            currentOtherUserId &&
+            !m.readBy?.includes(currentOtherUserId)) {
+          return { ...m, readBy: [...(m.readBy || []), currentOtherUserId] };
         }
         return m;
       }));
@@ -312,10 +348,21 @@ export default function ChatDetailScreen() {
     return () => clearInterval(interval);
   }, [otherUserStatus.isOnline]);
 
-  const fetchMessages = async () => {
+  const fetchMessages = async (isLoadMore = false) => {
     try {
-      if (messages.length === 0) setLoading(true); // Only show spinner if we have absolutely nothing
-      const data = await get(`/chats/${chatId}/messages`);
+      if (!isLoadMore) {
+        if (messages.length === 0) setLoading(true); // Only show spinner if we have absolutely nothing
+      } else {
+        setLoadingMore(true);
+      }
+      
+      // Build query params
+      let queryParams = `limit=30`;
+      if (isLoadMore && oldestMessageId) {
+        queryParams += `&beforeMessageId=${oldestMessageId}`;
+      }
+      
+      const data = await get(`/chats/${chatId}/messages?${queryParams}`);
       
       // Initialize message IDs set with existing messages for deduplication
       if (data.messages && data.messages.length > 0) {
@@ -324,16 +371,31 @@ export default function ChatDetailScreen() {
         });
       }
       
-      setMessages(data.messages);
-      setGroupedMessages(groupMessagesByDate(data.messages));
+      if (isLoadMore) {
+        // Append older messages to the beginning of the array using functional update
+        setMessages(prevMessages => {
+          const updatedMessages = [...data.messages, ...prevMessages];
+          // Update grouped messages after state update
+          setGroupedMessages(groupMessagesByDate(updatedMessages));
+          return updatedMessages;
+        });
+      } else {
+        setMessages(data.messages);
+        setGroupedMessages(groupMessagesByDate(data.messages));
+      }
       
-      if (chatId && currentUserId) {
+      // Update pagination state
+      setHasMore(data.hasMore !== false);
+      setOldestMessageId(data.oldestMessageId || null);
+      
+      if (!isLoadMore && chatId && currentUserId) {
         markAllAsRead();
       }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to fetch messages');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -411,6 +473,23 @@ export default function ChatDetailScreen() {
     return false;
   }, [otherUserId]);
 
+  const loadMoreMessages = useCallback(async () => {
+    if (loadingMore || !hasMore || !oldestMessageId) return;
+    
+    console.log('Loading more messages, oldestMessageId:', oldestMessageId);
+    await fetchMessages(true);
+  }, [loadingMore, hasMore, oldestMessageId, fetchMessages]);
+
+  // Handle scroll to detect when user wants to load more (scrolling to top in inverted list)
+  const handleScroll = useCallback((event: any) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    // In inverted FlatList, scrolling to top means offsetY becomes more negative
+    // When user scrolls near the "top" (which is actually the bottom visually), load more
+    if (offsetY > 100 && hasMore && !loadingMore) {
+      loadMoreMessages();
+    }
+  }, [hasMore, loadingMore, loadMoreMessages]);
+
   const renderItem = useCallback(({ item }: { item: ListItem }) => (
     <MessageItem 
       item={item} 
@@ -418,6 +497,16 @@ export default function ChatDetailScreen() {
       isMessageRead={isMessageRead} 
     />
   ), [currentUserId, isMessageRead]);
+
+  // Render header for loading more indicator
+  const renderHeader = useCallback(() => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.loadingMoreContainer}>
+        <Text style={styles.loadingMoreText}>Loading older messages...</Text>
+      </View>
+    );
+  }, [loadingMore]);
 
   return (
     <KeyboardAvoidingView
@@ -452,6 +541,9 @@ export default function ChatDetailScreen() {
         maxToRenderPerBatch={10}
         windowSize={10}
         removeClippedSubviews={Platform.OS === 'android'}
+        onEndReached={loadMoreMessages}
+        onEndReachedThreshold={0.5}
+        ListHeaderComponent={renderHeader}
       />
 
       <View style={styles.inputContainer}>
@@ -642,6 +734,14 @@ const styles = StyleSheet.create({
   },
   sendButtonTextDisabled: {
     color: '#8b9a9f',
+  },
+  loadingMoreContainer: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  loadingMoreText: {
+    color: '#8E8E93',
+    fontSize: 12,
   },
 });
 

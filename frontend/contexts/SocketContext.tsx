@@ -30,7 +30,7 @@ interface SocketContextType {
   updateConversation: (update: ConversationUpdate) => void;
   activeChatId: string | null;
   setActiveChatId: React.Dispatch<React.SetStateAction<string | null>>;
-  connect: () => Promise<void>;
+  connect: (force?: boolean) => Promise<void>;
   disconnect: () => void;
 }
 
@@ -181,9 +181,15 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, [socket, updateConversation]);
 
-  const connect = useCallback(async () => {
-    // Prevent multiple socket initializations
-    if (socketRef.current) return;
+  const connect = useCallback(async (force = false) => {
+    // Prevent multiple socket initializations unless forced (e.g., account switch)
+    if (socketRef.current && !force) return;
+
+    if (force && socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current.removeAllListeners();
+      socketRef.current = null;
+    }
 
     try {
       const token = await AsyncStorage.getItem('token');

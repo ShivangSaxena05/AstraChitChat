@@ -32,6 +32,38 @@ export default function SignupScreen() {
       const data = await post('/auth/register', { name, email, password });
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('userId', data._id);
+
+      // --- MULTI-ACCOUNT SUPPORT ---
+      // Fetch existing saved accounts
+      const savedAccountsStr = await AsyncStorage.getItem('saved_accounts');
+      let savedAccounts: any[] = [];
+      if (savedAccountsStr) {
+        try {
+          savedAccounts = JSON.parse(savedAccountsStr);
+        } catch (e) {
+          savedAccounts = [];
+        }
+      }
+
+      // Check if account already exists in the list to avoid duplicates
+      const accountExists = savedAccounts.some(acc => acc.userId === data._id);
+      
+      if (!accountExists) {
+        // Add new account to the list
+        savedAccounts.push({
+          userId: data._id,
+          token: data.token,
+          username: data.username || data.name || email.split('@')[0], // Fallback if backend doesn't return username
+          profilePicture: data.profilePicture || 'https://via.placeholder.com/40' // Fallback image
+        });
+        await AsyncStorage.setItem('saved_accounts', JSON.stringify(savedAccounts));
+      } else {
+        // If it exists, update the token just in case it refreshed
+        const updatedAccounts = savedAccounts.map(acc => 
+          acc.userId === data._id ? { ...acc, token: data.token } : acc
+        );
+        await AsyncStorage.setItem('saved_accounts', JSON.stringify(updatedAccounts));
+      }
       await connect();
       router.replace('/(tabs)');
     } catch (error: any) {

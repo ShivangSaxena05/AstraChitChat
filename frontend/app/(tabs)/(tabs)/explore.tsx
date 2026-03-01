@@ -30,7 +30,7 @@ interface Post {
 }
 
 // --- EXPLORE SCREEN COMPONENT ---
-export default function ExploreScreen() {
+export default function ExploreScreen({ isEmbedded = false }: { isEmbedded?: boolean } = {}) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,6 +145,13 @@ export default function ExploreScreen() {
   if (posts.length === 0 && loading && !refreshing) {
     return (
       <ThemedView style={styles.container}>
+        {!isEmbedded && (
+          <View style={styles.header}>
+            <TopHeaderComponent />
+            <SearchBarComponent />
+            <StoriesReelsComponent />
+          </View>
+        )}
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4ADDAE" />
           <Text style={styles.loadingText}>Fetching initial posts...</Text>
@@ -157,11 +164,13 @@ export default function ExploreScreen() {
   return (
     <ThemedView style={styles.container}>
       {/* Header with Search Bar */}
-      <View style={styles.header}>
-        <TopHeaderComponent />
-        <SearchBarComponent />
-        <StoriesReelsComponent />
-      </View>
+      {!isEmbedded && (
+        <View style={styles.header}>
+          <TopHeaderComponent />
+          <SearchBarComponent />
+          <StoriesReelsComponent />
+        </View>
+      )}
 
       <FlatList
         data={posts}

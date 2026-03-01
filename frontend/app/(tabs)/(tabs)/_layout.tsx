@@ -27,24 +27,25 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="chat-list"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="magnifyingglass" color={color} />,
+          title: 'Chat',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="t.bubble.fill" color={color} />,
         }}
       />
       <Tabs.Screen
         name="upload"
         options={{
-          title: '',
-          tabBarIcon: ({ color }) => <IconSymbol size={32} name="plus.circle.fill" color="#007AFF" />,
+          title: 'Create',
+          href: null, // Hidden from tab bar - accessed via FAB
+          tabBarIcon: ({ color }) => <IconSymbol size={32} name="plus.circle.fill" color="#4ADDAE" />,
         }}
       />
       <Tabs.Screen
-        name="flicks"
+        name="notifications"
         options={{
-          title: 'Flicks',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="video.fill" color={color} />,
+          title: 'Notifications',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="bell.fill" color={color} />,
         }}
       />
       <Tabs.Screen

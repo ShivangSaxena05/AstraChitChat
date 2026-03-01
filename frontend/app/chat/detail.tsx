@@ -32,6 +32,7 @@ interface Message {
   content?: string;
   createdAt: string;
   readBy: string[];
+  deliveredTo?: string[];
 }
 
 // Type for items in the flatlist (messages or date separators)
@@ -60,6 +61,9 @@ const MessageItem = memo(({
   const message = item.data;
   const isOwnMessage = String(message.sender._id) === String(currentUserId);
   const isRead = isMessageRead(message, currentUserId);
+  const isDelivered = message.deliveredTo && 
+                      currentUserId && 
+                      message.deliveredTo.some(id => String(id) !== String(currentUserId));
 
   return (
     <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
@@ -76,8 +80,11 @@ const MessageItem = memo(({
           {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Text>
         {isOwnMessage && (
-          <Text style={[styles.readStatus, isRead ? styles.readStatusBlue : styles.readStatusGray]}>
-            {isRead ? '✓✓' : '✓'}
+          <Text style={[
+            styles.readStatus, 
+            isRead ? styles.readStatusBlue : styles.readStatusGray
+          ]}>
+            {isRead ? '✓✓' : (isDelivered ? '✓✓' : '✓')}
           </Text>
         )}
       </View>
@@ -275,6 +282,19 @@ export default function ChatDetailScreen() {
           setConversations(prev => prev.map(c => 
             String(c._id) === String(chatId) ? { ...c, unreadCount: 0 } : c
           ));
+        } else {
+          // If we sent it, we shouldn't emit delivered to ourselves since we are the sender
+        }
+      } else {
+        // If the message is NOT for this chat, but it IS for us, tell the server it was delivered
+        // because we received it on our device (even if we're not looking at that chat)
+        if (message.sender._id !== currentUserId) {
+            socket.emit('message delivered', {
+                messageId: message._id,
+                chatId: messageChatId,
+                senderId: message.sender._id,
+                receiverId: currentUserId
+            });
         }
       }
     };
@@ -315,6 +335,24 @@ export default function ChatDetailScreen() {
       }));
     };
 
+    // Listen for real-time delivery receipts (Double Gray Ticks)
+    const handleMessageDelivered = (data?: { messageId?: string, receiverId?: string }) => {
+        if (!data || !data.messageId || !data.receiverId) return;
+        
+        setMessages(prev => prev.map(m => {
+            if (String(m._id) === String(data.messageId)) {
+                // If it doesn't already have this receiver in the delivered array, add it
+                if (!m.deliveredTo?.includes(String(data.receiverId))) {
+                    return {
+                        ...m,
+                        deliveredTo: [...(m.deliveredTo || []), String(data.receiverId)]
+                    };
+                }
+            }
+            return m;
+        }));
+    };
+
     socket.on('message received', handleMessageReceived);
     socket.on('user online', handleUserOnline);
     socket.on('typing', handleRemoteTyping);
@@ -327,6 +365,7 @@ export default function ChatDetailScreen() {
       socket.off('typing', handleRemoteTyping);
       socket.off('stop typing', handleRemoteStopTyping);
       socket.off('messages read', handleMessagesRead);
+      socket.off('message delivered', handleMessageDelivered);
     };
   }, [socket, chatId, otherUserId, currentUserId]);
 
@@ -390,6 +429,22 @@ export default function ChatDetailScreen() {
       
       if (!isLoadMore && chatId && currentUserId) {
         markAllAsRead();
+        
+        // Mark all fetched messages from the other user as delivered
+        // since we just fetched them to our device
+        if (data.messages && data.messages.length > 0) {
+            data.messages.forEach((msg: Message) => {
+                if (String(msg.sender._id) !== String(currentUserId) && 
+                    (!msg.deliveredTo || !msg.deliveredTo.includes(currentUserId))) {
+                    socket?.emit('message delivered', {
+                        messageId: msg._id,
+                        chatId: chatId,
+                        senderId: msg.sender._id,
+                        receiverId: currentUserId
+                    });
+                }
+            });
+        }
       }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to fetch messages');
@@ -405,6 +460,17 @@ export default function ChatDetailScreen() {
       if (socket && socketConnected) {
         socket.emit('read messages', chatId);
       }
+      // Immediately update local state to show blue ticks for sent messages
+      setMessages(prev => prev.map(m => {
+        // Only mark as read messages we sent to this specific user
+        if (String(m.sender._id) === String(currentUserId) && 
+            String(m.receiver._id) === String(otherUserId) && 
+            otherUserId &&
+            !m.readBy?.includes(otherUserId)) {
+          return { ...m, readBy: [...(m.readBy || []), otherUserId] };
+        }
+        return m;
+      }));
     } catch (error) {
       console.log('Error marking messages as read:', error);
     }
@@ -548,15 +614,17 @@ export default function ChatDetailScreen() {
 
       <View style={styles.inputContainer}>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           value={newMessage}
           onChangeText={handleTyping}
           placeholder="Type a message..."
           placeholderTextColor="#999"
-          multiline
+          multiline={false}
+          autoFocus={true}
+          blurOnSubmit={false}
           onSubmitEditing={sendMessage}
           returnKeyType="send"
-          blurOnSubmit
         />
         <TouchableOpacity
           style={[styles.sendButton, (!socketConnected || !newMessage.trim()) && styles.sendButtonDisabled]}
@@ -744,4 +812,3 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
-

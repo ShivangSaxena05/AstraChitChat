@@ -49,15 +49,6 @@ export const post = async (url: string, data: any) => {
     const response = await api.delete(url);
     return response.data;
   }
-  // If data is FormData, let axios set the Content-Type automatically with proper boundary
-  if (data instanceof FormData) {
-    const response = await api.post(url, data, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
-  }
   const response = await api.post(url, data);
   return response.data;
 };

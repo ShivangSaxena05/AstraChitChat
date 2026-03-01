@@ -15,7 +15,6 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -24,29 +23,12 @@ export default function RootLayout() {
 
   const checkAuthStatus = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-
-      if (!token) {
-        setIsAuthenticated(false);
-        setIsLoading(false);
-        return;
-      }
-
-      // Simply check if token exists - if it does, user is authenticated
-      // The server will validate the token on API calls anyway
-      // This avoids issues with JWT decoding in React Native
-      if (token && token.length > 0) {
-        setIsAuthenticated(true);
-      } else {
-        await AsyncStorage.removeItem('token');
-        await AsyncStorage.removeItem('userId');
-        setIsAuthenticated(false);
-      }
+      // Small delay just to ensure the layout has time to mount correctly 
+      // without white flashing. Auth routing is handled by (tabs)/_layout.tsx 
+      // and explicit redirects in auth pages.
+      setIsLoading(false);
     } catch (error) {
-      console.error('Error checking auth status:', error);
-      // On error, default to not authenticated
-      setIsAuthenticated(false);
-    } finally {
+      console.error('Error in layout init:', error);
       setIsLoading(false);
     }
   };
@@ -64,10 +46,10 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <SocketProvider>
         <Stack>
-          {isAuthenticated && <Stack.Screen name="(tabs)" options={{ headerShown: false }} />}
-          {isAuthenticated && <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />}
-          {!isAuthenticated && <Stack.Screen name="auth/login" options={{ headerShown: false }} />}
-          {!isAuthenticated && <Stack.Screen name="auth/signup" options={{ headerShown: false }} />}
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+          <Stack.Screen name="auth/signup" options={{ headerShown: false }} />
         </Stack>
         <StatusBar style="auto" />
       </SocketProvider>

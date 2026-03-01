@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, Share } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { ThemedText } from './themed-text';
-import { post, put, del } from '@/services/api';
+import { post as apiPost, put, del } from '@/services/api';
 
 interface Post {
   _id: string;
@@ -103,7 +103,7 @@ export default function PostCard({ post, onLike, onComment, onShare, onUpdate }:
           style={styles.actionButton}
           onPress={async () => {
             try {
-              await post(`/posts/${post._id}/like`);
+              await apiPost(`/posts/${post._id}/like`, {});
               setIsLiked(!isLiked);
               setLikeCount(prev => isLiked ? prev - 1 : prev + 1);
               onUpdate?.();

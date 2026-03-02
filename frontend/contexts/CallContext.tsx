@@ -4,6 +4,7 @@ import { useSocket } from './SocketContext';
 
 interface CallState {
   isCalling: boolean;
+  isConnected: boolean; // True only when WebRTC handshake is complete
   incomingCall: any | null;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
@@ -35,6 +36,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { socket, currentUserId } = useSocket();
   const [callState, setCallState] = useState<CallState>({
     isCalling: false,
+    isConnected: false,
     incomingCall: null,
     localStream: null,
     remoteStream: null,
@@ -128,9 +130,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }));
     };
 
-    // Handle abrupt close
+    // Handle connection states
     pc.onconnectionstatechange = (event: any) => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      console.log('WebRTC Connection State:', pc.connectionState);
+      if (pc.connectionState === 'connected') {
+        setCallState(prev => ({ ...prev, isConnected: true }));
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
         cleanupCall();
       }
     };
@@ -147,7 +152,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const targetId = targetIds[0];
 
     try {
-      setCallState(prev => ({ ...prev, isCalling: true, activeChatId: chatId }));
+      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
       
       const pc = await setupMediaAndPC(targetId);
       
@@ -223,6 +228,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return {
         isCalling: false,
+        isConnected: false,
         incomingCall: null,
         localStream: null,
         remoteStream: null,

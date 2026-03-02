@@ -44,7 +44,7 @@
         }
       ],
       [
-        "react-native-webrtc",
+        "@config-plugins/react-native-webrtc",
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera for video calls.",
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for secure audio calls."

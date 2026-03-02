@@ -5,13 +5,13 @@ import { useCall } from '@/contexts/CallContext';
 import { ThemedText } from './themed-text';
 
 export default function CallOverlay() {
-  const { isCalling, incomingCall, acceptCall, declineCall, endCall, isMuted, toggleMute, isSpeaker, toggleSpeaker } = useCall();
+  const { isCalling, isConnected, incomingCall, acceptCall, declineCall, endCall, isMuted, toggleMute, isSpeaker, toggleSpeaker } = useCall();
   const [callDuration, setCallDuration] = useState(0);
 
   // Timer for active calls
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (isCalling && !incomingCall) {
+    if (isCalling && isConnected && !incomingCall) {
       interval = setInterval(() => {
         setCallDuration(prev => prev + 1);
       }, 1000);
@@ -21,7 +21,7 @@ export default function CallOverlay() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isCalling, incomingCall]);
+  }, [isCalling, isConnected, incomingCall]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -57,8 +57,10 @@ export default function CallOverlay() {
       <View pointerEvents="box-none" style={styles.activeCallContainer}>
         <View style={styles.floatingControls}>
           <View style={styles.callHeader}>
-            <Ionicons name="lock-closed" size={12} color="#4ADDAE" style={{marginRight: 4}} />
-            <Text style={styles.durationText}>{formatTime(callDuration)}</Text>
+            <Ionicons name="lock-closed" size={12} color={isConnected ? "#4ADDAE" : "#f0ad4e"} style={{marginRight: 4}} />
+            <Text style={[styles.durationText, !isConnected && { color: "#f0ad4e" }]}>
+              {isConnected ? formatTime(callDuration) : "Connecting..."}
+            </Text>
           </View>
           
           <View style={styles.controlRow}>

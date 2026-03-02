@@ -700,6 +700,13 @@ export default function ChatDetailScreen() {
             {otherUserTyping ? 'typing...' : (otherUserStatus.isOnline ? 'Online' : formatLastSeen(otherUserStatus.lastSeen))}
           </Text>
         </View>
+
+        {/* Desktop Web Fallback Call Button */}
+        {Platform.OS === 'web' && (
+          <TouchableOpacity onPress={triggerCall} style={styles.webCallButton}>
+            <Ionicons name="call" size={24} color="#4ADDAE" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <FlatList
@@ -781,6 +788,10 @@ const styles = StyleSheet.create({
   },
   offlineStatus: {
     color: '#8E8E93',
+  },
+  webCallButton: {
+    padding: 8,
+    marginLeft: 12,
   },
   messagesList: {
     flex: 1,

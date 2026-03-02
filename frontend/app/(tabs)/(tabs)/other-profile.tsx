@@ -14,6 +14,7 @@ interface UserProfile {
     posts: number;
     followers: number;
     following: number;
+    likes: number;
   };
   isFollowing?: boolean;
 }
@@ -150,32 +151,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       Alert.alert('Success', 'User reported successfully.');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to report user');
-    }
-  };
-
-  const handleFollowersPress = () => {
-    if (userId) {
-      router.push({
-        pathname: '/followers-list',
-        params: { 
-          userId: userId, 
-          username: user?.username || '',
-          type: 'followers'
-        }
-      });
-    }
-  };
-
-  const handleFollowingPress = () => {
-    if (userId) {
-      router.push({
-        pathname: '/followers-list',
-        params: { 
-          userId: userId, 
-          username: user?.username || '',
-          type: 'following'
-        }
-      });
     }
   };
 
@@ -404,14 +379,20 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
           </View>
-          <TouchableOpacity style={styles.stat} onPress={handleFollowersPress}>
+          <View style={styles.stat}>
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.stat} onPress={handleFollowingPress}>
+          </View>
+          <View style={styles.stat}>
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
-          </TouchableOpacity>
+          </View>
+          {user.stats.posts > 0 && (
+            <View style={styles.stat}>
+              <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
+              <ThemedText style={styles.statLabel}>Likes</ThemedText>
+            </View>
+          )}
         </View>
       </View>
 

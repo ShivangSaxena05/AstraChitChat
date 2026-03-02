@@ -19,7 +19,7 @@ interface Message {
     username: string;
     profilePicture: string;
   };
-  chat?: string | { _id: string };
+  chat?: string | { _id: string; convoType?: 'direct' | 'group' };
   msgType: string;
   bodyText?: string;
   mediaUrl?: string;
@@ -65,8 +65,13 @@ const MessageItem = memo(({
                       currentUserId && 
                       message.deliveredTo.some(id => String(id) !== String(currentUserId));
 
+  const isGroupChat = typeof message.chat === 'object' ? message.chat?.convoType === 'group' : false;
+
   return (
     <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
+      {!isOwnMessage && message.sender?.username && (
+        <Text style={styles.senderNameText}>{message.sender.username}</Text>
+      )}
       <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
         {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
       </Text>
@@ -724,6 +729,12 @@ const styles = StyleSheet.create({
   },
   otherMessageText: {
     color: '#e9edef',
+  },
+  senderNameText: {
+    color: '#4ADDAE',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 4,
   },
   timestamp: {
     fontSize: 12,

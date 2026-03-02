@@ -35,6 +35,7 @@ app.use('/api/media', require('./routes/mediaRoutes'));
 app.use('/api/chats', require('./routes/chatRoutes'));
 app.use('/api/follow', require('./routes/followRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/report', require('./routes/reportRoutes'));
 
 // Basic route

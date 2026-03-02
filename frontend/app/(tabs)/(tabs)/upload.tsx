@@ -29,7 +29,7 @@ export default function UploadScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: [ImagePicker.MediaType.Images, ImagePicker.MediaType.Videos],
+      mediaTypes: ['images', 'videos'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 1,
@@ -49,7 +49,7 @@ export default function UploadScreen() {
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: [ImagePicker.MediaType.Images, ImagePicker.MediaType.Videos],
+      mediaTypes: ['images', 'videos'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 1,
@@ -181,6 +181,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 10,
+  },
+  previewText: {
+    color: '#888',
+    fontSize: 16,
   },
   captionInput: {
     width: '100%',

@@ -70,6 +70,16 @@ const messageSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
+    deliveredTo: [{
+        user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        deliveredAt: {
+            type: Date,
+            default: Date.now
+        }
+    }],
     reactions: [{
         user: {
             type: mongoose.Schema.Types.ObjectId,
@@ -107,8 +117,5 @@ const messageSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
-
-// Compound index for efficient message pagination
-messageSchema.index({ chat: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Message', messageSchema);

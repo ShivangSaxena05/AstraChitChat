@@ -1,230 +1,223 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-
-// --- IMPORTS ---
-// Assuming these paths are correct for your project structure
-import PostCard from '@/components/PostCard';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, TouchableOpacity, Image } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
-import { get } from '@/services/api';
-
-// Import all required UI components for the header structure
-import SearchBarComponent from '@/components/SearchBarComponent';
-import StoriesReelsComponent from '@/components/StoriesReelsComponent';
+import { ThemedText } from '@/components/themed-text';
+import { Ionicons } from '@expo/vector-icons';
+import * as api from '@/services/api';
+import PostCard from '@/components/PostCard';
 import TopHeaderComponent from '@/components/TopHeaderComponent';
 
-
-// --- INTERFACE ---
-interface Post {
-  _id: string;
-  mediaUrl: string;
-  mediaType: string;
-  caption: string;
-  user: {
-    _id: string;
-    username: string;
-    profilePicture: string;
-  };
-  createdAt: string;
-  likes: number;
-  comments: number;
-}
-
-// --- EXPLORE SCREEN COMPONENT ---
 export default function ExploreScreen() {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const router = require('expo-router').useRouter();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // Initial fetch on component mount
-    setLoading(true);
-    fetchPosts();
-  }, []);
-
-  /**
-   * Fetches posts from the API with pagination support.
-   * @param pageNum The page number to fetch.
-   * @param isRefresh Flag to indicate a full refresh (clear current posts).
-   */
-  const fetchPosts = async (pageNum = 1, isRefresh = false) => {
-    // Ensure that if we are refreshing or loading for the first time,
-    // we don't accidentally load page > 1 data.
-    if (pageNum === 1) {
-        setHasMore(true); // Reset hasMore state on initial load/refresh
+  const performSearch = async (query: string) => {
+    if (!query.trim()) {
+      setResults([]);
+      setLoading(false);
+      return;
     }
-
+    setLoading(true);
     try {
-      const data = await get(`/posts/feed?page=${pageNum}`);
-
-      if (isRefresh) {
-        setPosts(data.posts);
-      } else {
-        setPosts(prevPosts => [...prevPosts, ...data.posts]);
-      }
-
-      // Assuming pageSize is 10. If fetched array length is less, it's the last page.
-      const pageSize = 10;
-      setHasMore(data.posts.length === pageSize);
-
-      setPage(pageNum); // Update page only on successful fetch
-
-    } catch (error: any) {
-      console.error('API Error:', error.response?.data || error.message);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to fetch posts');
+      const { users, posts } = await api.get(`/search?q=${encodeURIComponent(query)}`);
+      // Combine users and posts, users first
+      // Tag them with type
+      const usersWithType = (users || []).map((u: any) => ({ ...u, _itemType: 'user' }));
+      const postsWithType = (posts || []).map((p: any) => ({ ...p, _itemType: 'post' }));
+      
+      setResults([...usersWithType, ...postsWithType]);
+    } catch (error) {
+      console.error('Search error:', error);
+      setResults([]);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
-  /**
-   * Handles pull-to-refresh action.
-   */
-  const handleRefresh = useCallback(() => {
-    if (loading) return;
-    setRefreshing(true);
-    fetchPosts(1, true); // Reset to page 1 and clear existing posts
-  }, [loading]);
-
-  /**
-   * Handles infinite scrolling by loading the next page.
-   */
-  const handleLoadMore = useCallback(() => {
-    // Only load more if not currently loading AND there are more posts to fetch
-    if (!loading && hasMore) {
-      setLoading(true); // Set loading true immediately to prevent duplicate calls
-      const nextPage = page + 1;
-      fetchPosts(nextPage);
+  useEffect(() => {
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    if (searchQuery.trim().length > 0) {
+      debounceTimeout.current = setTimeout(() => performSearch(searchQuery), 300);
+    } else {
+      setResults([]);
     }
-  }, [loading, hasMore, page]);
+    return () => {
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    };
+  }, [searchQuery]);
 
-  // --- Post Action Handlers (To be implemented) ---
-  const handleLike = (postId: string) => { console.log('Like post:', postId); };
-  const handleComment = (postId: string) => { console.log('Comment on post:', postId); };
-  const handleShare = (postId: string) => { console.log('Share post:', postId); };
-
-  // --- FlatList Render Functions ---
-
-  const renderPost = ({ item }: { item: Post }) => (
-    <PostCard
-      post={item}
-      onLike={handleLike}
-      onComment={handleComment}
-      onShare={handleShare}
-    />
+  const renderUserCard = (user: any) => (
+    <TouchableOpacity 
+      style={styles.userCard}
+      onPress={() => router.push({ pathname: '/', params: { showProfile: user._id } })}
+    >
+      <Image 
+        source={{ uri: user.profilePicture || 'https://via.placeholder.com/50' }} 
+        style={styles.userAvatar} 
+      />
+      <View style={styles.userInfo}>
+        <ThemedText style={styles.userName}>{user.name || user.username}</ThemedText>
+        <Text style={styles.userUsername}>@{user.username}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#888" />
+    </TouchableOpacity>
   );
 
-  /**
-   * Renders the loading indicator at the end of the list.
-   */
-  const renderFooter = () => {
-    if (!loading || !hasMore || posts.length === 0) return null;
-    return (
-      <View style={styles.footer}>
-        <ActivityIndicator size="small" color="#4ADDAE" />
-        <Text style={styles.footerText}>Loading more posts...</Text>
-      </View>
-    );
+  const renderItem = ({ item }: { item: any }) => {
+    if (item._itemType === 'user') {
+      return renderUserCard(item);
+    }
+    if (item._itemType === 'post') {
+      return <PostCard post={item} />;
+    }
+    return null;
   };
 
-  /**
-   * Renders a message when the post list is empty (and not loading).
-   */
-  const renderEmpty = () => {
-    if (loading || refreshing) return null;
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>No posts yet. Be the first to share something!</Text>
-      </View>
-    );
-  };
-
-  // Initial full-screen loading state check (before any posts are rendered)
-  if (posts.length === 0 && loading && !refreshing) {
-    return (
-      <ThemedView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4ADDAE" />
-          <Text style={styles.loadingText}>Fetching initial posts...</Text>
-        </View>
-      </ThemedView>
-    );
-  }
-
-// --- MAIN RENDER ---
   return (
     <ThemedView style={styles.container}>
-      {/* Header with Search Bar */}
-      <View style={styles.header}>
+      <View style={styles.topHeader}>
         <TopHeaderComponent />
-        <SearchBarComponent />
-        <StoriesReelsComponent />
+      </View>
+      <View style={styles.searchHeader}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search users, videos, and posts..."
+            placeholderTextColor="#888"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
+              <Ionicons name="close-circle" size={20} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      <FlatList
-        data={posts}
-        renderItem={renderPost}
-        keyExtractor={(item) => item._id}
-
-        // --- Infinite Scroll/Refresh Props ---
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#4ADDAE"
-          />
-        }
-        onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={renderFooter}
-        ListEmptyComponent={renderEmpty}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      ) : results.length > 0 ? (
+        <FlatList
+          data={results}
+          keyExtractor={(item, index) => item._id + index}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+        />
+      ) : searchQuery.trim().length > 0 ? (
+        <View style={styles.centerContainer}>
+          <ThemedText style={styles.noResultsText}>No results found for "{searchQuery}"</ThemedText>
+        </View>
+      ) : (
+        <View style={styles.centerContainer}>
+          <Ionicons name="search-outline" size={64} color="#555" style={styles.placeholderIcon} />
+          <ThemedText style={styles.placeholderTitle}>Discover More</ThemedText>
+          <Text style={styles.placeholderText}>Search for users, videos, and interesting posts.</Text>
+        </View>
+      )}
     </ThemedView>
   );
 }
 
-// --- STYLES ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000', // Assuming a dark background
-  },
-  header: {
     backgroundColor: '#000',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  topHeader: {
+    backgroundColor: 'transparent',
+  },
+  searchHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     backgroundColor: '#000',
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+    zIndex: 10,
   },
-  loadingText: {
-    color: 'white',
-    marginTop: 10,
-  },
-  footer: {
-    padding: 20,
-    alignItems: 'center',
+  searchContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#333',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    height: 40,
   },
-  footerText: {
-    color: '#888',
-    marginLeft: 10,
+  searchIcon: {
+    marginRight: 8,
   },
-  emptyContainer: {
+  clearIcon: {
+    marginLeft: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    height: '100%',
+  },
+  centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    minHeight: 200,
   },
-  emptyText: {
+  placeholderIcon: {
+    marginBottom: 16,
+  },
+  placeholderTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    color: '#fff',
+  },
+  placeholderText: {
     fontSize: 16,
-    color: '#666',
+    color: '#888',
     textAlign: 'center',
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#888',
+    textAlign: 'center',
+  },
+  listContent: {
+    paddingBottom: 80,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+    backgroundColor: '#111',
+  },
+  userAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: '#333',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  userUsername: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 2,
   },
 });

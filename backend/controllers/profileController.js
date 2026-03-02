@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Post = require('../models/Post');
 const Follow = require('../models/Follow');
+const Like = require('../models/Like');
 
 // @desc    Get current user's profile
 // @route   GET /api/profile/me
@@ -19,6 +20,11 @@ const getUserProfile = async (req, res) => {
         const followersCount = await Follow.countDocuments({ following: req.user._id });
         const followingCount = await Follow.countDocuments({ follower: req.user._id });
 
+        // Get total likes count
+        const userPosts = await Post.find({ user: req.user._id }).select('_id');
+        const postIds = userPosts.map(p => p._id);
+        const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
+
         res.json({
             _id: user._id,
             username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
@@ -28,6 +34,7 @@ const getUserProfile = async (req, res) => {
                 posts: postCount,
                 followers: followersCount,
                 following: followingCount,
+                likes: totalLikes,
             },
         });
     } catch (error) {
@@ -55,6 +62,11 @@ const getUserProfileById = async (req, res) => {
         const followersCount = await Follow.countDocuments({ following: userId });
         const followingCount = await Follow.countDocuments({ follower: userId });
 
+        // Get total likes count
+        const userPosts = await Post.find({ user: userId }).select('_id');
+        const postIds = userPosts.map(p => p._id);
+        const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
+
         res.json({
             _id: user._id,
             name: user.name,
@@ -65,6 +77,7 @@ const getUserProfileById = async (req, res) => {
                 posts: postCount,
                 followers: followersCount,
                 following: followingCount,
+                likes: totalLikes,
             },
         });
     } catch (error) {

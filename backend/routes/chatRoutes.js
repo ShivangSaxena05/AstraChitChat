@@ -13,7 +13,8 @@ const {
     unsendMessage,
     getMessageReceipts,
     getMessageReactions,
-    getUserStatus
+    getUserStatus,
+    createGroupChat
 } = require('../controllers/chatController');
 
 // const {
@@ -35,6 +36,9 @@ router.get('/', protect, getChats);
 
 // Create a new chat without sending a message
 router.post('/create', protect, createChat);
+
+// Create a new group chat
+router.post('/group', protect, createGroupChat);
 
 // Send message (auto-create chat if needed)
 router.post('/', protect, sendMessage);

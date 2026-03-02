@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
@@ -62,6 +62,10 @@ export default function AddChatScreen() {
 
   const renderUser = ({ item }: { item: User }) => (
     <TouchableOpacity style={styles.userItem} onPress={() => startChat(item)}>
+      <Image 
+        source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} 
+        style={styles.avatar} 
+      />
       <View style={styles.userInfo}>
         <ThemedText type="subtitle">{item.username}</ThemedText>
         <Text style={styles.userName}>{item.name}</Text>
@@ -167,6 +171,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#333',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: '#333',
   },
   userInfo: {
     flex: 1,

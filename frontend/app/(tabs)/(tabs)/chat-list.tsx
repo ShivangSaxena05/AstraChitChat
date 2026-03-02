@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Modal, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
 
 // --- IMPORTS ---
 // Assuming these paths are correct for your project structure
@@ -21,6 +21,8 @@ import OtherProfileScreen from './other-profile';
 // --- INTERFACE ---
 interface Chat {
   _id: string;
+  convoType?: 'direct' | 'group';
+  title?: string;
   participants: {
     _id: string;
     username: string;
@@ -99,14 +101,22 @@ export default function ChatListScreen() {
     const otherParticipant = item.participants.find(p => p._id !== currentUserId);
 
     const isFromMe = String(item.lastMessage?.sender?._id) === String(currentUserId);
+    const isGroup = item.convoType === 'group';
+    
     const formatLastMessage = () => {
       if (!item.lastMessage?.text) return 'No messages yet';
-      if (!isFromMe && item.lastMessage?.sender && item.participants.length > 2) {
-        // Only prefix with username in group chats (if needed) or when preferred
-        return `${item.lastMessage.text}`; 
+      if (!isFromMe && item.lastMessage?.sender && isGroup) {
+        // Prefix with sender's username in group chats
+        return `${item.lastMessage.sender.username}: ${item.lastMessage.text}`; 
       }
       return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
     };
+    
+    // Determine Chat Title
+    const chatTitle = isGroup && item.title ? item.title : (otherParticipant?.username || 'Unknown');
+    const avatarUri = isGroup 
+      ? 'https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/solid/users.svg' // Simple group placeholder
+      : (otherParticipant?.profilePicture || 'https://i.pravatar.cc/150');
 
     return (
       <TouchableOpacity
@@ -120,8 +130,12 @@ export default function ChatListScreen() {
           }
         })}
       >
+        <Image 
+          source={{ uri: avatarUri }} 
+          style={styles.avatar} 
+        />
         <View style={styles.chatContent}>
-          <ThemedText type="subtitle">{otherParticipant?.username || 'Unknown'}</ThemedText>
+          <ThemedText type="subtitle">{chatTitle}</ThemedText>
           <Text style={[styles.lastMessage, item.unreadCount > 0 && { color: '#fff', fontWeight: 'bold' }]} numberOfLines={1}>
             {formatLastMessage()}
           </Text>
@@ -149,7 +163,15 @@ export default function ChatListScreen() {
   }
 
   const handlePlusPress = () => {
-    router.push('/chat/add');
+    Alert.alert(
+      "New Chat",
+      "Choose chat type",
+      [
+        { text: "Direct Message", onPress: () => router.push('/chat/add') },
+        { text: "New Group", onPress: () => router.push('/create-group') },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const handleUserSelect = (userId: string) => {
@@ -244,6 +266,13 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: '#333', // placeholder color
   },
   chatContent: {
     flex: 1,

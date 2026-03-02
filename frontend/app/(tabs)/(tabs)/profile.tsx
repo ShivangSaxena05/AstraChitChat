@@ -13,6 +13,7 @@ interface UserProfile {
     posts: number;
     followers: number;
     following: number;
+    likes: number;
   };
 }
 
@@ -281,6 +282,12 @@ export default function ProfileScreen() {
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
           </View>
+          {user.stats.posts > 0 && (
+            <View style={styles.stat}>
+              <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
+              <ThemedText style={styles.statLabel}>Likes</ThemedText>
+            </View>
+          )}
         </View>
       </View>
 

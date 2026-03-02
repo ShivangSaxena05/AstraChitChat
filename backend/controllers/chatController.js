@@ -340,12 +340,19 @@ async function sendMessage(req, res) {
     const senderParticipant = chat.participants.find(p => p.user.toString() === senderId.toString());
     if (senderParticipant) senderParticipant.lastReadMsgId = createdMessage._id;
 
-    // Increment unread count for receiver using Map
+    // Increment unread count for all other receivers using Map
     if (!chat.unreadCount) {
       chat.unreadCount = new Map();
     }
-    const currentCount = chat.unreadCount.get(receiverId.toString()) || 0;
-    chat.unreadCount.set(receiverId.toString(), currentCount + 1);
+
+    // For every participant except the sender, increment their unread count
+    chat.participants.forEach(p => {
+      const uid = p.user.toString();
+      if (uid !== senderId.toString()) {
+        const currentCount = chat.unreadCount.get(uid) || 0;
+        chat.unreadCount.set(uid, currentCount + 1);
+      }
+    });
 
     // Receiver's lastReadMsgId should remain unchanged (so it counts as unread until they open)
     await chat.save();
@@ -715,6 +722,47 @@ async function createChat(req, res) {
 }
 
 /**
+ * POST /api/chats/group
+ * Create a new group chat.
+ * Body: { participants: [userId1, userId2, ...], title: "Group Name" }
+ */
+async function createGroupChat(req, res) {
+  try {
+    const userId = req.user._id.toString();
+    const { participants, title } = req.body;
+
+    if (!participants || !Array.isArray(participants) || participants.length < 2) {
+      return res.status(400).json({ message: 'At least two other participants are required to create a group chat.' });
+    }
+
+    if (!title || title.trim().length === 0) {
+      return res.status(400).json({ message: 'Group title is required' });
+    }
+
+    // Ensure all participants are valid and distinct
+    const allParticipantIds = [...new Set([...participants, userId])]; // include creator
+
+    const participantObjects = allParticipantIds.map(id => ({
+      user: toObjectId(id),
+      role: id === userId ? 'admin' : 'member', // Creator is admin
+      joinedAt: new Date()
+    }));
+
+    const chat = await Chat.create({
+      convoType: 'group',
+      title: title.trim(),
+      participants: participantObjects,
+      lastMessage: null
+    });
+
+    return res.status(201).json({ _id: chat._id, chat });
+  } catch (error) {
+    console.error('createGroupChat error:', error);
+    return res.status(500).json({ message: 'Server error: could not create group chat', error: error.message });
+  }
+}
+
+/**
  * GET /api/chats/search?q=...
  * Search users by username or name (returns user-like objects for front-end)
  */
@@ -774,5 +822,6 @@ module.exports = {
   getMessageReceipts,
   getMessageReactions,
   searchChats,
-  getUserStatus
+  getUserStatus,
+  createGroupChat
 };

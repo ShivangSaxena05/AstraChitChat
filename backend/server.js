@@ -107,9 +107,27 @@ io.on('connection', (socket) => {
                 readBy: [{ user: newMessageReceived.sender, readAt: new Date() }]
             });
 
-            // Populate sender and receiver details
+            // Populate sender, receiver, and quoted message details
             await message.populate('sender', 'name username profilePicture');
             await message.populate('receiver', 'name username profilePicture');
+            
+            // Populate quoted message if it exists
+            if (newMessageReceived.quotedMsgId) {
+                await message.populate({
+                    path: 'quotedMsgId',
+                    populate: { path: 'sender', select: 'name username profilePicture' }
+                });
+            }
+
+            // Transform quotedMsgId to quotedMessage for frontend compatibility
+            let messageToEmit = message.toObject();
+            if (message.quotedMsgId) {
+                messageToEmit.quotedMessage = {
+                    _id: message.quotedMsgId._id,
+                    bodyText: message.quotedMsgId.bodyText,
+                    sender: message.quotedMsgId.sender
+                };
+            }
 
             // Get sender details for lastMessage
             const senderDoc = await User.findById(newMessageReceived.sender).select('name username profilePicture');
@@ -156,7 +174,7 @@ io.on('connection', (socket) => {
             };
 
             // Emit to chat room so all participants receive the message (including sender)
-            io.to(newMessageReceived.chat).emit('message received', message);
+            io.to(newMessageReceived.chat).emit('message received', messageToEmit);
 
             // ========================================================================
             // Emit conversationUpdated event to both users (sender and receiver)

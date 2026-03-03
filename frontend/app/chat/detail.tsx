@@ -613,8 +613,18 @@ export default function ChatDetailScreen() {
   // Handle long press on message to reply
   const handleMessageLongPress = useCallback((message: Message) => {
     setQuotedMessage(message);
-    inputRef.current?.focus();
   }, []);
+
+  // Focus input when quoted message changes
+  useEffect(() => {
+    if (quotedMessage) {
+      // Small delay to ensure the UI has updated
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [quotedMessage]);
 
   const renderItem = useCallback(({ item }: { item: ListItem }) => (
     <MessageItem 
@@ -657,12 +667,18 @@ export default function ChatDetailScreen() {
 
         {/* Call Buttons */}
         <View style={styles.callButtonsContainer}>
-          <TouchableOpacity onPress={triggerCall} style={styles.callButton}>
+          <TouchableOpacity onPress={() => {
+            if (otherUserId && chatId) {
+              initiateCall([otherUserId], chatId, false); // Audio call
+            } else {
+              Alert.alert("Error", "Cannot initiate call right now.");
+            }
+          }} style={styles.callButton}>
             <Ionicons name="call" size={24} color="#4ADDAE" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => {
             if (otherUserId && chatId) {
-              initiateCall([otherUserId], chatId);
+              initiateCall([otherUserId], chatId, true); // Video call
             } else {
               Alert.alert("Error", "Cannot initiate video call right now.");
             }
@@ -689,7 +705,8 @@ export default function ChatDetailScreen() {
         ListHeaderComponent={renderHeader}
       />
 
-      <View style={styles.inputContainer}>
+      {/* Input Area - Using column layout to properly stack reply preview and input */}
+      <View style={[styles.inputContainer, quotedMessage && styles.inputContainerWithReply]}>
         {/* Reply Preview Bar */}
         {quotedMessage && (
           <View style={styles.replyPreviewContainer}>
@@ -708,28 +725,30 @@ export default function ChatDetailScreen() {
           </View>
         )}
         
-        <TextInput
-          ref={inputRef}
-          style={[styles.input, quotedMessage && styles.inputWithReply]}
-          value={newMessage}
-          onChangeText={handleTyping}
-          placeholder={quotedMessage ? "Write your reply..." : "Type a message..."}
-          placeholderTextColor="#999"
-          multiline={false}
-          blurOnSubmit={false}
-          onSubmitEditing={sendMessage}
-          returnKeyType="send"
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, (!socketConnected || !newMessage.trim()) && styles.sendButtonDisabled]}
-          onPress={sendMessage}
-          disabled={!socketConnected || !newMessage.trim()}
-        >
-          <Text style={[styles.sendButtonText, (!socketConnected || !newMessage.trim()) && styles.sendButtonTextDisabled]}>
-            {socketConnected ? 'Send' : 'Connecting...'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+        {/* Input row with TextInput and Send button */}
+        <View style={styles.inputRow}>
+          <TextInput
+            ref={inputRef}
+            style={styles.input}
+            value={newMessage}
+            onChangeText={handleTyping}
+            placeholder={quotedMessage ? "Write your reply..." : "Type a message..."}
+            placeholderTextColor="#999"
+            multiline={false}
+            blurOnSubmit={false}
+            onSubmitEditing={sendMessage}
+            returnKeyType="send"
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, (!socketConnected || !newMessage.trim()) && styles.sendButtonDisabled]}
+            onPress={sendMessage}
+            disabled={!socketConnected || !newMessage.trim()}
+          >
+            <Text style={[styles.sendButtonText, (!socketConnected || !newMessage.trim()) && styles.sendButtonTextDisabled]}>
+              {socketConnected ? 'Send' : 'Connecting...'}
+            </Text>
+          </TouchableOpacity>
+        </View>
     </KeyboardAvoidingView>
   );
 }
@@ -881,6 +900,15 @@ const styles = StyleSheet.create({
     borderTopColor: '#202c33',
     backgroundColor: '#1f2c34', // WhatsApp dark mode input bg
     alignItems: 'flex-end',
+  },
+  inputContainerWithReply: {
+    flexDirection: 'column',
+    padding: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#202c33',
+    backgroundColor: '#1f2c34',
+    alignItems: 'stretch',
   },
   input: {
     flex: 1,

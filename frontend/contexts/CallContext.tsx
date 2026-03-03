@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices, MediaStream } from 'react-native-webrtc';
+import InCallManager from 'react-native-incall-manager';
 import { useSocket } from './SocketContext';
 
 interface CallState {
@@ -54,15 +55,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!socket || !currentUserId) return;
 
-    socket.on('webrtc-offer', async ({ offer, callerId, chatId }) => {
+    socket.on('webrtc-offer', async ({ offer, callerId, chatId, isVideo }) => {
       // If we are already in a call, we should automatically decline or ignore (busy)
       if (peerConnectionRef.current || callState.isCalling) {
         socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
         return;
       }
       
-      console.log('Received call offer from:', callerId);
-      setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId } }));
+      console.log('Received call offer from:', callerId, 'isVideo:', isVideo);
+      setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId, isVideo } }));
     });
 
     socket.on('webrtc-answer', async ({ answer, responderId }) => {
@@ -116,7 +117,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  const setupMediaAndPC = async (targetId: string): Promise<RTCPeerConnection> => {
+  const setupMediaAndPC = async (targetId: string, isVideo: boolean = false): Promise<RTCPeerConnection> => {
     // 0. Request Microphone Permissions
     const hasPermission = await requestMicrophonePermission();
     if (!hasPermission) {
@@ -124,10 +125,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Microphone permission denied');
     }
 
-    // 1. Get Local Microphone Stream
+    // 1. Get Local Microphone/Camera Stream
     const stream = await mediaDevices.getUserMedia({
       audio: true,
-      video: false
+      video: isVideo // Enable video if it's a video call
     }) as MediaStream;
 
     setCallState(prev => ({ ...prev, localStream: stream }));
@@ -176,7 +177,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return pc;
   };
 
-  const initiateCall = async (targetIds: string[], chatId: string) => {
+  const initiateCall = async (targetIds: string[], chatId: string, isVideo: boolean = false) => {
     // Note: This basic setup assumes 1-on-1 direct calls currently. 
     // Group calls (Mesh) would require managing multiple RTCPeerConnections (an array/map of them).
     // We will start by connecting to the first target.
@@ -185,9 +186,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const targetId = targetIds[0];
 
     try {
+      // Start InCallManager for audio routing
+      InCallManager.start({ media: isVideo ? 'video' : 'audio' });
+      InCallManager.setForceSpeakerphoneOn(false); // Start with earpiece
+
       setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
       
-      const pc = await setupMediaAndPC(targetId);
+      const pc = await setupMediaAndPC(targetId, isVideo);
       
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
@@ -196,7 +201,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         targetId,
         offer,
         callerId: currentUserId,
-        chatId
+        chatId,
+        isVideo // Pass isVideo to the offer
       });
       
     } catch (error) {
@@ -207,12 +213,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const acceptCall = async () => {
     if (!callState.incomingCall || !socket || !currentUserId) return;
-    const { offer, callerId, chatId } = callState.incomingCall;
+    const { offer, callerId, chatId, isVideo } = callState.incomingCall;
 
     try {
+      // Start InCallManager for audio/video routing
+      InCallManager.start({ media: isVideo ? 'video' : 'audio' });
+      InCallManager.setForceSpeakerphoneOn(false); // Start with earpiece
+
       setCallState(prev => ({ ...prev, isCalling: true, incomingCall: null, activeChatId: chatId }));
       
-      const pc = await setupMediaAndPC(callerId);
+      const pc = await setupMediaAndPC(callerId, isVideo || false);
       
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
@@ -251,6 +261,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const cleanupCall = useCallback((reason?: string) => {
     console.log('cleanupCall called:', reason || 'unknown');
+    
+    // Stop InCallManager audio routing
+    try {
+      InCallManager.stop();
+    } catch (e) {
+      console.log('InCallManager stop error:', e);
+    }
+    
     // Use refs to prevent race conditions during cleanup
     const pc = peerConnectionRef.current;
     const streamRef = callState.localStream;
@@ -298,10 +316,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const toggleSpeaker = () => {
-    // Note: react-native-webrtc provides something like `InCallManager` (from react-native-incall-manager) 
-    // to route audio to the loudspeaker. Without it, the speaker toggle is decorative or requires native bridging.
-    // For V1 MVP, we will assume generic state.
-    setCallState(prev => ({ ...prev, isSpeaker: !prev.isSpeaker }));
+    // Use InCallManager to actually toggle speaker
+    const newSpeakerState = !callState.isSpeaker;
+    try {
+      InCallManager.setForceSpeakerphoneOn(newSpeakerState);
+    } catch (e) {
+      console.log('InCallManager speaker toggle error:', e);
+    }
+    setCallState(prev => ({ ...prev, isSpeaker: newSpeakerState }));
   };
 
   const toggleVideo = () => {

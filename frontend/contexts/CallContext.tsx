@@ -166,8 +166,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('WebRTC Connection State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setCallState(prev => ({ ...prev, isConnected: true }));
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        cleanupCall();
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        cleanupCall('connection failed');
+      } else if (pc.connectionState === 'closed') {
+        cleanupCall('connection closed');
       }
     };
 
@@ -247,38 +249,41 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cleanupCall();
   };
 
-  const cleanupCall = useCallback(() => {
-    // Use a flag to prevent race conditions during cleanup
-    const targetId = activeCallTargetIdRef.current;
+  const cleanupCall = useCallback((reason?: string) => {
+    console.log('cleanupCall called:', reason || 'unknown');
+    // Use refs to prevent race conditions during cleanup
+    const pc = peerConnectionRef.current;
+    const streamRef = callState.localStream;
     
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
+    if (pc) {
+      console.log('Closing peer connection');
+      pc.close();
       peerConnectionRef.current = null;
     }
-    
-    // Store local stream reference before clearing state
-    const streamToCleanup = callState.localStream;
     
     // Clear refs first
     activeCallTargetIdRef.current = null;
     
-    // Then update state
-    setCallState({
-      isCalling: false,
-      isConnected: false,
-      incomingCall: null,
-      localStream: null,
-      remoteStream: null,
-      isMuted: false,
-      isSpeaker: false,
-      activeChatId: null
+    // Then update state - use functional update to avoid dependency issues
+    setCallState(prev => {
+      // Stop tracks if they exist in the state or in our captured ref
+      const streamToCleanup = streamRef || prev.localStream;
+      if (streamToCleanup) {
+        console.log('Stopping tracks');
+        streamToCleanup.getTracks().forEach(t => t.stop());
+      }
+      return {
+        isCalling: false,
+        isConnected: false,
+        incomingCall: null,
+        localStream: null,
+        remoteStream: null,
+        isMuted: false,
+        isSpeaker: false,
+        activeChatId: null
+      };
     });
-    
-    // Stop tracks after state update
-    if (streamToCleanup) {
-      streamToCleanup.getTracks().forEach(t => t.stop());
-    }
-  }, [callState.localStream]);
+  }, []); // Empty deps - use refs for values
 
   const toggleMute = () => {
     setCallState(prev => {

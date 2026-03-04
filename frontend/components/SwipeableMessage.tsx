@@ -1,6 +1,5 @@
 import React, { memo, useRef } from 'react';
 import { View, StyleSheet, PanResponder, Animated } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 interface SwipeableMessageProps {
   children: React.ReactNode;
@@ -17,53 +16,37 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
   isOwnMessage 
 }) => {
   const translateX = useRef(new Animated.Value(0)).current;
-  const isSwipeActive = useRef(false);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to horizontal swipes
         return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 5;
       },
-      onPanResponderGrant: () => {
-        isSwipeActive.current = false;
-      },
       onPanResponderMove: (_, gestureState) => {
-        // Only allow swiping in the correct direction based on message type
-        // For own messages (sent), swipe from right to left (negative dx)
-        // For other messages (received), swipe from left to right (positive dx)
         const shouldAllow = isOwnMessage 
-          ? gestureState.dx < 0 && gestureState.dx > -50  // Swipe left
-          : gestureState.dx > 0 && gestureState.dx < 50;  // Swipe right
+          ? gestureState.dx < 0 && gestureState.dx > -50
+          : gestureState.dx > 0 && gestureState.dx < 50;
 
         if (shouldAllow) {
-          isSwipeActive.current = true;
-          // Apply the gesture with a damping factor for smoother feel
           translateX.setValue(gestureState.dx * 0.4);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        // Check if swipe exceeded threshold
         const swipeDistance = isOwnMessage ? -gestureState.dx : gestureState.dx;
         
         if (swipeDistance > SWIPE_THRESHOLD) {
-          // Trigger reply
           onSwipeReply();
         }
 
-        // Animate back to original position
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
           tension: 40,
           friction: 8,
-        }).start(() => {
-          isSwipeActive.current = false;
-        });
+        }).start();
       },
       onPanResponderTerminate: () => {
-        // Reset position if gesture is cancelled
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -74,15 +57,6 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Forward Indicator - Shows on the side being swiped */}
-      <View style={[
-        styles.forwardIndicator, 
-        isOwnMessage ? styles.forwardIndicatorLeft : styles.forwardIndicatorRight
-      ]}>
-        <Ionicons name="arrow-forward" size={16} color="#4ADDAE" />
-      </View>
-      
-      {/* Message Bubble with Pan Responder */}
       <Animated.View 
         style={[
           styles.messageWrapper,
@@ -98,30 +72,11 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    position: 'relative',
     marginVertical: 4,
     marginHorizontal: 8,
   },
   messageWrapper: {
-    // The actual message styling will be passed through children
-  },
-  forwardIndicator: {
-    position: 'absolute',
-    top: '50%',
-    marginTop: -12,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(74, 221, 174, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: -1,
-  },
-  forwardIndicatorLeft: {
-    left: -32,
-  },
-  forwardIndicatorRight: {
-    right: -32,
+    // styling passed through children
   },
 });
 

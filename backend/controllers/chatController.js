@@ -234,7 +234,7 @@ async function getChatMessages(req, res) {
     const responseMessages = messages.map(m => {
       const simpleReadBy = Array.isArray(m.readBy) ? m.readBy.map(r => (r.user ? r.user.toString() : r.toString())) : [];
       const simpleDeliveredTo = Array.isArray(m.deliveredTo) ? m.deliveredTo.map(r => (r.user ? r.user.toString() : r.toString())) : [];
-      
+
       // Transform quotedMsgId (populated) to quotedMessage for frontend compatibility
       let quotedMessage = null;
       if (m.quotedMsgId) {
@@ -244,7 +244,7 @@ async function getChatMessages(req, res) {
           sender: m.quotedMsgId.sender
         };
       }
-      
+
       return {
         ...m,
         readBy: simpleReadBy,
@@ -290,8 +290,18 @@ async function sendMessage(req, res) {
     }
 
     // Ensure receiver exists
-    const receiver = await User.findById(receiverId).select('_id name username profilePicture');
+    const receiver = await User.findById(receiverId).select('_id name username profilePicture blockedUsers');
     if (!receiver) return res.status(404).json({ message: 'Receiver not found' });
+
+    const sender = await User.findById(senderId).select('blockedUsers');
+
+    // Check block status
+    if (sender.blockedUsers && sender.blockedUsers.includes(receiverId)) {
+      return res.status(403).json({ message: 'You have blocked this user' });
+    }
+    if (receiver.blockedUsers && receiver.blockedUsers.includes(senderId)) {
+      return res.status(403).json({ message: 'Action not allowed' }); // Generic message for privacy
+    }
 
     let chat;
 

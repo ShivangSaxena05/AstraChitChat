@@ -41,8 +41,14 @@ const getFeedPosts = async (req, res) => {
     const page = Number(req.query.page) || 1; // For pagination
 
     try {
+        const currentUser = await User.findById(userId).select('blockedUsers');
+        const blockedUsers = currentUser.blockedUsers || [];
+        const usersWhoBlockedMe = await User.find({ blockedUsers: userId }).select('_id');
+        const blockedByIds = usersWhoBlockedMe.map(u => u._id);
+        const excludedUsers = [...blockedUsers, ...blockedByIds];
+
         // MVP Logic: Fetch the 10 most recent posts, populated with user info
-        const posts = await Post.find({})
+        const posts = await Post.find({ user: { $nin: excludedUsers } })
             .sort({ createdAt: -1 }) // Sort by newest first
             .limit(pageSize)
             .skip(pageSize * (page - 1))
@@ -70,8 +76,15 @@ const getShortVideos = async (req, res) => {
     const page = Number(req.query.page) || 1;
 
     try {
+        const userId = req.user._id;
+        const currentUser = await User.findById(userId).select('blockedUsers');
+        const blockedUsers = currentUser.blockedUsers || [];
+        const usersWhoBlockedMe = await User.find({ blockedUsers: userId }).select('_id');
+        const blockedByIds = usersWhoBlockedMe.map(u => u._id);
+        const excludedUsers = [...blockedUsers, ...blockedByIds];
+
         // Fetch posts where mediaType is 'flick'
-        const flicks = await Post.find({ mediaType: 'flick' })
+        const flicks = await Post.find({ mediaType: 'flick', user: { $nin: excludedUsers } })
             .sort({ createdAt: -1 }) // Sort by newest first
             .limit(pageSize)
             .skip(pageSize * (page - 1))

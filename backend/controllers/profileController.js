@@ -27,6 +27,7 @@ const getUserProfile = async (req, res) => {
 
         res.json({
             _id: user._id,
+            name: user.name,
             username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
             profilePicture: user.profilePicture,
             bio: user.bio || '',
@@ -36,6 +37,7 @@ const getUserProfile = async (req, res) => {
                 following: followingCount,
                 likes: totalLikes,
             },
+            isPrivate: user.isPrivate,
         });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
@@ -67,6 +69,15 @@ const getUserProfileById = async (req, res) => {
         const postIds = userPosts.map(p => p._id);
         const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
 
+        // Check block/mute status
+        let isBlocked = false;
+        let isMuted = false;
+        if (req.user) {
+            const currentUser = await User.findById(req.user._id);
+            isBlocked = currentUser.blockedUsers && currentUser.blockedUsers.includes(userId);
+            isMuted = currentUser.mutedUsers && currentUser.mutedUsers.includes(userId);
+        }
+
         res.json({
             _id: user._id,
             name: user.name,
@@ -79,6 +90,11 @@ const getUserProfileById = async (req, res) => {
                 following: followingCount,
                 likes: totalLikes,
             },
+            isPrivate: user.isPrivate,
+            isTwoFactorEnabled: user.isTwoFactorEnabled,
+            role: user.role,
+            isBlocked,
+            isMuted,
         });
     } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -90,15 +106,24 @@ const getUserProfileById = async (req, res) => {
 // @route   PUT /api/profile/me
 // @access  Private
 const updateUserProfile = async (req, res) => {
-    const { username, bio, profilePicture } = req.body;
+    const { name, username, bio, profilePicture, coverPhoto, location, website, pronouns, isPrivate } = req.body;
 
     try {
         const user = await User.findById(req.user._id);
 
         if (user) {
+            user.name = name !== undefined ? name : user.name;
             user.username = username !== undefined ? username : user.username;
             user.bio = bio !== undefined ? bio : user.bio;
             user.profilePicture = profilePicture !== undefined ? profilePicture : user.profilePicture;
+            user.coverPhoto = coverPhoto !== undefined ? coverPhoto : user.coverPhoto;
+            user.location = location !== undefined ? location : user.location;
+            user.website = website !== undefined ? website : user.website;
+            user.pronouns = pronouns !== undefined ? pronouns : user.pronouns;
+
+            if (isPrivate !== undefined) {
+                user.isPrivate = isPrivate;
+            }
 
             const updatedUser = await user.save();
             res.json({ message: 'Profile updated successfully', user: updatedUser });

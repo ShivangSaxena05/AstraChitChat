@@ -521,14 +521,13 @@ export default function ChatDetailScreen() {
       if (socket && socketConnected) {
         socket.emit('read messages', chatId);
       }
-      // Immediately update local state to show blue ticks for sent messages
+      // Immediately update local state to show that WE have read their messages
       setMessages(prev => prev.map(m => {
-        // Only mark as read messages we sent to this specific user
-        if (String(m.sender._id) === String(currentUserId) && 
-            String(m.receiver._id) === String(otherUserId) && 
-            otherUserId &&
-            !m.readBy?.includes(otherUserId)) {
-          return { ...m, readBy: [...(m.readBy || []), otherUserId] };
+        // Only mark as read messages we received from the other user
+        if (String(m.sender._id) !== String(currentUserId) && 
+            currentUserId &&
+            !m.readBy?.includes(currentUserId)) {
+          return { ...m, readBy: [...(m.readBy || []), currentUserId] };
         }
         return m;
       }));

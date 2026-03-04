@@ -4,11 +4,19 @@ const {
   unfollowUser,
   getFollowers,
   getFollowing,
-  checkFollowStatus
+  checkFollowStatus,
+  acceptFollowRequest,
+  rejectFollowRequest,
+  getFollowRequests
 } = require('../controllers/followController');
 const { protect } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Follow requests
+router.get('/requests', protect, getFollowRequests);
+router.post('/requests/:userId/accept', protect, acceptFollowRequest);
+router.post('/requests/:userId/reject', protect, rejectFollowRequest);
 
 // Follow/unfollow routes
 router.post('/:userId', protect, followUser);

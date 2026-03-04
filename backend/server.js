@@ -111,7 +111,7 @@ io.on('connection', (socket) => {
             // Populate sender, receiver, and quoted message details
             await message.populate('sender', 'name username profilePicture');
             await message.populate('receiver', 'name username profilePicture');
-            
+
             // Populate quoted message if it exists
             let quotedMessageData = null;
             if (message.quotedMsgId) {
@@ -119,17 +119,20 @@ io.on('connection', (socket) => {
                     path: 'quotedMsgId',
                     populate: { path: 'sender', select: 'name username profilePicture' }
                 });
-                
-                // Create quotedMessage object for frontend
-                quotedMessageData = {
-                    _id: message.quotedMsgId._id,
-                    bodyText: message.quotedMsgId.bodyText,
-                    sender: {
-                        _id: message.quotedMsgId.sender._id,
-                        username: message.quotedMsgId.sender.username,
-                        profilePicture: message.quotedMsgId.sender.profilePicture
-                    }
-                };
+
+                // Need to re-check after populate as the message might have been deleted/unsent
+                if (message.quotedMsgId && message.quotedMsgId._id) {
+                    // Create quotedMessage object for frontend
+                    quotedMessageData = {
+                        _id: message.quotedMsgId._id,
+                        bodyText: message.quotedMsgId.bodyText,
+                        sender: {
+                            _id: message.quotedMsgId.sender._id,
+                            username: message.quotedMsgId.sender.username,
+                            profilePicture: message.quotedMsgId.sender.profilePicture
+                        }
+                    };
+                }
             }
 
             // Get sender details for lastMessage

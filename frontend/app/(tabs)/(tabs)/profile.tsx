@@ -3,12 +3,18 @@ import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 interface UserProfile {
   username: string;
+  name?: string;
   profilePicture: string;
+  coverPhoto?: string;
   bio: string;
+  location?: string;
+  website?: string;
+  pronouns?: string;
   stats: {
     posts: number;
     followers: number;
@@ -33,6 +39,7 @@ export default function ProfileScreen() {
   const [posts, setPosts] = useState<UserPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('posts');
+  const scrollY = React.useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
 
@@ -117,6 +124,29 @@ export default function ProfileScreen() {
     </View>
   );
 
+  const HEADER_MAX_HEIGHT = 160;
+  const HEADER_MIN_HEIGHT = 90;
+  
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT],
+    outputRange: [0, -HEADER_MAX_HEIGHT + HEADER_MIN_HEIGHT],
+    extrapolate: 'clamp',
+  });
+
+  const imageScale = scrollY.interpolate({
+    inputRange: [-160, 0, HEADER_MAX_HEIGHT],
+    outputRange: [1.5, 1, 1],
+    extrapolate: 'clamp',
+  });
+
+  const openWebsite = (url: string) => {
+    let finalUrl = url;
+    if (!/^https?:\/\//i.test(url)) {
+      finalUrl = 'http://' + url;
+    }
+    Linking.openURL(finalUrl).catch(() => Alert.alert('Error', 'Could not open URL'));
+  };
+
   const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
@@ -127,55 +157,117 @@ export default function ProfileScreen() {
       alignItems: 'center',
     },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 16,
+      alignItems: 'center', // Center everything in the top header section
+      paddingHorizontal: 16,
+      marginTop: -55, // Pull up over the cover photo
     },
     profileImage: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
+      width: 110,
+      height: 110,
+      borderRadius: 55,
+      borderWidth: 4,
+      borderColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
+      backgroundColor: colorScheme === 'dark' ? '#333' : '#eee', // guarantee bg behind transparent pngs
     },
     statsContainer: {
-      flex: 1,
       flexDirection: 'row',
       justifyContent: 'space-around',
+      width: '100%',
+      marginTop: 20,
+      paddingHorizontal: 10,
     },
     stat: {
       alignItems: 'center',
+      flex: 1,
     },
     statNumber: {
-      fontSize: 18,
-      fontWeight: 'bold',
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 2,
+      color: colorScheme === 'dark' ? '#fff' : '#000',
     },
     statLabel: {
-      fontSize: 14,
-      color: colorScheme === 'dark' ? '#ccc' : 'gray',
+      fontSize: 12,
+      fontWeight: '500',
+      color: colorScheme === 'dark' ? '#8e8e93' : '#8e8e93',
     },
     bioContainer: {
-      paddingHorizontal: 16,
-      marginBottom: 16,
+      alignItems: 'center', // Center all bio elements
+      paddingHorizontal: 20,
+      marginTop: 20,
+      marginBottom: 24,
+    },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 6,
+    },
+    nameText: {
+      fontSize: 18,
+      fontWeight: '800',
+      letterSpacing: 0.2,
+    },
+    pronounBadge: {
+      backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+      marginLeft: 8,
+    },
+    pronounText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colorScheme === 'dark' ? '#bbb' : '#555',
     },
     username: {
-      fontWeight: 'bold',
-      marginBottom: 4,
+      fontSize: 13,
+      fontWeight: '500',
+      color: colorScheme === 'dark' ? '#8e8e93' : '#8e8e93',
+      marginBottom: 10,
+    },
+    bioText: {
+      fontSize: 14,
+      textAlign: 'center',
+      color: colorScheme === 'dark' ? '#d1d1d6' : '#333',
+      lineHeight: 20,
+      marginBottom: 14,
+    },
+    metadataRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      flexWrap: 'wrap',
+      gap: 12,
+    },
+    metadataItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    metadataText: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: colorScheme === 'dark' ? '#8e8e93' : '#666',
     },
     buttonContainer: {
       flexDirection: 'row',
-      justifyContent: 'space-around',
-      paddingHorizontal: 16,
-      marginBottom: 16,
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      marginVertical: 10,
+      gap: 10,
     },
     button: {
       flex: 1,
-      marginHorizontal: 4,
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef',
-      paddingVertical: 8,
-      borderRadius: 8,
+      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f2f2f7',
+      paddingVertical: 10,
+      borderRadius: 12,
       alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colorScheme === 'dark' ? '#2c2c2e' : '#e5e5ea',
     },
     buttonText: {
-      fontWeight: 'bold',
+      fontWeight: '600',
+      fontSize: 13,
       color: colorScheme === 'dark' ? '#fff' : '#000',
     },
     grid: {
@@ -192,26 +284,28 @@ export default function ProfileScreen() {
     },
     tabContainer: {
       flexDirection: 'row',
-      paddingHorizontal: 16,
-      marginBottom: 16,
+      paddingHorizontal: 20,
+      marginBottom: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colorScheme === 'dark' ? '#333' : '#e5e5ea',
     },
     tab: {
       flex: 1,
-      paddingVertical: 8,
-      paddingHorizontal: 16,
-      borderRadius: 8,
+      paddingVertical: 12,
       alignItems: 'center',
     },
     activeTab: {
-      backgroundColor: '#4ADDAE',
+      borderBottomWidth: 2,
+      borderBottomColor: colorScheme === 'dark' ? '#fff' : '#000',
     },
     tabText: {
-      fontSize: 16,
-      color: colorScheme === 'dark' ? '#ccc' : 'gray',
+      fontSize: 13,
+      fontWeight: '600',
+      color: colorScheme === 'dark' ? '#8e8e93' : '#8e8e93',
     },
     activeTabText: {
-      color: '#fff',
-      fontWeight: 'bold',
+      color: colorScheme === 'dark' ? '#fff' : '#000',
+      fontWeight: '700',
     },
     videoIndicator: {
       position: 'absolute',
@@ -254,6 +348,46 @@ export default function ProfileScreen() {
       color: colorScheme === 'dark' ? '#999' : '#999',
       textAlign: 'center',
     },
+    headerContentWrapper: {
+      backgroundColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
+      borderTopLeftRadius: 30,
+      borderTopRightRadius: 30,
+      marginTop: -24, // Create a stronger card overlap effect
+      paddingTop: 12,
+      shadowColor: "#000",
+      shadowOffset: {
+        width: 0,
+        height: -4,
+      },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 5,
+    },
+    coverPhotoContainer: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 160,
+      zIndex: -1,
+    },
+    coverPhotoImage: {
+      width: '100%',
+      height: '100%',
+    },
+    coverPhotoPlaceholder: {
+      width: '100%',
+      height: '100%',
+      backgroundColor: colorScheme === 'dark' ? '#111' : '#e1e1e1',
+    },
+    coverPhotoOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.1)', // subtle darkening
+    },
   }), [colorScheme]);
 
   if (loading) {
@@ -264,11 +398,19 @@ export default function ProfileScreen() {
     return <ThemedView style={styles.loadingContainer}><ThemedText>Could not load profile.</ThemedText></ThemedView>;
   }
 
-  return (
-    <ThemedView style={styles.container}>
-      {/* Profile Header */}
+  const renderHeader = () => (
+    <View style={styles.headerContentWrapper}>
       <View style={styles.header}>
-        <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.profileImage} />
+        {/* Profile Avatar */}
+        {!user.profilePicture || user.profilePicture.includes('anonymous-avatar-icon') || user.profilePicture.includes('pravatar.cc') ? (
+          <View style={[styles.profileImage, { justifyContent: 'center', alignItems: 'center' }]}>
+            <Ionicons name="person" size={60} color={colorScheme === 'dark' ? '#aaa' : '#888'} />
+          </View>
+        ) : (
+           <Image source={{ uri: user.profilePicture }} style={styles.profileImage} />
+        )}
+
+        {/* Stats Section moved right below avatar */}
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
@@ -283,23 +425,45 @@ export default function ProfileScreen() {
             <ThemedText style={styles.statLabel}>Following</ThemedText>
           </View>
           {user.stats.posts > 0 && (
-            <View style={styles.stat}>
-              <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
-              <ThemedText style={styles.statLabel}>Likes</ThemedText>
-            </View>
+             <View style={styles.stat}>
+               <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
+               <ThemedText style={styles.statLabel}>Likes</ThemedText>
+             </View>
           )}
         </View>
       </View>
 
       {/* Bio Section */}
       <View style={styles.bioContainer}>
-        <ThemedText style={styles.username}>{user.username}</ThemedText>
-        <ThemedText>{user.bio}</ThemedText>
+        <View style={styles.nameRow}>
+          <ThemedText style={styles.nameText}>{user.name || user.username}</ThemedText>
+          {user.pronouns ? <View style={styles.pronounBadge}><ThemedText style={styles.pronounText}>{user.pronouns}</ThemedText></View> : null}
+        </View>
+        
+        {user.name ? <ThemedText style={styles.username}>@{user.username}</ThemedText> : null}
+        
+        {user.bio ? <ThemedText style={styles.bioText}>{user.bio}</ThemedText> : null}
+        
+        <View style={styles.metadataRow}>
+          {user.location ? (
+            <View style={styles.metadataItem}>
+              <Ionicons name="location-outline" size={14} color={colorScheme === 'dark' ? '#aaa' : '#666'} />
+              <ThemedText style={styles.metadataText}>{user.location}</ThemedText>
+            </View>
+          ) : null}
+          
+          {user.website ? (
+            <TouchableOpacity style={styles.metadataItem} onPress={() => openWebsite(user.website!)}>
+              <Ionicons name="link-outline" size={14} color="#007AFF" />
+              <ThemedText style={[styles.metadataText, { color: '#007AFF' }]}>{user.website.replace(/^https?:\/\//, '')}</ThemedText>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.button} onPress={() => router.push('/profile/edit')}>
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/profile/edit' as any)}>
           <ThemedText style={styles.buttonText}>Edit Profile</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity style={styles.button} onPress={handleShareProfile}>
@@ -313,30 +477,57 @@ export default function ProfileScreen() {
           style={[styles.tab, activeTab === 'posts' && styles.activeTab]}
           onPress={() => setActiveTab('posts')}
         >
-          <ThemedText style={[styles.tabText, activeTab === 'posts' && styles.activeTabText]}>📷 Posts</ThemedText>
+          <ThemedText style={[styles.tabText, activeTab === 'posts' && styles.activeTabText]}>Posts</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'videos' && styles.activeTab]}
           onPress={() => setActiveTab('videos')}
         >
-          <ThemedText style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>🎥 Videos</ThemedText>
+          <ThemedText style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>Videos</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'reels' && styles.activeTab]}
           onPress={() => setActiveTab('reels')}
         >
-          <ThemedText style={[styles.tabText, activeTab === 'reels' && styles.activeTabText]}>🎬 Reels</ThemedText>
+          <ThemedText style={[styles.tabText, activeTab === 'reels' && styles.activeTabText]}>Reels</ThemedText>
         </TouchableOpacity>
       </View>
+    </View>
+  );
 
-      {/* Post Grid */}
-      <FlatList
+  return (
+    <ThemedView style={styles.container}>
+      
+      {/* Animated Parallax Cover Photo */}
+      <Animated.View style={[styles.coverPhotoContainer, { transform: [{ translateY: headerTranslateY }] }]}>
+        {user.coverPhoto ? (
+          <Animated.Image 
+            source={{ uri: user.coverPhoto }} 
+            style={[styles.coverPhotoImage, { transform: [{ scale: imageScale }] }]} 
+          />
+        ) : (
+          <Animated.View 
+            style={[styles.coverPhotoPlaceholder, { transform: [{ scale: imageScale }] }]} 
+          />
+        )}
+        <View style={styles.coverPhotoOverlay} />
+      </Animated.View>
+
+      {/* Post Grid with Parallax Scroll Support */}
+      <Animated.FlatList
         data={getFilteredPosts()}
         renderItem={renderPostItem}
-        keyExtractor={(item) => item._id}
+        keyExtractor={(item: UserPost) => item._id}
         numColumns={3}
         style={styles.grid}
+        contentContainerStyle={{ paddingTop: HEADER_MAX_HEIGHT }}
+        ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
       />
     </ThemedView>
   );

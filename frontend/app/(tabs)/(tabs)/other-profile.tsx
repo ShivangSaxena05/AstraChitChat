@@ -17,6 +17,8 @@ interface UserProfile {
     likes: number;
   };
   isFollowing?: boolean;
+  isBlocked?: boolean;
+  isMuted?: boolean;
 }
 
 interface UserPost {
@@ -41,6 +43,8 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
 
@@ -54,6 +58,8 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           const userData = await get(`/users/${userId}`);
           console.log('User data received:', userData);
           setUser(userData);
+          setIsBlocked(userData.isBlocked || false);
+          setIsMuted(userData.isMuted || false);
           // Fetch follow status separately
           const followStatus = await get(`/follow/${userId}/check`);
           setIsFollowing(followStatus.isFollowing);
@@ -142,6 +148,27 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to start chat');
+    }
+  };
+
+  const handleBlock = async () => {
+    try {
+      const response = await post(`/users/${userId}/block`, {});
+      setIsBlocked(response.isBlocked);
+      if (response.isBlocked) {
+        setIsFollowing(false); // Optimistically unfollow
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || 'Failed to block/unblock user');
+    }
+  };
+
+  const handleMute = async () => {
+    try {
+      const response = await post(`/users/${userId}/mute`, {});
+      setIsMuted(response.isMuted);
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || 'Failed to mute/unmute user');
     }
   };
 
@@ -422,6 +449,18 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
 
       {/* Report Button */}
       <View style={styles.reportContainer}>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+          <TouchableOpacity style={[styles.button, { backgroundColor: isBlocked ? '#ff4444' : (colorScheme === 'dark' ? '#333' : '#efefef') }]} onPress={handleBlock}>
+            <ThemedText style={{ color: isBlocked ? '#fff' : (colorScheme === 'dark' ? '#fff' : '#000'), fontWeight: 'bold' }}>
+              {isBlocked ? 'Unblock' : 'Block User'}
+            </ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.button, { backgroundColor: isMuted ? '#FFA500' : (colorScheme === 'dark' ? '#333' : '#efefef') }]} onPress={handleMute}>
+            <ThemedText style={{ color: isMuted ? '#fff' : (colorScheme === 'dark' ? '#fff' : '#000'), fontWeight: 'bold' }}>
+              {isMuted ? 'Unmute' : 'Mute User'}
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
           <ThemedText style={styles.reportButtonText}>Report User</ThemedText>
         </TouchableOpacity>

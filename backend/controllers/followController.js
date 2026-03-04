@@ -25,13 +25,21 @@ const followUser = async (req, res) => {
       return res.status(400).json({ message: 'Already following this user' });
     }
 
+    if (userToFollow.isPrivate) {
+      if (!userToFollow.followRequests.includes(currentUserId)) {
+        userToFollow.followRequests.push(currentUserId);
+        await userToFollow.save();
+      }
+      return res.status(200).json({ message: 'Follow request sent', isRequested: true });
+    }
+
     // Create follow relationship
     await Follow.create({
       follower: currentUserId,
       following: userId
     });
 
-    res.status(201).json({ message: 'User followed successfully' });
+    res.status(201).json({ message: 'User followed successfully', isFollowing: true });
   } catch (error) {
     res.status(500).json({ message: 'Server error: could not follow user', error: error.message });
   }
@@ -113,9 +121,78 @@ const checkFollowStatus = async (req, res) => {
       following: userId
     });
 
-    res.json({ isFollowing: !!follow });
+    const userToFollow = await User.findById(userId);
+    const isRequested = userToFollow && userToFollow.followRequests && userToFollow.followRequests.includes(currentUserId);
+
+    res.json({ isFollowing: !!follow, isRequested: !!isRequested });
   } catch (error) {
     res.status(500).json({ message: 'Server error: could not check follow status', error: error.message });
+  }
+};
+
+// @desc    Accept follow request
+// @route   POST /api/follow/requests/:userId/accept
+// @access  Private
+const acceptFollowRequest = async (req, res) => {
+  try {
+    const { userId } = req.params; // ID of the user who requested
+    const currentUserId = req.user._id;
+
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser.followRequests.includes(userId)) {
+      return res.status(400).json({ message: 'No follow request found from this user' });
+    }
+
+    // Remove from followRequests
+    currentUser.followRequests = currentUser.followRequests.filter(id => id.toString() !== userId.toString());
+    await currentUser.save();
+
+    // Create follow relationship
+    await Follow.create({
+      follower: userId,
+      following: currentUserId
+    });
+
+    res.json({ message: 'Follow request accepted' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error: could not accept follow request', error: error.message });
+  }
+};
+
+// @desc    Reject follow request
+// @route   POST /api/follow/requests/:userId/reject
+// @access  Private
+const rejectFollowRequest = async (req, res) => {
+  try {
+    const { userId } = req.params; // ID of the user who requested
+    const currentUserId = req.user._id;
+
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser.followRequests.includes(userId)) {
+      return res.status(400).json({ message: 'No follow request found from this user' });
+    }
+
+    // Remove from followRequests
+    currentUser.followRequests = currentUser.followRequests.filter(id => id.toString() !== userId.toString());
+    await currentUser.save();
+
+    res.json({ message: 'Follow request rejected' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error: could not reject follow request', error: error.message });
+  }
+};
+
+// @desc    Get follow requests
+// @route   GET /api/follow/requests
+// @access  Private
+const getFollowRequests = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
+    const currentUser = await User.findById(currentUserId).populate('followRequests', 'name username profilePicture');
+
+    res.json({ requests: currentUser.followRequests || [] });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error: could not fetch follow requests', error: error.message });
   }
 };
 
@@ -124,5 +201,8 @@ module.exports = {
   unfollowUser,
   getFollowers,
   getFollowing,
-  checkFollowStatus
+  checkFollowStatus,
+  acceptFollowRequest,
+  rejectFollowRequest,
+  getFollowRequests
 };

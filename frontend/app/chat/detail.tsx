@@ -9,6 +9,7 @@ import { get, post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
 import { useCall } from '@/contexts/CallContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import SwipeableMessage from '@/components/SwipeableMessage';
 
 interface Message {
   _id: string;
@@ -56,12 +57,14 @@ const MessageItem = memo(({
   item, 
   currentUserId,
   isMessageRead,
-  onLongPress
+  onLongPress,
+  onSwipeReply
 }: { 
   item: ListItem; 
   currentUserId: string | null;
   isMessageRead: (message: Message, currentId: string | null) => boolean;
   onLongPress?: (message: Message) => void;
+  onSwipeReply?: (message: Message) => void;
 }) => {
   if (item.type === 'dateSeparator') {
     return (
@@ -80,51 +83,61 @@ const MessageItem = memo(({
 
   const isGroupChat = typeof message.chat === 'object' ? message.chat?.convoType === 'group' : false;
 
+  // Handle swipe to reply
+  const handleSwipe = useCallback(() => {
+    onSwipeReply?.(message);
+  }, [message, onSwipeReply]);
+
   return (
-    <TouchableOpacity 
-      onLongPress={() => onLongPress?.(message)}
-      delayLongPress={500}
-      activeOpacity={0.7}
+    <SwipeableMessage
+      onSwipeReply={handleSwipe}
+      isOwnMessage={isOwnMessage}
     >
-      <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
-        {/* Quoted Message Display */}
-        {message.quotedMessage && (
-          <View style={[styles.quotedMessageContainer, isOwnMessage ? styles.ownQuotedMessage : styles.otherQuotedMessage]}>
-            <Text style={[styles.quotedMessageName, isOwnMessage ? styles.ownQuotedName : styles.otherQuotedName]}>
-              {message.quotedMessage.sender?.username || 'Unknown'}
-            </Text>
-            <Text style={[styles.quotedMessageText, isOwnMessage ? styles.ownQuotedText : styles.otherQuotedText]} numberOfLines={1}>
-              {message.quotedMessage.bodyText || 'Message'}
-            </Text>
-          </View>
-        )}
-        
-        {!isOwnMessage && message.sender?.username && (
-          <Text style={styles.senderNameText}>{message.sender.username}</Text>
-        )}
-        <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
-          {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
-        </Text>
-        {message.editedAt && !message.unsentAt && (
-          <Text style={[styles.editedText, isOwnMessage ? styles.ownEditedText : styles.otherEditedText]}>
-            (edited)
+      <TouchableOpacity 
+        onLongPress={() => onLongPress?.(message)}
+        delayLongPress={500}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
+          {/* Quoted Message Display */}
+          {message.quotedMessage && (
+            <View style={[styles.quotedMessageContainer, isOwnMessage ? styles.ownQuotedMessage : styles.otherQuotedMessage]}>
+              <Text style={[styles.quotedMessageName, isOwnMessage ? styles.ownQuotedName : styles.otherQuotedName]}>
+                {message.quotedMessage.sender?.username || 'Unknown'}
+              </Text>
+              <Text style={[styles.quotedMessageText, isOwnMessage ? styles.ownQuotedText : styles.otherQuotedText]} numberOfLines={1}>
+                {message.quotedMessage.bodyText || 'Message'}
+              </Text>
+            </View>
+          )}
+          
+          {!isOwnMessage && message.sender?.username && (
+            <Text style={styles.senderNameText}>{message.sender.username}</Text>
+          )}
+          <Text style={[styles.messageText, isOwnMessage ? styles.ownMessageText : styles.otherMessageText]}>
+            {message.unsentAt ? '[Message unsent]' : (message.bodyText || message.content)}
           </Text>
-        )}
-        <View style={styles.timestampContainer}>
-          <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
-            {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-          {isOwnMessage && (
-            <Text style={[
-              styles.readStatus, 
-              isRead ? styles.readStatusBlue : styles.readStatusGray
-            ]}>
-              {isRead ? '✓✓' : (isDelivered ? '✓✓' : '✓')}
+          {message.editedAt && !message.unsentAt && (
+            <Text style={[styles.editedText, isOwnMessage ? styles.ownEditedText : styles.otherEditedText]}>
+              (edited)
             </Text>
           )}
+          <View style={styles.timestampContainer}>
+            <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
+              {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            {isOwnMessage && (
+              <Text style={[
+                styles.readStatus, 
+                isRead ? styles.readStatusBlue : styles.readStatusGray
+              ]}>
+                {isRead ? '✓✓' : (isDelivered ? '✓✓' : '✓')}
+              </Text>
+            )}
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </SwipeableMessage>
   );
 });
 
@@ -626,14 +639,20 @@ export default function ChatDetailScreen() {
     }
   }, [quotedMessage]);
 
+  // Handle swipe to reply (WhatsApp style)
+  const handleSwipeReply = useCallback((message: Message) => {
+    setQuotedMessage(message);
+  }, []);
+
   const renderItem = useCallback(({ item }: { item: ListItem }) => (
     <MessageItem 
       item={item} 
       currentUserId={currentUserId} 
       isMessageRead={isMessageRead}
       onLongPress={handleMessageLongPress}
+      onSwipeReply={handleSwipeReply}
     />
-  ), [currentUserId, isMessageRead, handleMessageLongPress]);
+  ), [currentUserId, isMessageRead, handleMessageLongPress, handleSwipeReply]);
 
   // Render header for loading more indicator
   const renderHeader = useCallback(() => {
@@ -749,6 +768,7 @@ export default function ChatDetailScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -910,6 +930,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2c34',
     alignItems: 'stretch',
   },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   input: {
     flex: 1,
     borderWidth: 0,
@@ -1051,3 +1075,4 @@ const styles = StyleSheet.create({
     color: '#aaa',
   },
 });
+

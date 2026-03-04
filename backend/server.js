@@ -93,6 +93,7 @@ io.on('connection', (socket) => {
     // Handle sending messages
     socket.on('new message', async (newMessageReceived) => {
         const Message = require('./models/Message');
+        const mongoose = require('mongoose');
 
         try {
             // Save message to database
@@ -103,7 +104,7 @@ io.on('connection', (socket) => {
                 bodyText: newMessageReceived.bodyText || newMessageReceived.content,
                 msgType: newMessageReceived.msgType || newMessageReceived.chatType || 'text',
                 attachments: newMessageReceived.attachments || [],
-                quotedMsgId: newMessageReceived.quotedMsgId,
+                quotedMsgId: newMessageReceived.quotedMsgId ? new mongoose.Types.ObjectId(newMessageReceived.quotedMsgId) : undefined,
                 readBy: [{ user: newMessageReceived.sender, readAt: new Date() }]
             });
 
@@ -112,57 +113,43 @@ io.on('connection', (socket) => {
             await message.populate('receiver', 'name username profilePicture');
             
             // Populate quoted message if it exists
-            if (newMessageReceived.quotedMsgId) {
+            let quotedMessageData = null;
+            if (message.quotedMsgId) {
                 await message.populate({
                     path: 'quotedMsgId',
                     populate: { path: 'sender', select: 'name username profilePicture' }
                 });
-            }
-
-            // Transform quotedMsgId to quotedMessage for frontend compatibility
-            let messageToEmit = message.toObject();
-            if (message.quotedMsgId) {
-                messageToEmit.quotedMessage = {
+                
+                // Create quotedMessage object for frontend
+                quotedMessageData = {
                     _id: message.quotedMsgId._id,
                     bodyText: message.quotedMsgId.bodyText,
-                    sender: message.quotedMsgId.sender
+                    sender: {
+                        _id: message.quotedMsgId.sender._id,
+                        username: message.quotedMsgId.sender.username,
+                        profilePicture: message.quotedMsgId.sender.profilePicture
+                    }
                 };
             }
 
             // Get sender details for lastMessage
             const senderDoc = await User.findById(newMessageReceived.sender).select('name username profilePicture');
 
-            // ========================================================================
-            // FIX EXPLANATION:
-            // The Chat model's lastMessage.sender field is defined as:
-            //   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
-            // 
-            // This means MongoDB expects an ObjectId (reference), NOT a plain object.
-            // Previously, we were storing sender as: { _id, username, profilePicture }
-            // which caused the schema mismatch and prevented proper population.
-            //
-            // Solution: Store sender as ObjectId in the database, then fetch the
-            // populated data separately for the socket event.
-            // ========================================================================
-
             // STEP 1: Update chat's lastMessage with sender as ObjectId reference
-            // This is schema-compliant and allows proper population when fetching
             await Chat.findByIdAndUpdate(newMessageReceived.chat, {
                 lastMessage: {
                     text: newMessageReceived.bodyText || newMessageReceived.content || (newMessageReceived.attachments && newMessageReceived.attachments.length ? 'Attachment' : ''),
                     createdAt: message.createdAt,
-                    sender: message.sender._id // IMPORTANT: Store as ObjectId, not object
+                    sender: message.sender._id
                 },
                 updatedAt: new Date()
             });
 
             // STEP 2: Fetch the updated chat with populated sender for socket event
-            // We need the populated data (username, profilePicture) for the frontend
             const updatedChat = await Chat.findById(newMessageReceived.chat)
                 .populate('lastMessage.sender', 'name username profilePicture');
 
             // STEP 3: Create properly formatted lastMessage for socket event
-            // This object contains all the data the frontend needs to display the preview
             const lastMessageForSocket = {
                 text: updatedChat.lastMessage.text,
                 createdAt: updatedChat.lastMessage.createdAt,
@@ -171,6 +158,22 @@ io.on('connection', (socket) => {
                     username: senderDoc.username,
                     profilePicture: senderDoc.profilePicture
                 }
+            };
+
+            // Create the final message object to emit
+            const messageToEmit = {
+                _id: message._id,
+                sender: message.sender,
+                receiver: message.receiver,
+                chat: message.chat,
+                msgType: message.msgType,
+                bodyText: message.bodyText,
+                attachments: message.attachments,
+                createdAt: message.createdAt,
+                readBy: [newMessageReceived.sender],
+                deliveredTo: [newMessageReceived.sender],
+                quotedMsgId: newMessageReceived.quotedMsgId ? newMessageReceived.quotedMsgId : undefined,
+                quotedMessage: quotedMessageData
             };
 
             // Emit to chat room so all participants receive the message (including sender)

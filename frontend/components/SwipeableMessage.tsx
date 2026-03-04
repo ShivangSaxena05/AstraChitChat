@@ -1,5 +1,5 @@
 import React, { memo, useRef } from 'react';
-import { View, Text, StyleSheet, PanResponder, Animated, Dimensions } from 'react-native';
+import { View, StyleSheet, PanResponder, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface SwipeableMessageProps {
@@ -48,7 +48,7 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
         const swipeDistance = isOwnMessage ? -gestureState.dx : gestureState.dx;
         
         if (swipeDistance > SWIPE_THRESHOLD) {
-          // Trigger haptic feedback and reply
+          // Trigger reply
           onSwipeReply();
         }
 
@@ -74,12 +74,12 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Reply Indicator - Shows on the side being swiped */}
+      {/* Forward Indicator - Shows on the side being swiped */}
       <View style={[
-        styles.replyIndicator, 
-        isOwnMessage ? styles.replyIndicatorLeft : styles.replyIndicatorRight
+        styles.forwardIndicator, 
+        isOwnMessage ? styles.forwardIndicatorLeft : styles.forwardIndicatorRight
       ]}>
-        <Ionicons name="arrow-undo" size={16} color="#4ADDAE" />
+        <Ionicons name="arrow-forward" size={16} color="#4ADDAE" />
       </View>
       
       {/* Message Bubble with Pan Responder */}
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   messageWrapper: {
     // The actual message styling will be passed through children
   },
-  replyIndicator: {
+  forwardIndicator: {
     position: 'absolute',
     top: '50%',
     marginTop: -12,
@@ -117,10 +117,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: -1,
   },
-  replyIndicatorLeft: {
+  forwardIndicatorLeft: {
     left: -32,
   },
-  replyIndicatorRight: {
+  forwardIndicatorRight: {
     right: -32,
   },
 });

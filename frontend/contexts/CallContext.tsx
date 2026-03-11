@@ -1,11 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-<<<<<<< HEAD
-import { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices, MediaStream } from 'react-native-webrtc';
-=======
 import { PermissionsAndroid, Platform } from 'react-native';
 import { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, mediaDevices, MediaStream } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
->>>>>>> upstream/master
 import { useSocket } from './SocketContext';
 
 interface CallState {
@@ -20,21 +16,13 @@ interface CallState {
 }
 
 interface CallContextType extends CallState {
-<<<<<<< HEAD
-  initiateCall: (targetIds: string[], chatId: string) => Promise<void>;
-  acceptCall: () => Promise<void>;
-=======
   initiateCall: (targetIds: string[], chatId: string, isVideo?: boolean) => Promise<void>;
   acceptCall: (isVideo?: boolean) => Promise<void>;
->>>>>>> upstream/master
   declineCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
-<<<<<<< HEAD
-=======
   toggleVideo: () => void;
->>>>>>> upstream/master
 }
 
 const CallContext = createContext<CallContextType | null>(null);
@@ -67,24 +55,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!socket || !currentUserId) return;
 
-<<<<<<< HEAD
-    socket.on('webrtc-offer', async ({ offer, callerId, chatId }) => {
-=======
     socket.on('webrtc-offer', async ({ offer, callerId, chatId, isVideo }) => {
->>>>>>> upstream/master
       // If we are already in a call, we should automatically decline or ignore (busy)
       if (peerConnectionRef.current || callState.isCalling) {
         socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
         return;
       }
-      
-<<<<<<< HEAD
-      console.log('Received call offer from:', callerId);
-      setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId } }));
-=======
+
       console.log('Received call offer from:', callerId, 'isVideo:', isVideo);
       setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId, isVideo } }));
->>>>>>> upstream/master
     });
 
     socket.on('webrtc-answer', async ({ answer, responderId }) => {
@@ -116,13 +95,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [socket, currentUserId, callState.isCalling]);
 
-<<<<<<< HEAD
-  const setupMediaAndPC = async (targetId: string): Promise<RTCPeerConnection> => {
-    // 1. Get Local Microphone Stream
-    const stream = await mediaDevices.getUserMedia({
-      audio: true,
-      video: false
-=======
   const requestMicrophonePermission = async () => {
     if (Platform.OS === 'android') {
       try {
@@ -157,7 +129,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: isVideo // Enable video if it's a video call
->>>>>>> upstream/master
     }) as MediaStream;
 
     setCallState(prev => ({ ...prev, localStream: stream }));
@@ -185,8 +156,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Receive Remote Stream
     pc.ontrack = (event: any) => {
-      setCallState(prev => ({ 
-        ...prev, 
+      setCallState(prev => ({
+        ...prev,
         remoteStream: event.streams[0]
       }));
     };
@@ -196,48 +167,33 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('WebRTC Connection State:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setCallState(prev => ({ ...prev, isConnected: true }));
-<<<<<<< HEAD
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        cleanupCall();
-=======
       } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
         cleanupCall('connection failed');
       } else if (pc.connectionState === 'closed') {
         cleanupCall('connection closed');
->>>>>>> upstream/master
       }
     };
 
     return pc;
   };
 
-<<<<<<< HEAD
-  const initiateCall = async (targetIds: string[], chatId: string) => {
-=======
   const initiateCall = async (targetIds: string[], chatId: string, isVideo: boolean = false) => {
->>>>>>> upstream/master
     // Note: This basic setup assumes 1-on-1 direct calls currently. 
     // Group calls (Mesh) would require managing multiple RTCPeerConnections (an array/map of them).
     // We will start by connecting to the first target.
     if (targetIds.length === 0 || !socket || !currentUserId) return;
-    
+
     const targetId = targetIds[0];
 
     try {
-<<<<<<< HEAD
-      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
-      
-      const pc = await setupMediaAndPC(targetId);
-=======
       // Start InCallManager for audio routing
       InCallManager.start({ media: isVideo ? 'video' : 'audio' });
       InCallManager.setForceSpeakerphoneOn(false); // Start with earpiece
 
       setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
-      
+
       const pc = await setupMediaAndPC(targetId, isVideo);
->>>>>>> upstream/master
-      
+
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
 
@@ -245,14 +201,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         targetId,
         offer,
         callerId: currentUserId,
-<<<<<<< HEAD
-        chatId
-=======
         chatId,
         isVideo // Pass isVideo to the offer
->>>>>>> upstream/master
       });
-      
+
     } catch (error) {
       console.error('Call initiation failed:', error);
       cleanupCall();
@@ -261,14 +213,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const acceptCall = async () => {
     if (!callState.incomingCall || !socket || !currentUserId) return;
-<<<<<<< HEAD
-    const { offer, callerId, chatId } = callState.incomingCall;
-
-    try {
-      setCallState(prev => ({ ...prev, isCalling: true, incomingCall: null, activeChatId: chatId }));
-      
-      const pc = await setupMediaAndPC(callerId);
-=======
     const { offer, callerId, chatId, isVideo } = callState.incomingCall;
 
     try {
@@ -277,10 +221,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       InCallManager.setForceSpeakerphoneOn(false); // Start with earpiece
 
       setCallState(prev => ({ ...prev, isCalling: true, incomingCall: null, activeChatId: chatId }));
-      
+
       const pc = await setupMediaAndPC(callerId, isVideo || false);
->>>>>>> upstream/master
-      
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -316,40 +259,29 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cleanupCall();
   };
 
-<<<<<<< HEAD
-  const cleanupCall = useCallback(() => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    
-    setCallState(prev => {
-      if (prev.localStream) {
-        prev.localStream.getTracks().forEach(t => t.stop());
-=======
   const cleanupCall = useCallback((reason?: string) => {
     console.log('cleanupCall called:', reason || 'unknown');
-    
+
     // Stop InCallManager audio routing
     try {
       InCallManager.stop();
     } catch (e) {
       console.log('InCallManager stop error:', e);
     }
-    
+
     // Use refs to prevent race conditions during cleanup
     const pc = peerConnectionRef.current;
     const streamRef = callState.localStream;
-    
+
     if (pc) {
       console.log('Closing peer connection');
       pc.close();
       peerConnectionRef.current = null;
     }
-    
+
     // Clear refs first
     activeCallTargetIdRef.current = null;
-    
+
     // Then update state - use functional update to avoid dependency issues
     setCallState(prev => {
       // Stop tracks if they exist in the state or in our captured ref
@@ -357,7 +289,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (streamToCleanup) {
         console.log('Stopping tracks');
         streamToCleanup.getTracks().forEach(t => t.stop());
->>>>>>> upstream/master
       }
       return {
         isCalling: false,
@@ -370,20 +301,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeChatId: null
       };
     });
-<<<<<<< HEAD
-    
-    activeCallTargetIdRef.current = null;
-  }, []);
-
-  const toggleMute = () => {
-    setCallState(prev => {
-      if (prev.localStream) {
-        prev.localStream.getAudioTracks().forEach(track => {
-          track.enabled = prev.isMuted; // If currently muted, we enable it.
-        });
-      }
-      return { ...prev, isMuted: !prev.isMuted };
-=======
   }, []); // Empty deps - use refs for values
 
   const toggleMute = () => {
@@ -395,17 +312,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
       return { ...prev, isMuted: newIsMuted };
->>>>>>> upstream/master
     });
   };
 
   const toggleSpeaker = () => {
-<<<<<<< HEAD
-    // Note: react-native-webrtc provides something like `InCallManager` (from react-native-incall-manager) 
-    // to route audio to the loudspeaker. Without it, the speaker toggle is decorative or requires native bridging.
-    // For V1 MVP, we will assume generic state.
-    setCallState(prev => ({ ...prev, isSpeaker: !prev.isSpeaker }));
-=======
     // Use InCallManager to actually toggle speaker
     const newSpeakerState = !callState.isSpeaker;
     try {
@@ -426,7 +336,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return prev;
     });
->>>>>>> upstream/master
   };
 
   return (
@@ -437,12 +346,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       declineCall,
       endCall,
       toggleMute,
-<<<<<<< HEAD
-      toggleSpeaker
-=======
       toggleSpeaker,
       toggleVideo
->>>>>>> upstream/master
     }}>
       {children}
     </CallContext.Provider>

@@ -6,12 +6,8 @@ const { getPresignedUploadUrl, deleteS3Object } = require('../services/mediaServ
 
 // ─────────────────────────────────────────────────────────────────────────────
 // @route   POST /api/media/upload
-<<<<<<< HEAD
-// @desc    Upload a media file to S3 and return a CloudFront URL
-=======
 // @desc    Upload a file via multer-s3 (small images / profile pics)
 //          Returns a CloudFront URL ready to save in MongoDB.
->>>>>>> upstream/master
 // @access  Private
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/upload', protect, upload.single('media'), (req, res) => {
@@ -19,30 +15,17 @@ router.post('/upload', protect, upload.single('media'), (req, res) => {
         return res.status(400).json({ message: 'Please upload a file.' });
     }
 
-<<<<<<< HEAD
-    // req.file.key  = the S3 object key  (e.g. "userId/timestamp-filename.jpg")
-    // CLOUDFRONT_URL = https://d2zuxfoq4alnc5.cloudfront.net
-    const cloudfrontUrl = process.env.CLOUDFRONT_URL.replace(/\/$/, ''); // strip trailing slash
-    const fileUrl = `${cloudfrontUrl}/${req.file.key}`;
-
-    res.status(200).json({
-        url: fileUrl,
-        key: req.file.key,
-=======
     const cloudfrontBase = process.env.CLOUDFRONT_URL.replace(/\/$/, '');
     const fileUrl = `${cloudfrontBase}/${req.file.key}`;
 
     res.status(200).json({
         url: fileUrl,              // CloudFront URL — save this as mediaUrl in MongoDB
         key: req.file.key,         // S3 object key — save this as mediaKey in MongoDB
->>>>>>> upstream/master
         size: req.file.size,
         contentType: req.file.contentType,
     });
 });
 
-<<<<<<< HEAD
-=======
 // ─────────────────────────────────────────────────────────────────────────────
 // @route   GET /api/media/presigned-url
 // @desc    Generate a presigned S3 PUT URL so the client can upload DIRECTLY
@@ -118,5 +101,4 @@ router.delete('/delete', protect, async (req, res) => {
     }
 });
 
->>>>>>> upstream/master
 module.exports = router;

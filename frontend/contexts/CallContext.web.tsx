@@ -58,7 +58,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
         return;
       }
-      
+
       console.log('Received call offer from:', callerId);
       setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId } }));
     });
@@ -131,8 +131,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Receive Remote Stream
     pc.ontrack = (event: any) => {
-      setCallState(prev => ({ 
-        ...prev, 
+      setCallState(prev => ({
+        ...prev,
         remoteStream: event.streams[0]
       }));
     };
@@ -155,14 +155,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Group calls (Mesh) would require managing multiple RTCPeerConnections (an array/map of them).
     // We will start by connecting to the first target.
     if (targetIds.length === 0 || !socket || !currentUserId) return;
-    
+
     const targetId = targetIds[0];
 
     try {
       setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
-      
+
       const pc = await setupMediaAndPC(targetId);
-      
+
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
 
@@ -172,7 +172,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         callerId: currentUserId,
         chatId
       });
-      
+
     } catch (error) {
       console.error('Call initiation failed:', error);
       cleanupCall();
@@ -185,9 +185,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       setCallState(prev => ({ ...prev, isCalling: true, incomingCall: null, activeChatId: chatId }));
-      
+
       const pc = await setupMediaAndPC(callerId);
-      
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -228,7 +228,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-    
+
     setCallState(prev => {
       if (prev.localStream) {
         prev.localStream.getTracks().forEach(t => t.stop());
@@ -244,20 +244,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeChatId: null
       };
     });
-    
+
     activeCallTargetIdRef.current = null;
   }, []);
 
   const toggleMute = () => {
     setCallState(prev => {
-<<<<<<< HEAD
-      if (prev.localStream) {
-        prev.localStream.getAudioTracks().forEach(track => {
-          track.enabled = prev.isMuted; // If currently muted, we enable it.
-        });
-      }
-      return { ...prev, isMuted: !prev.isMuted };
-=======
       const newIsMuted = !prev.isMuted;
       if (prev.localStream) {
         prev.localStream.getAudioTracks().forEach(track => {
@@ -265,7 +257,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
       return { ...prev, isMuted: newIsMuted };
->>>>>>> upstream/master
     });
   };
 

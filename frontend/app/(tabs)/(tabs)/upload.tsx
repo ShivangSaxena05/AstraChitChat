@@ -83,16 +83,17 @@ export default function UploadScreen() {
 
     setUploading(true);
     try {
-      // 1. Upload media to your local server
-      // The expo-image-picker provides a fileName, which is what our backend needs.
-      const mediaUrl = await uploadMedia(
+      // 1. Upload media to S3 via backend
+      // uploadMedia returns { url: cloudfrontUrl, key: s3ObjectKey }
+      const { url: mediaUrl, key: mediaKey } = await uploadMedia(
         selectedMedia.uri,
-        selectedMedia.fileName ?? `upload.${selectedMedia.uri.split('.').pop()}` // Fallback for filename
+        selectedMedia.fileName ?? `upload.${selectedMedia.uri.split('.').pop()}`
       );
 
-      // Create post via API
+      // 2. Create post via API — include mediaKey for future S3 deletion
       await post('/posts/upload', {
         mediaUrl,
+        mediaKey,
         mediaType: selectedMedia.type === 'image' ? 'image' : 'video',
         caption,
       });
@@ -110,7 +111,7 @@ export default function UploadScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title" style={styles.title}>Create Post</ThemedText>
-      
+
       <TouchableOpacity style={styles.selectButton} onPress={handleSelectMedia}>
         <ThemedText style={styles.selectButtonText}>
           {selectedMedia ? 'Change Media' : 'Select Media'}

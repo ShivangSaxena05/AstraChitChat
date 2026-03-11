@@ -16,7 +16,7 @@ export default function EditProfileScreen() {
   const [location, setLocation] = useState('');
   const [website, setWebsite] = useState('');
   const [pronouns, setPronouns] = useState('');
-  
+
   const [locationSuggestions, setLocationSuggestions] = useState<any[]>([]);
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
 
@@ -124,12 +124,14 @@ export default function EditProfileScreen() {
       // If a new image was selected, upload it first
       if (newProfilePictureUri) {
         const fileName = newProfilePictureUri.split('/').pop() || 'profile.jpg';
-        newProfilePictureUrl = await uploadMedia(newProfilePictureUri, fileName);
+        const result = await uploadMedia(newProfilePictureUri, fileName);
+        newProfilePictureUrl = result.url;
       }
 
       if (newCoverPhotoUri) {
         const fileName = newCoverPhotoUri.split('/').pop() || 'cover.jpg';
-        newCoverPhotoUrl = await uploadMedia(newCoverPhotoUri, fileName);
+        const result = await uploadMedia(newCoverPhotoUri, fileName);
+        newCoverPhotoUrl = result.url;
       }
 
       // Send updated data to the backend
@@ -160,7 +162,7 @@ export default function EditProfileScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      
+
       {/* Cover Photo Selection */}
       <TouchableOpacity onPress={handleChooseCoverPhoto} style={styles.coverPhotoContainer}>
         {newCoverPhotoUri || coverPhoto ? (

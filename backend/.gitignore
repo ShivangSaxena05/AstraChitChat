@@ -3,3 +3,6 @@ node_modules
 .env
 
 package_lock.json
+
+playground-1.mongodb.js
+playground-2.mongodb.js

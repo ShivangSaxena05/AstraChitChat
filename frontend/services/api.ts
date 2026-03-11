@@ -8,9 +8,9 @@ const API_URL = BASE_API_URL;
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  // Do NOT hardcode Content-Type here.
+  // Axios will auto-set 'multipart/form-data' for FormData
+  // and 'application/json' for plain JS objects.
 });
 
 // Add request interceptor to include JWT token

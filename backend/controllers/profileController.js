@@ -37,7 +37,11 @@ const getUserProfile = async (req, res) => {
 >>>>>>> upstream/master
             username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
             profilePicture: user.profilePicture,
+            coverPhoto: user.coverPhoto || '',
             bio: user.bio || '',
+            location: user.location || '',
+            website: user.website || '',
+            pronouns: user.pronouns || '',
             stats: {
                 posts: postCount,
                 followers: followersCount,

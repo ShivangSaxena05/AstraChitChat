@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, PanResponder, Animated } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
@@ -153,6 +153,12 @@ export default function ChatDetailScreen() {
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
   
+  // Call Gesture State
+  const [isHoldingTop, setIsHoldingTop] = useState(false);
+  const [callProgress, setCallProgress] = useState(0);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdStartTimeRef = useRef<number>(0);
+
   // Reply/Quote feature state
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
   
@@ -265,12 +271,9 @@ export default function ChatDetailScreen() {
   // Initialize and set up socket listeners
   useEffect(() => {
     const init = async () => {
-      // Clear previous message IDs when entering a new chat ONLY if we're actually clearing messages
       messageIdsRef.current.clear();
       setMessages([]);
-      // Do not set loading to true here to avoid the aggressive spinner blocking the UI mount
       setGroupedMessages([]);
-      // Reset pagination state
       setHasMore(true);
       setOldestMessageId(null);
 
@@ -280,7 +283,6 @@ export default function ChatDetailScreen() {
       fetchMessages();
       fetchUserStatus();
 
-      // Instantly clear the unread count for this active chat in the global list
       setConversations(prev => prev.map(c => 
         String(c._id) === String(chatId) ? { ...c, unreadCount: 0 } : c
       ));
@@ -303,19 +305,12 @@ export default function ChatDetailScreen() {
   useEffect(() => {
     if (!socket || !chatId) return;
 
-    // Join the chat room
     socket.emit('join chat', chatId);
 
-    // ========================================================================
-    // FIX: Proper message deduplication using Set for O(1) lookup
-    // ========================================================================
     const handleMessageReceived = (message: Message) => {
-      // Get the chat ID from the message (handle both string and object)
       const messageChatId = typeof message.chat === 'object' ? message.chat?._id : message.chat;
       
-      // Only handle messages for this chat
       if (String(messageChatId) === String(chatId)) {
-        // FIX: Use Set for O(1) deduplication instead of array.some()
         const messageId = message._id;
         
         if (messageIdsRef.current.has(messageId)) {
@@ -323,11 +318,9 @@ export default function ChatDetailScreen() {
           return;
         }
         
-        // Add to set and update state
         messageIdsRef.current.add(messageId);
         
         setMessages(prev => {
-          // Double-check deduplication
           if (prev.some(m => m._id === messageId)) {
             return prev;
           }
@@ -335,19 +328,13 @@ export default function ChatDetailScreen() {
           return updated;
         });
 
-        // Auto-mark as read if the message is from the other user
         if (message.sender._id !== currentUserId) {
           markAllAsRead();
-          // Instantly clear the unread count in the global context so the list doesn't show a ghost badge
           setConversations(prev => prev.map(c => 
             String(c._id) === String(chatId) ? { ...c, unreadCount: 0 } : c
           ));
-        } else {
-          // If we sent it, we shouldn't emit delivered to ourselves since we are the sender
         }
       } else {
-        // If the message is NOT for this chat, but it IS for us, tell the server it was delivered
-        // because we received it on our device (even if we're not looking at that chat)
         if (message.sender._id !== currentUserId) {
             socket.emit('message delivered', {
                 messageId: message._id,
@@ -359,7 +346,6 @@ export default function ChatDetailScreen() {
       }
     };
 
-    // Listen for online status changes
     const handleUserOnline = (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
       if (data.userId === otherUserId) {
         setOtherUserStatus({
@@ -369,23 +355,18 @@ export default function ChatDetailScreen() {
       }
     };
 
-    // Listen for typing indicators
     const handleRemoteTyping = () => setOtherUserTyping(true);
     const handleRemoteStopTyping = () => setOtherUserTyping(false);
 
-    // Listen for real-time read receipts (Blue Ticks)
-    // Use refs to avoid stale closure issues
     const handleMessagesRead = (data?: { chatId?: string; readerId?: string }) => {
       const currentOtherUserId = otherUserIdRef.current;
       const currentUser = currentUserIdRef.current;
       
-      // Only update if the read receipt is from the other user in this chat
       if (data?.readerId && String(data.readerId) !== String(currentUser)) {
         return;
       }
       
       setMessages(prev => prev.map(m => {
-        // If it's a message we sent, and it hasn't been marked read by the other user locally yet
         if (String(m.sender._id) === String(currentUser) && 
             currentOtherUserId &&
             !m.readBy?.includes(currentOtherUserId)) {
@@ -395,13 +376,11 @@ export default function ChatDetailScreen() {
       }));
     };
 
-    // Listen for real-time delivery receipts (Double Gray Ticks)
     const handleMessageDelivered = (data?: { messageId?: string, receiverId?: string }) => {
         if (!data || !data.messageId || !data.receiverId) return;
         
         setMessages(prev => prev.map(m => {
             if (String(m._id) === String(data.messageId)) {
-                // If it doesn't already have this receiver in the delivered array, add it
                 if (!m.deliveredTo?.includes(String(data.receiverId))) {
                     return {
                         ...m,
@@ -443,7 +422,7 @@ export default function ChatDetailScreen() {
       if (!otherUserStatus.isOnline) {
         fetchUserStatus();
       }
-    }, 30000); // Every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [otherUserStatus.isOnline]);
@@ -451,12 +430,11 @@ export default function ChatDetailScreen() {
   const fetchMessages = async (isLoadMore = false) => {
     try {
       if (!isLoadMore) {
-        if (messages.length === 0) setLoading(true); // Only show spinner if we have absolutely nothing
+        if (messages.length === 0) setLoading(true);
       } else {
         setLoadingMore(true);
       }
       
-      // Build query params
       let queryParams = `limit=30`;
       if (isLoadMore && oldestMessageId) {
         queryParams += `&beforeMessageId=${oldestMessageId}`;
@@ -464,7 +442,6 @@ export default function ChatDetailScreen() {
       
       const data = await get(`/chats/${chatId}/messages?${queryParams}`);
       
-      // Initialize message IDs set with existing messages for deduplication
       if (data.messages && data.messages.length > 0) {
         data.messages.forEach((msg: Message) => {
           messageIdsRef.current.add(msg._id);
@@ -472,10 +449,8 @@ export default function ChatDetailScreen() {
       }
       
       if (isLoadMore) {
-        // Append older messages to the beginning of the array using functional update
         setMessages(prevMessages => {
           const updatedMessages = [...data.messages, ...prevMessages];
-          // Update grouped messages after state update
           setGroupedMessages(groupMessagesByDate(updatedMessages));
           return updatedMessages;
         });
@@ -484,15 +459,12 @@ export default function ChatDetailScreen() {
         setGroupedMessages(groupMessagesByDate(data.messages));
       }
       
-      // Update pagination state
       setHasMore(data.hasMore !== false);
       setOldestMessageId(data.oldestMessageId || null);
       
       if (!isLoadMore && chatId && currentUserId) {
         markAllAsRead();
         
-        // Mark all fetched messages from the other user as delivered
-        // since we just fetched them to our device
         if (data.messages && data.messages.length > 0) {
             data.messages.forEach((msg: Message) => {
                 if (String(msg.sender._id) !== String(currentUserId) && 
@@ -521,9 +493,8 @@ export default function ChatDetailScreen() {
       if (socket && socketConnected) {
         socket.emit('read messages', chatId);
       }
-      // Immediately update local state to show that WE have read their messages
+      // Mark messages we received as read
       setMessages(prev => prev.map(m => {
-        // Only mark as read messages we received from the other user
         if (String(m.sender._id) !== String(currentUserId) && 
             currentUserId &&
             !m.readBy?.includes(currentUserId)) {
@@ -559,7 +530,6 @@ export default function ChatDetailScreen() {
       // Clear quoted message after sending
       setQuotedMessage(null);
       
-      // Update global context immediately so ChatList re-sorts with the new message
       updateConversation({
         conversationId: chatId,
         lastMessage: {
@@ -567,7 +537,7 @@ export default function ChatDetailScreen() {
           createdAt: new Date().toISOString(),
           sender: {
             _id: currentUserId,
-            username: 'You', // This gets formatted by ChatList's isFromMe logic anyway
+            username: 'You',
             profilePicture: ''
           }
         },
@@ -579,7 +549,6 @@ export default function ChatDetailScreen() {
       setNewMessage('');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       socket.emit('stop typing', chatId);
-      // Inverted FlatList handles scrolling automatically
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to send message');
     }
@@ -614,6 +583,53 @@ export default function ChatDetailScreen() {
     await fetchMessages(true);
   }, [loadingMore, hasMore, oldestMessageId, fetchMessages]);
 
+  // Handle scroll to detect when user wants to load more AND the scroll-and-hold calling gesture
+  const handleScroll = useCallback((event: any) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    
+    const contentHeight = event.nativeEvent.contentSize.height;
+    const layoutHeight = event.nativeEvent.layoutMeasurement.height;
+    const maxOffset = contentHeight - layoutHeight;
+    
+    // Load more logic (approaching bottom)
+    if (offsetY > maxOffset - 100 && hasMore && !loadingMore) {
+      loadMoreMessages();
+    }
+    
+    // Pull-to-call logic (pulling past max offset)
+    if (offsetY > maxOffset + 30) {
+      if (!isHoldingTop) {
+        setIsHoldingTop(true);
+        holdStartTimeRef.current = Date.now();
+        
+        if (!callTimerRef.current) {
+          callTimerRef.current = setInterval(() => {
+            const elapsed = Date.now() - holdStartTimeRef.current;
+            const progress = Math.min(elapsed / 2000, 1);
+            setCallProgress(progress);
+            
+            if (progress >= 1) {
+              if (callTimerRef.current) clearInterval(callTimerRef.current);
+              callTimerRef.current = null;
+              setIsHoldingTop(false);
+              setCallProgress(0);
+              triggerCall();
+            }
+          }, 50);
+        }
+      }
+    } else {
+      if (isHoldingTop) {
+        setIsHoldingTop(false);
+        setCallProgress(0);
+        if (callTimerRef.current) {
+          clearInterval(callTimerRef.current);
+          callTimerRef.current = null;
+        }
+      }
+    }
+  }, [hasMore, loadingMore, loadMoreMessages, isHoldingTop]);
+
   const triggerCall = () => {
     if (otherUserId && chatId) {
       initiateCall([otherUserId], chatId);
@@ -630,7 +646,6 @@ export default function ChatDetailScreen() {
   // Focus input when quoted message changes
   useEffect(() => {
     if (quotedMessage) {
-      // Small delay to ensure the UI has updated
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 100);
@@ -669,6 +684,33 @@ export default function ChatDetailScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={90}
     >
+      {/* Call hover animation overlay */}
+      {isHoldingTop && (
+        <View style={styles.callHoverContainer}>
+          <View style={styles.callIconWrapper}>
+            <Svg width="80" height="80" viewBox="0 0 80 80" style={styles.circularProgress}>
+              <Circle cx="40" cy="40" r="36" stroke="#333" strokeWidth="4" fill="none" />
+              <Circle
+                cx="40"
+                cy="40"
+                r="36"
+                stroke="#4ADDAE"
+                strokeWidth="4"
+                fill="none"
+                strokeDasharray={`${2 * Math.PI * 36}`}
+                strokeDashoffset={`${2 * Math.PI * 36 * (1 - callProgress)}`}
+                strokeLinecap="round"
+                transform="rotate(-90 40 40)"
+              />
+            </Svg>
+            <Ionicons name="call" size={32} color={callProgress >= 1 ? "#4ADDAE" : "#fff"} />
+          </View>
+          <Text style={styles.callHoverText}>
+            {callProgress >= 1 ? "Calling..." : "Hold to Call"}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButtonContainer}>
           <Text style={styles.backButton}>←</Text>
@@ -687,7 +729,7 @@ export default function ChatDetailScreen() {
         <View style={styles.callButtonsContainer}>
           <TouchableOpacity onPress={() => {
             if (otherUserId && chatId) {
-              initiateCall([otherUserId], chatId, false); // Audio call
+              initiateCall([otherUserId], chatId, false);
             } else {
               Alert.alert("Error", "Cannot initiate call right now.");
             }
@@ -696,7 +738,7 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => {
             if (otherUserId && chatId) {
-              initiateCall([otherUserId], chatId, true); // Video call
+              initiateCall([otherUserId], chatId, true);
             } else {
               Alert.alert("Error", "Cannot initiate video call right now.");
             }
@@ -718,6 +760,8 @@ export default function ChatDetailScreen() {
         maxToRenderPerBatch={10}
         windowSize={10}
         removeClippedSubviews={Platform.OS === 'android'}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         onEndReached={hasMore && !loadingMore && messages.length > 0 ? loadMoreMessages : null}
         onEndReachedThreshold={0.5}
         ListHeaderComponent={renderHeader}
@@ -773,10 +817,7 @@ export default function ChatDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#151718',
-  },
+  container: { flex: 1, backgroundColor: '#151718' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -785,49 +826,17 @@ const styles = StyleSheet.create({
     borderBottomColor: '#333',
     backgroundColor: '#1a1a1a',
   },
-  backButtonContainer: {
-    marginRight: 12,
-  },
-  backButton: {
-    fontSize: 24,
-    color: '#007AFF',
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  statusText: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  onlineStatus: {
-    color: '#34C759',
-  },
-  offlineStatus: {
-    color: '#8E8E93',
-  },
-  webCallButton: {
-    padding: 8,
-    marginLeft: 12,
-  },
-  callButtonsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  callButton: {
-    padding: 8,
-  },
-  messagesList: {
-    flex: 1,
-  },
-  messagesContainer: {
-    padding: 16,
-    paddingTop: 8,
-  },
-  dateSeparator: {
-    alignItems: 'center',
-    marginVertical: 12,
-  },
+  backButtonContainer: { marginRight: 12 },
+  backButton: { fontSize: 24, color: '#007AFF' },
+  headerInfo: { flex: 1 },
+  statusText: { fontSize: 12, marginTop: 2 },
+  onlineStatus: { color: '#34C759' },
+  offlineStatus: { color: '#8E8E93' },
+  callButtonsContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  callButton: { padding: 8 },
+  messagesList: { flex: 1 },
+  messagesContainer: { padding: 16, paddingTop: 8 },
+  dateSeparator: { alignItems: 'center', marginVertical: 12 },
   dateSeparatorText: {
     backgroundColor: '#2b2b2b',
     color: '#aaa',
@@ -843,7 +852,7 @@ const styles = StyleSheet.create({
     padding: 10,
     paddingHorizontal: 14,
     borderRadius: 20,
-    elevation: 1, // subtle shadow for Android
+    elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -851,88 +860,31 @@ const styles = StyleSheet.create({
   },
   ownMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#005c4b', // WhatsApp Dark Mode Green
+    backgroundColor: '#005c4b',
     borderBottomRightRadius: 4,
   },
   otherMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#202c33', // WhatsApp Dark Mode Gray
+    backgroundColor: '#202c33',
     borderBottomLeftRadius: 4,
   },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  ownMessageText: {
-    color: '#e9edef',
-  },
-  otherMessageText: {
-    color: '#e9edef',
-  },
-  senderNameText: {
-    color: '#4ADDAE',
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  timestamp: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  ownTimestamp: {
-    color: '#e0e0e0',
-    textAlign: 'right',
-  },
-  otherTimestamp: {
-    color: '#aaa',
-  },
-  timestampContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  readStatus: {
-    fontSize: 12,
-    marginLeft: 8,
-  },
-  readStatusBlue: {
-    color: '#34B7F1',
-  },
-  readStatusGray: {
-    color: '#e0e0e0',
-  },
-  editedText: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  ownEditedText: {
-    color: '#e0e0e0',
-  },
-  otherEditedText: {
-    color: '#999',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 8,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#202c33',
-    backgroundColor: '#1f2c34', // WhatsApp dark mode input bg
-    alignItems: 'flex-end',
-  },
-  inputContainerWithReply: {
-    flexDirection: 'column',
-    padding: 8,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#202c33',
-    backgroundColor: '#1f2c34',
-    alignItems: 'stretch',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  messageText: { fontSize: 15, lineHeight: 20 },
+  ownMessageText: { color: '#e9edef' },
+  otherMessageText: { color: '#e9edef' },
+  senderNameText: { color: '#4ADDAE', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  timestamp: { fontSize: 12, marginTop: 4 },
+  ownTimestamp: { color: '#e0e0e0', textAlign: 'right' },
+  otherTimestamp: { color: '#aaa' },
+  timestampContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  readStatus: { fontSize: 12, marginLeft: 8 },
+  readStatusBlue: { color: '#34B7F1' },
+  readStatusGray: { color: '#e0e0e0' },
+  editedText: { fontSize: 12, marginTop: 2 },
+  ownEditedText: { color: '#e0e0e0' },
+  otherEditedText: { color: '#999' },
+  inputContainer: { flexDirection: 'row', padding: 8, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: '#202c33', backgroundColor: '#1f2c34', alignItems: 'flex-end' },
+  inputContainerWithReply: { flexDirection: 'column', padding: 8, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: '#202c33', backgroundColor: '#1f2c34', alignItems: 'stretch' },
+  inputRow: { flexDirection: 'row', alignItems: 'center' },
   input: {
     flex: 1,
     borderWidth: 0,
@@ -943,14 +895,11 @@ const styles = StyleSheet.create({
     marginRight: 8,
     maxHeight: 120,
     color: '#e9edef',
-    backgroundColor: '#2a3942', // WhatsApp dark mode input field inside
+    backgroundColor: '#2a3942',
     fontSize: 16,
   },
-  inputWithReply: {
-    marginTop: 8,
-  },
   sendButton: {
-    backgroundColor: '#00a884', // WhatsApp dark mode teal
+    backgroundColor: '#00a884',
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -958,120 +907,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 2,
   },
-  sendButtonDisabled: {
-    backgroundColor: '#3b4a54',
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  callHoverContainer: {
-    position: 'absolute',
-    top: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 100,
-    pointerEvents: 'none',
-  },
-  callIconWrapper: {
-    width: 80,
-    height: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 40,
-  },
-  circularProgress: {
-    position: 'absolute',
-  },
-  callHoverText: {
-    color: '#fff',
-    marginTop: 12,
-    fontWeight: 'bold',
-    fontSize: 14,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  sendButtonTextDisabled: {
-    color: '#8b9a9f',
-  },
-  loadingMoreContainer: {
-    padding: 12,
-    alignItems: 'center',
-  },
-  loadingMoreText: {
-    color: '#8E8E93',
-    fontSize: 12,
-  },
-  // Reply Preview Styles
-  replyPreviewContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a3942',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-  },
-  replyPreviewLine: {
-    width: 3,
-    height: '100%',
-    backgroundColor: '#4ADDAE',
-    borderRadius: 2,
-    marginRight: 12,
-  },
-  replyPreviewContent: {
-    flex: 1,
-  },
-  replyPreviewName: {
-    color: '#4ADDAE',
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  replyPreviewText: {
-    color: '#aaa',
-    fontSize: 14,
-  },
-  cancelReplyButton: {
-    padding: 4,
-  },
-  // Quoted Message in Bubble Styles
-  quotedMessageContainer: {
-    borderLeftWidth: 3,
-    paddingLeft: 8,
-    marginBottom: 6,
-  },
-  ownQuotedMessage: {
-    borderLeftColor: '#4ADDAE',
-  },
-  otherQuotedMessage: {
-    borderLeftColor: '#4ADDAE',
-  },
-  quotedMessageName: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  ownQuotedName: {
-    color: '#4ADDAE',
-  },
-  otherQuotedName: {
-    color: '#4ADDAE',
-  },
-  quotedMessageText: {
-    fontSize: 13,
-  },
-  ownQuotedText: {
-    color: '#a8c7bb',
-  },
-  otherQuotedText: {
-    color: '#aaa',
-  },
+  sendButtonDisabled: { backgroundColor: '#3b4a54' },
+  sendButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  sendButtonTextDisabled: { color: '#8b9a9f' },
+  callHoverContainer: { position: 'absolute', top: 100, left: 0, right: 0, alignItems: 'center', zIndex: 100, pointerEvents: 'none' },
+  callIconWrapper: { width: 80, height: 80, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 40 },
+  circularProgress: { position: 'absolute' },
+  callHoverText: { color: '#fff', marginTop: 12, fontWeight: 'bold', fontSize: 14, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 16, paddingVertical: 4, borderRadius: 12, overflow: 'hidden' },
+  loadingMoreContainer: { padding: 12, alignItems: 'center' },
+  loadingMoreText: { color: '#8E8E93', fontSize: 12 },
+  replyPreviewContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a3942', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, marginBottom: 8 },
+  replyPreviewLine: { width: 3, height: '100%', backgroundColor: '#4ADDAE', borderRadius: 2, marginRight: 12 },
+  replyPreviewContent: { flex: 1 },
+  replyPreviewName: { color: '#4ADDAE', fontSize: 12, fontWeight: 'bold', marginBottom: 2 },
+  replyPreviewText: { color: '#aaa', fontSize: 14 },
+  cancelReplyButton: { padding: 4 },
+  quotedMessageContainer: { borderLeftWidth: 3, paddingLeft: 8, marginBottom: 6 },
+  ownQuotedMessage: { borderLeftColor: '#4ADDAE' },
+  otherQuotedMessage: { borderLeftColor: '#4ADDAE' },
+  quotedMessageName: { fontSize: 12, fontWeight: 'bold', marginBottom: 2 },
+  ownQuotedName: { color: '#4ADDAE' },
+  otherQuotedName: { color: '#4ADDAE' },
+  quotedMessageText: { fontSize: 13 },
+  ownQuotedText: { color: '#a8c7bb' },
+  otherQuotedText: { color: '#aaa' },
 });
 

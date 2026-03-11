@@ -45,10 +45,6 @@ export const get = async (url: string) => {
 };
 
 export const post = async (url: string, data: any) => {
-  if (data && data.method === 'DELETE') {
-    const response = await api.delete(url);
-    return response.data;
-  }
   const response = await api.post(url, data);
   return response.data;
 };

@@ -60,7 +60,6 @@ io.on('connection', (socket) => {
     const User = require('./models/User');
 
     // Require Chat model here to avoid circular dependencies
-    // This is needed for the lastMessage update in 'new message' handler
     const Chat = require('./models/Chat');
 
     console.log('A user connected via socket.');
@@ -138,12 +137,22 @@ io.on('connection', (socket) => {
             // Get sender details for lastMessage
             const senderDoc = await User.findById(newMessageReceived.sender).select('name username profilePicture');
 
+            // ========================================================================
+            // FIX EXPLANATION:
+            // The Chat model's lastMessage.sender field is defined as:
+            //   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+            // 
+            // This means MongoDB expects an ObjectId (reference), NOT a plain object.
+            // Solution: Store sender as ObjectId in the database, then fetch the
+            // populated data separately for the socket event.
+            // ========================================================================
+
             // STEP 1: Update chat's lastMessage with sender as ObjectId reference
             await Chat.findByIdAndUpdate(newMessageReceived.chat, {
                 lastMessage: {
                     text: newMessageReceived.bodyText || newMessageReceived.content || (newMessageReceived.attachments && newMessageReceived.attachments.length ? 'Attachment' : ''),
                     createdAt: message.createdAt,
-                    sender: message.sender._id
+                    sender: message.sender._id // IMPORTANT: Store as ObjectId, not object
                 },
                 updatedAt: new Date()
             });
@@ -185,14 +194,11 @@ io.on('connection', (socket) => {
             // ========================================================================
             // Emit conversationUpdated event to both users (sender and receiver)
             // This is the key to real-time chat list updates!
-            // 
-            // The frontend listens for 'conversationUpdated' and updates the
-            // chat list without needing to refetch from the server.
             // ========================================================================
 
             const conversationUpdate = {
                 conversationId: newMessageReceived.chat,
-                lastMessage: lastMessageForSocket, // Now has proper sender data!
+                lastMessage: lastMessageForSocket,
                 updatedAt: new Date().toISOString(),
                 senderId: newMessageReceived.sender,
                 isNewMessage: true
@@ -233,7 +239,6 @@ io.on('connection', (socket) => {
 
     // Handle real-time delivery receipts (Double Gray Ticks)
     socket.on('message delivered', async (data) => {
-        // data should contain { messageId, chatId, senderId, receiverId }
         try {
             const Message = require('./models/Message');
             const toObjectId = require('mongoose').Types.ObjectId;
@@ -271,7 +276,6 @@ io.on('connection', (socket) => {
 
     // Handle incoming WebRTC offer
     socket.on('webrtc-offer', (data) => {
-        // data expects: { targetId, offer, callerId, chatId }
         console.log('Forwarding webrtc-offer to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-offer', {
             offer: data.offer,
@@ -282,7 +286,6 @@ io.on('connection', (socket) => {
 
     // Handle incoming WebRTC answer
     socket.on('webrtc-answer', (data) => {
-        // data expects: { targetId, answer, responderId }
         console.log('Forwarding webrtc-answer to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-answer', {
             answer: data.answer,
@@ -292,7 +295,6 @@ io.on('connection', (socket) => {
 
     // Handle incoming ICE Candidate for WebRTC
     socket.on('webrtc-candidate', (data) => {
-        // data expects: { targetId, candidate, senderId }
         console.log('Forwarding webrtc-candidate to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-candidate', {
             candidate: data.candidate,
@@ -302,7 +304,6 @@ io.on('connection', (socket) => {
 
     // Handle ending or declining a call
     socket.on('end-call', (data) => {
-        // data expects: { targetId, senderId }
         socket.to(data.targetId).emit('end-call', {
             senderId: data.senderId
         });

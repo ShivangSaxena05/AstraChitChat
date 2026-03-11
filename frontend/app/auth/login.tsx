@@ -89,17 +89,18 @@ export default function LoginScreen() {
     try {
       const data = await post('/auth/login', { email, password });
       
+      // Check if 2FA is required first
       if (data.requires2FA) {
         setRequires2FA(true);
         setUserId(data.userId);
+        setLoading(false);
         return;
       }
       
+      // Otherwise, complete the login normally
       await completeLogin(data);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Login failed. Please check your credentials and try again.');
-    } finally {
-      if (!requires2FA) setLoading(false); // don't stop loading if branching to 2FA? We wait to setRequires2FA so it's fine
       setLoading(false);
     }
   };
@@ -192,3 +193,4 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
 });
+

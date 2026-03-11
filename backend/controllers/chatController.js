@@ -174,10 +174,13 @@ async function getChatMessages(req, res) {
 
     const messages = await Message.find(messageQuery)
       .populate('sender', 'name username profilePicture')
+<<<<<<< HEAD
+=======
       .populate({
         path: 'quotedMsgId',
         populate: { path: 'sender', select: 'name username profilePicture' }
       })
+>>>>>>> upstream/master
       .sort(sortOrder)
       .limit(pageSize + 1) // Fetch one extra to check if there are more
       .lean();
@@ -234,6 +237,12 @@ async function getChatMessages(req, res) {
     const responseMessages = messages.map(m => {
       const simpleReadBy = Array.isArray(m.readBy) ? m.readBy.map(r => (r.user ? r.user.toString() : r.toString())) : [];
       const simpleDeliveredTo = Array.isArray(m.deliveredTo) ? m.deliveredTo.map(r => (r.user ? r.user.toString() : r.toString())) : [];
+<<<<<<< HEAD
+      return {
+        ...m,
+        readBy: simpleReadBy,
+        deliveredTo: simpleDeliveredTo
+=======
 
       // Transform quotedMsgId (populated) to quotedMessage for frontend compatibility
       let quotedMessage = null;
@@ -250,6 +259,7 @@ async function getChatMessages(req, res) {
         readBy: simpleReadBy,
         deliveredTo: simpleDeliveredTo,
         quotedMessage: quotedMessage
+>>>>>>> upstream/master
       };
     });
 

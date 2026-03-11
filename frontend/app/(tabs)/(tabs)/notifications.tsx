@@ -30,7 +30,10 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+<<<<<<< HEAD
+=======
   const [followRequestsCount, setFollowRequestsCount] = useState(0);
+>>>>>>> upstream/master
   const router = useRouter();
 
   useEffect(() => {
@@ -40,6 +43,8 @@ export default function NotificationsScreen() {
   const fetchNotifications = async (pageNum = 1, isRefresh = false) => {
     if (pageNum === 1) {
       setHasMore(true);
+<<<<<<< HEAD
+=======
       // Fetch follow requests count
       try {
         const reqs = await get('/follow/requests');
@@ -47,6 +52,7 @@ export default function NotificationsScreen() {
       } catch (e) {
         console.log('Error fetching follow reqs:', e);
       }
+>>>>>>> upstream/master
     }
 
     try {
@@ -177,6 +183,8 @@ export default function NotificationsScreen() {
     </TouchableOpacity>
   );
 
+<<<<<<< HEAD
+=======
   const renderHeader = () => {
     if (followRequestsCount === 0) return null;
     return (
@@ -192,6 +200,7 @@ export default function NotificationsScreen() {
     );
   };
 
+>>>>>>> upstream/master
   const renderFooter = () => {
     if (!loading || !hasMore || notifications.length === 0) return null;
     return (
@@ -243,7 +252,10 @@ export default function NotificationsScreen() {
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
+<<<<<<< HEAD
+=======
         ListHeaderComponent={renderHeader}
+>>>>>>> upstream/master
         ListFooterComponent={renderFooter}
         ListEmptyComponent={renderEmpty}
         showsVerticalScrollIndicator={false}
@@ -325,6 +337,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
   },
+<<<<<<< HEAD
+=======
   followRequestBanner: {
     padding: 16,
     backgroundColor: '#111',
@@ -344,6 +358,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+>>>>>>> upstream/master
   notificationItem: {
     flexDirection: 'row',
     alignItems: 'center',

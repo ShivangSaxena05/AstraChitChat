@@ -39,6 +39,8 @@ const userSchema = new mongoose.Schema({
         maxlength: 500,
         default: ''
     },
+<<<<<<< HEAD
+=======
     location: {
         type: String,
         maxlength: 100,
@@ -53,6 +55,7 @@ const userSchema = new mongoose.Schema({
         maxlength: 20,
         default: ''
     },
+>>>>>>> upstream/master
     isOnline: {
         type: Boolean,
         default: false
@@ -60,6 +63,8 @@ const userSchema = new mongoose.Schema({
     lastSeen: {
         type: Date,
         default: null
+<<<<<<< HEAD
+=======
     },
     blockedUsers: [{
         type: mongoose.Schema.Types.ObjectId,
@@ -89,6 +94,7 @@ const userSchema = new mongoose.Schema({
     isTwoFactorEnabled: {
         type: Boolean,
         default: false
+>>>>>>> upstream/master
     }
 }, {
     timestamps: true // Adds createdAt and updatedAt fields

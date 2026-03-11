@@ -1,6 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { get, post, put } from '@/services/api';
+import { del, get, post, put } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, Share, StyleSheet, Switch, TouchableOpacity, View, useColorScheme, Modal, TextInput } from 'react-native';
@@ -173,10 +173,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               setLoading(true);
-              await fetch('http://localhost:5000/api/users/me', {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${await AsyncStorage.getItem('token')}` }
-              }); // basic fetch fallback
+              await del('/users/me');
               await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('userId');
               router.replace('/(auth)/login' as any);

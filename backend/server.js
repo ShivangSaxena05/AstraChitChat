@@ -6,11 +6,37 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// Security: Set various HTTP headers
+app.use(helmet());
+
+// Security: Rate limiting - prevent brute force attacks
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: { message: 'Too many requests from this IP, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Apply rate limiting to all routes
+app.use(limiter);
+
+// Auth routes need stricter rate limiting
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Limit to 10 login attempts per 15 minutes
+    message: { message: 'Too many login attempts, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Limit body size to prevent large payload attacks
 
 // Serve static files from the uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -47,11 +73,17 @@ app.get('/', (req, res) => {
 const server = http.createServer(app);
 
 // Attach Socket.io to the server
+// Allow multiple origins for production (Expo, web, mobile)
+const socketOrigins = process.env.SOCKET_ORIGINS 
+    ? process.env.SOCKET_ORIGINS.split(',') 
+    : ['http://localhost:8081', 'http://localhost:8082', 'exp://localhost:8081'];
+
 const io = new Server(server, {
     pingTimeout: 60000,
     cors: {
-        origin: 'http://localhost:8081', // Expo client URL
+        origin: socketOrigins,
         methods: ['GET', 'POST'],
+        credentials: true
     },
 });
 

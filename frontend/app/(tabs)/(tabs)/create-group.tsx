@@ -1,3 +1,4 @@
+import TopHeaderComponent from '@/components/TopHeaderComponent';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -129,25 +130,8 @@ export default function CreateGroupScreen() {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <ThemedText style={styles.headerTitle}>New Group</ThemedText>
-        <TouchableOpacity 
-          onPress={handleCreateGroup} 
-          disabled={loading || selectedUsers.length < 2 || groupTitle.trim() === ''}
-          style={styles.createBtn}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color="#4ADDAE" />
-          ) : (
-            <Text style={[styles.createText, (selectedUsers.length < 2 || groupTitle.trim() === '') ? styles.disabledText : null]}>
-              Create
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Top Header with back navigation */}
+      <TopHeaderComponent />
 
       {/* Group Info Input */}
       <View style={styles.inputSection}>

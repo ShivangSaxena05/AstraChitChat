@@ -1,3 +1,4 @@
+import TopHeaderComponent from '@/components/TopHeaderComponent';
 import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -313,19 +314,47 @@ export default function ChatDetailScreen() {
       if (String(messageChatId) === String(chatId)) {
         const messageId = message._id;
         
-        if (messageIdsRef.current.has(messageId)) {
-          console.log('Chat detail: Duplicate message ignored:', messageId);
+        // Debug: log the message to see if quotedMessage is included
+        console.log('Message received:', {
+          _id: messageId,
+          quotedMsgId: message.quotedMsgId,
+          quotedMessage: message.quotedMessage
+        });
+        
+        // ✅ FIXED: Robust duplicate prevention + validation
+        if (typeof messageId !== 'string' || messageIdsRef.current.has(messageId)) {
+          console.log('Chat detail: Duplicate/invalid message ignored:', messageId);
           return;
+        }
+
+        // Sanitize incoming quotedMessage bodyText (XSS prevention)
+        let finalMessage: Message = { ...message };
+        if (message.quotedMessage) {
+          finalMessage.quotedMessage = {
+            ...message.quotedMessage,
+            bodyText: sanitizeMessage(message.quotedMessage.bodyText || '')
+          };
+        } else if (message.quotedMsgId) {
+          // Fallback: try local lookup (defensive)
+          const quotedMsg = messages.find(m => String(m._id) === String(message.quotedMsgId));
+          if (quotedMsg) {
+            finalMessage.quotedMessage = {
+              _id: quotedMsg._id,
+              bodyText: sanitizeMessage(quotedMsg.bodyText || quotedMsg.content || ''),
+              sender: quotedMsg.sender
+            };
+          }
         }
         
         messageIdsRef.current.add(messageId);
         
+        // Immutable update w/ explicit dedup check
         setMessages(prev => {
           if (prev.some(m => m._id === messageId)) {
+            console.log('State dedup: Message already exists:', messageId);
             return prev;
           }
-          const updated = [...prev, message];
-          return updated;
+          return [...prev, finalMessage];
         });
 
         if (message.sender._id !== currentUserId) {
@@ -442,21 +471,28 @@ export default function ChatDetailScreen() {
       
       const data = await get(`/chats/${chatId}/messages?${queryParams}`);
       
-      if (data.messages && data.messages.length > 0) {
-        data.messages.forEach((msg: Message) => {
+      // Process messages to ensure quotedMessage is properly set
+      const processedMessages = (data.messages || []).map((msg: Message) => {
+        // If quotedMessage is missing but quotedMsgId exists, we need to handle it
+        // For now, just return as-is since the backend should populate it
+        return msg;
+      });
+      
+      if (processedMessages.length > 0) {
+        processedMessages.forEach((msg: Message) => {
           messageIdsRef.current.add(msg._id);
         });
       }
       
       if (isLoadMore) {
         setMessages(prevMessages => {
-          const updatedMessages = [...data.messages, ...prevMessages];
+          const updatedMessages = [...processedMessages, ...prevMessages];
           setGroupedMessages(groupMessagesByDate(updatedMessages));
           return updatedMessages;
         });
       } else {
-        setMessages(data.messages);
-        setGroupedMessages(groupMessagesByDate(data.messages));
+        setMessages(processedMessages);
+        setGroupedMessages(groupMessagesByDate(processedMessages));
       }
       
       setHasMore(data.hasMore !== false);
@@ -507,94 +543,73 @@ export default function ChatDetailScreen() {
     }
   };
 
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !currentUserId || !socket || !socketConnected) return;
+const sanitizeMessage = (text: string): string => {
+  // Remove HTML tags, scripts, and dangerous characters
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
+    .replace(/'/g, '&#x27;')
+    .replace(/`/g, '&#x60;')
+    .trim();
+};
 
-    try {
-      // Create temporary message ID for optimistic UI
-      const tempId = `temp_${Date.now()}`;
-      
-      // Store the quoted message data for immediate display
-      const quotedMsgData = quotedMessage ? {
-        _id: quotedMessage._id,
-        bodyText: quotedMessage.bodyText || quotedMessage.content,
-        sender: quotedMessage.sender
-      } : null;
+const sendMessage = async () => {
+  const sanitizedText = sanitizeMessage(newMessage);
+  if (!sanitizedText || !currentUserId || !socket || !socketConnected) return;
 
-      const messageData: any = {
-        sender: currentUserId,
-        receiver: otherUserId,
-        chat: chatId,
-        bodyText: newMessage.trim(),
-        content: newMessage.trim(),
-        msgType: 'text'
-      };
+  try {
+    const messageData: any = {
+      sender: currentUserId,
+      receiver: otherUserId,
+      chat: chatId,
+      bodyText: sanitizedText,
+      content: sanitizedText,
+      msgType: 'text'
+    };
 
-      // Add quoted message ID if replying to a message
-      if (quotedMessage) {
-        messageData.quotedMsgId = quotedMessage._id;
-      }
+    // Validate quoted message
+    if (quotedMessage && quotedMessage._id) {
+      messageData.quotedMsgId = quotedMessage._id;
+    }
 
-      socket.emit('new message', messageData);
+    socket.emit('new message', messageData);
 
-      // Immediately add message to local state with quotedMessage for instant display
-      const newMsg = {
-        _id: tempId,
+    // Clear quoted message after sending
+    setQuotedMessage(null);
+    
+    updateConversation({
+      conversationId: chatId,
+      lastMessage: {
+        text: sanitizedText,
+        createdAt: new Date().toISOString(),
         sender: {
           _id: currentUserId,
           username: 'You',
           profilePicture: ''
-        },
-        receiver: {
-          _id: otherUserId,
-          username: otherUsername,
-          profilePicture: ''
-        },
-        chat: chatId,
-        msgType: 'text',
-        bodyText: newMessage.trim(),
-        content: newMessage.trim(),
-        createdAt: new Date().toISOString(),
-        readBy: [currentUserId],
-        deliveredTo: [currentUserId],
-        quotedMsgId: quotedMessage ? quotedMessage._id : undefined,
-        quotedMessage: quotedMsgData
-      };
-      
-      // Add message to local state immediately
-      setMessages(prev => [...prev, newMsg]);
-      messageIdsRef.current.add(tempId);
+        }
+      },
+      updatedAt: new Date().toISOString(),
+      senderId: currentUserId,
+      isNewMessage: true
+    });
 
-      // Clear quoted message after sending
-      setQuotedMessage(null);
-      
-      updateConversation({
-        conversationId: chatId,
-        lastMessage: {
-          text: newMessage.trim(),
-          createdAt: new Date().toISOString(),
-          sender: {
-            _id: currentUserId,
-            username: 'You',
-            profilePicture: ''
-          }
-        },
-        updatedAt: new Date().toISOString(),
-        senderId: currentUserId,
-        isNewMessage: true
-      });
-
-      setNewMessage('');
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      socket.emit('stop typing', chatId);
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to send message');
-    }
-  };
+    setNewMessage('');
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    socket.emit('stop typing', chatId);
+  } catch (error: any) {
+    console.error('Send message failed:', error);
+    Alert.alert('Error', 'Failed to send message');
+  }
+};
 
   const handleTyping = (text: string) => {
-    setNewMessage(text);
-    if (!socketConnected || !socket) return;
+    // Sanitize on every keystroke for safety (lightweight)
+    const sanitized = sanitizeMessage(text);
+    setNewMessage(sanitized);
+    
+    if (!socketConnected || !socket || sanitized.length === 0) return;
     
     socket.emit('typing', chatId);
 
@@ -749,42 +764,8 @@ export default function ChatDetailScreen() {
         </View>
       )}
 
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButtonContainer}>
-          <Text style={styles.backButton}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <ThemedText type="subtitle">{otherUsername}</ThemedText>
-          <Text style={[
-            styles.statusText,
-            (otherUserTyping || otherUserStatus.isOnline) ? styles.onlineStatus : styles.offlineStatus
-          ]}>
-            {otherUserTyping ? 'typing...' : (otherUserStatus.isOnline ? 'Online' : formatLastSeen(otherUserStatus.lastSeen))}
-          </Text>
-        </View>
-
-        {/* Call Buttons */}
-        <View style={styles.callButtonsContainer}>
-          <TouchableOpacity onPress={() => {
-            if (otherUserId && chatId) {
-              initiateCall([otherUserId], chatId, false);
-            } else {
-              Alert.alert("Error", "Cannot initiate call right now.");
-            }
-          }} style={styles.callButton}>
-            <Ionicons name="call" size={24} color="#4ADDAE" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            if (otherUserId && chatId) {
-              initiateCall([otherUserId], chatId, true);
-            } else {
-              Alert.alert("Error", "Cannot initiate video call right now.");
-            }
-          }} style={styles.callButton}>
-            <Ionicons name="videocam" size={24} color="#4ADDAE" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Top Header - now includes username switcher and back navigation */}
+      <TopHeaderComponent />
 
       <FlatList
         ref={flatListRef}

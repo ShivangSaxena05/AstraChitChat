@@ -65,7 +65,7 @@ export default function SignupScreen() {
         await AsyncStorage.setItem('saved_accounts', JSON.stringify(updatedAccounts));
       }
       await connect();
-      router.replace('/(tabs)');
+      router.replace('/(tabs)' as any);
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Signup failed');
     } finally {

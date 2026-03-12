@@ -1,28 +1,24 @@
-# TODO: Fix Chat and Calling Features - COMPLETED
+# Chat System Production Audit - IMPLEMENTATION TRACKER
 
-## Chat Detail (detail.tsx) Bugs - ✅ FIXED
-- [x] 1. Fix socket event listener registration for message delivery receipts
-- [x] 2. Fix read receipts logic 
-- [x] 3. Fix loading state with stale closure
-- [x] 4. Clear typing timeout on unmount
+## Status: ✅ Plan Approved - Starting Critical Fixes
 
-## Call Context (CallContext.tsx) Bugs - ✅ FIXED
-- [x] 5. Fix toggleMute inverted logic
-- [x] 6. Add proper audio routing for speaker
-- [x] 7. Fix cleanup race conditions
-- [x] 8. Add video call UI support
+**Current Progress: 2/15 files**
 
-## UI Improvements - ✅ COMPLETED
-- [x] 9. Add video call button alongside audio call
-- [x] 10. Improve chat header styling
+✅ frontend/app/chat/detail.tsx - Security hardening complete
+✅ frontend/contexts/SocketContext.tsx - Socket validation + reconnect
 
-## Bug Report - Comprehensive Review - ✅ COMPLETED
-- [x] 11. Comprehensive bug and error check across entire project
-- [x] 12. Fixed Critical Issues:
-    - Login Flow (git merge conflicts)
-    - Chat Detail Missing Props  
-    - API Service DELETE handling
-    - Server.js Socket Handler
-- [x] 13. Fixed High Priority Issues:
-    - Profile Screen duplicate rendering
+## Critical Security Fixes (Priority 1 - START HERE)
+- [ ] frontend/app/chat/detail.tsx - Input sanitization + dedup
+- [ ] frontend/contexts/SocketContext.tsx - Message validation + retry
+- [ ] backend/server.js - Socket input validation
+- [ ] backend/controllers/chatController.js - Query optimization + Joi
+- [ ] backend/models/Message.js - Add compound indexes
+
+## Performance Fixes (Priority 2)
+- [ ] ...
+*(Will update as completed)*
+
+**Next: Execute security fixes first. Run `npx expo start --clear` after frontend changes.**
+
+**Completed Steps: None yet**
 

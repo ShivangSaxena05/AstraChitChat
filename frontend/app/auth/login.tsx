@@ -56,7 +56,7 @@ export default function LoginScreen() {
     await connect();
     
     // Navigate only after storage operations complete
-    router.replace('/(tabs)');
+    router.replace('/(tabs)' as any);
   };
 
   const handleLogin = async () => {

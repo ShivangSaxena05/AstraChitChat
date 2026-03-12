@@ -81,48 +81,56 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   // without needing to refetch from the server.
   // ========================================================================
   
-  const updateConversation = useCallback((update: ConversationUpdate) => {
-    console.log('Socket: Received conversation update:', update);
+  // ✅ SECURITY: Input validation for conversation updates
+  const validateConversationUpdate = (update: any): update is ConversationUpdate => {
+    return update &&
+      typeof update.conversationId === 'string' &&
+      update.lastMessage &&
+      typeof update.lastMessage.text === 'string' &&
+      typeof update.lastMessage.createdAt === 'string' &&
+      update.lastMessage.sender &&
+      typeof update.senderId === 'string' &&
+      update.lastMessage.text.length < 1000; // Prevent oversized payloads
+  };
+
+  const updateConversation = useCallback((rawUpdate: any) => {
+    if (!validateConversationUpdate(rawUpdate)) {
+      console.warn('Socket: Invalid conversation update rejected:', rawUpdate);
+      return;
+    }
+
+    console.log('Socket: Validated conversation update:', rawUpdate);
     
     setConversations(prevConversations => {
-      const conversationId = update.conversationId;
+      const conversationId = rawUpdate.conversationId;
       const existingIndex = prevConversations.findIndex(c => 
         String(c._id) === String(conversationId)
       );
 
-      const senderObj = update.lastMessage?.sender;
+      const senderObj = rawUpdate.lastMessage?.sender;
       let senderInfo = senderObj;
       if (!senderObj || typeof senderObj !== 'object' || !senderObj.username) {
-        // Fallback: If the backend hasn't been updated with populated sender info yet,
-        // we construct a generic UI placeholder instead of aborting the fast update
-        // and relying on a network refetch which could be stale.
         console.log('Socket: Missing populated sender info, constructing synthetic fallback...');
         senderInfo = {
-          _id: update.senderId || 'unknown',
-          username: 'New Message', // Generic fallback
+          _id: rawUpdate.senderId || 'unknown',
+          username: 'New Message',
           profilePicture: ''
         };
       }
 
-      // Create updated lastMessage object
       const updatedLastMessage = {
-        text: update.lastMessage?.text || 'Sent an attachment',
-        createdAt: update.lastMessage?.createdAt || update.updatedAt || new Date().toISOString(),
+        text: rawUpdate.lastMessage.text || 'Sent an attachment',
+        createdAt: rawUpdate.lastMessage.createdAt || rawUpdate.updatedAt || new Date().toISOString(),
         sender: senderInfo
       };
 
       if (existingIndex >= 0) {
-        // Update existing conversation
         const updated = [...prevConversations];
         const currentChat = updated[existingIndex];
         
-        // Calculate unread count
-        // If sender is NOT me AND I am NOT actively viewing this chat, increment unread count
         let newUnreadCount = currentChat.unreadCount || 0;
-        
-        // Ensure proper string comparison for IDs
         const currentUserIdStr = currentUserIdRef.current ? String(currentUserIdRef.current) : '';
-        const senderIdStr = update.senderId ? String(update.senderId) : '';
+        const senderIdStr = rawUpdate.senderId ? String(rawUpdate.senderId) : '';
         
         const isFromMe = senderIdStr === currentUserIdStr;
         const isViewingChat = activeChatIdRef.current === String(conversationId);
@@ -135,10 +143,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           ...currentChat,
           lastMessage: updatedLastMessage,
           unreadCount: newUnreadCount,
-          updatedAt: update.updatedAt || new Date().toISOString()
+          updatedAt: rawUpdate.updatedAt || new Date().toISOString()
         };
         
-        // Re-sort by most recent
         updated.sort((a, b) => {
           const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
           const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
@@ -147,9 +154,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         
         return updated;
       } else {
-        // New conversation detected - fetch updated list to ensure consistency
         console.log('Socket: New conversation detected, fetching list...');
-        // We can't construct the full chat object just from the update event
         get('/chats').then(data => {
           if (data && data.chats) {
             const sorted = data.chats.sort((a: any, b: any) => {
@@ -157,7 +162,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
               const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
               return bTime - aTime;
             });
-            // Force completely new array reference to ensure React triggers a re-render
             setConversations([...sorted]);
           }
         }).catch(err => console.error('Failed to fetch new conversation:', err));
@@ -181,8 +185,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, [socket, updateConversation]);
 
+  // ✅ FIXED: Robust reconnect + validation
   const connect = useCallback(async (force = false) => {
-    // Prevent multiple socket initializations unless forced (e.g., account switch)
     if (socketRef.current && !force) return;
 
     if (force && socketRef.current) {
@@ -195,8 +199,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       const token = await AsyncStorage.getItem('token');
       const userId = await AsyncStorage.getItem('userId');
       
-      if (!token || !userId) {
-        console.log('Socket: No token or userId, skipping initialization');
+      if (!token || !userId || typeof userId !== 'string') {
+        console.log('Socket: Invalid auth, skipping');
         return;
       }
 
@@ -206,32 +210,45 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         auth: { token },
         transports: ['websocket'],
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10, // ✅ Increased attempts
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        forceNew: force
       });
 
       socketRef.current = newSocket;
 
       newSocket.on('connect', () => {
-        console.log('Socket: Connected to server');
+        console.log('Socket: ✅ Connected (attempts:', newSocket.io.opts.reconnectionAttempts, ')');
         setIsConnected(true);
-        // Join user's personal room
         newSocket.emit('setup', { _id: userId });
       });
 
-      newSocket.on('disconnect', () => {
-        console.log('Socket: Disconnected from server');
+      newSocket.on('disconnect', (reason) => {
+        console.log('Socket: Disconnected:', reason);
         setIsConnected(false);
       });
 
       newSocket.on('connect_error', (error) => {
-        console.error('Socket: Connection error:', error.message);
+        console.error('Socket: ❌ Connect error:', error.message);
         setIsConnected(false);
+      });
+
+      // ✅ NEW: Reconnection events
+      newSocket.on('reconnect', (attempts) => {
+        console.log('Socket: 🔄 Reconnected after', attempts, 'attempts');
+        setIsConnected(true);
+        newSocket.emit('setup', { _id: userId });
+      });
+
+      newSocket.on('reconnect_error', (error) => {
+        console.error('Socket: Reconnect failed:', error.message);
       });
 
       setSocket(newSocket);
     } catch (error) {
-      console.error('Socket: Initialization error:', error);
+      console.error('Socket: Init failed:', error);
     }
   }, []);
 

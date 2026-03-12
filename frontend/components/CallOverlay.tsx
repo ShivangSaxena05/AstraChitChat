@@ -42,7 +42,7 @@ export default function CallOverlay() {
             <TouchableOpacity style={[styles.actionBtn, styles.declineBtn]} onPress={declineCall}>
               <Ionicons name="close" size={32} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={acceptCall}>
+            <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => acceptCall()}>
               <Ionicons name="call" size={32} color="#fff" />
             </TouchableOpacity>
           </View>

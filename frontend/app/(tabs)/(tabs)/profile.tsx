@@ -1,3 +1,4 @@
+import TopHeaderComponent from '@/components/TopHeaderComponent';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
@@ -42,6 +43,7 @@ export default function ProfileScreen() {
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
+
 
   useFocusEffect(
     React.useCallback(() => {
@@ -210,14 +212,28 @@ export default function ProfileScreen() {
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity 
+            style={styles.stat}
+            onPress={() => router.push({
+              pathname: 'followers-list',
+              params: { userId: user._id, username: user.username, type: 'followers' }
+            })}
+            activeOpacity={0.7}
+          >
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.stat}
+            onPress={() => router.push({
+              pathname: 'followers-list',
+              params: { userId: user._id, username: user.username, type: 'following' }
+            })}
+            activeOpacity={0.7}
+          >
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
-          </View>
+          </TouchableOpacity>
           {user.stats.posts > 0 && (
             <View style={styles.stat}>
               <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
@@ -279,6 +295,9 @@ export default function ProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* Top Header with username switcher */}
+      <TopHeaderComponent />
+      
       <Animated.View style={[styles.coverPhotoContainer, { transform: [{ translateY: headerTranslateY }] }]}>
         {user.coverPhoto ? (
           <Animated.Image source={{ uri: user.coverPhoto }} style={[styles.coverPhotoImage, { transform: [{ scale: imageScale }] }]} />
@@ -294,7 +313,7 @@ export default function ProfileScreen() {
         keyExtractor={(item: UserPost) => item._id}
         numColumns={3}
         style={styles.grid}
-        contentContainerStyle={{ paddingTop: HEADER_MAX_HEIGHT }}
+        contentContainerStyle={{ paddingTop: HEADER_MAX_HEIGHT + 60 }} // Account for TopHeader height
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
         scrollEventThrottle={16}

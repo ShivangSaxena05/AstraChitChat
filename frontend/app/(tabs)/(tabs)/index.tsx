@@ -70,97 +70,24 @@ export default function HomeScreen() {
 
   // Tab state & User state
   const [activeTab, setActiveTab] = useState<'flicks' | 'explore'>('flicks');
-  const [currentUsername, setCurrentUsername] = useState<string>('User');
-  
-  // Account Switcher State
-  const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
-  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
-  
-  // Flicks state
+
+  // Content state
   const [flicks, setFlicks] = useState<Flick[]>([]);
   const [flicksLoading, setFlicksLoading] = useState(true);
   const [flicksRefreshing, setFlicksRefreshing] = useState(false);
-  const [currentVisibleIndex, setCurrentVisibleIndex] = useState<number | null>(null);
-  const [likedFlicks, setLikedFlicks] = useState<Set<string>>(new Set());
-  const videoRefs = useRef<{ [key: string]: Video }>({});
-
-  // Explore state
   const [posts, setPosts] = useState<Post[]>([]);
-  const [exploreLoading, setExploreLoading] = useState(false);
+  const [exploreLoading, setExploreLoading] = useState(true);
   const [exploreRefreshing, setExploreRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [currentVisibleIndex, setCurrentVisibleIndex] = useState<number | null>(null);
+  const [likedFlicks, setLikedFlicks] = useState<Set<string>>(new Set());
+  const videoRefs = useRef<Record<string, Video | null>>({});
 
   // Initial load
   useEffect(() => {
     fetchFlicks();
-    fetchUserProfile();
   }, []);
-
-  // Fetch User Profile for header
-  const fetchUserProfile = async () => {
-    try {
-      const data = await get('/profile/me');
-      if (data && data.user && data.user.username) {
-        setCurrentUsername(data.user.username);
-      } else if (data && data.username) {
-        // Fallback depending on how the controller structures the response
-        setCurrentUsername(data.username);
-      }
-    } catch (error) {
-      console.log('Error fetching user profile for header:', error);
-    }
-  };
-
-  // --- MULTI-ACCOUNT LOGIC ---
-  const loadSavedAccounts = async () => {
-    try {
-      const accountsStr = await AsyncStorage.getItem('saved_accounts');
-      if (accountsStr) {
-        setSavedAccounts(JSON.parse(accountsStr));
-      }
-    } catch (error) {
-      console.error('Error loading saved accounts:', error);
-    }
-  };
-
-  const handleOpenAccountSwitcher = () => {
-    loadSavedAccounts();
-    setIsAccountModalVisible(true);
-  };
-
-  const handleSwitchAccount = async (account: SavedAccount) => {
-    try {
-      // Don't switch if already active
-      const currentUserId = await AsyncStorage.getItem('userId');
-      if (currentUserId === account.userId) {
-        setIsAccountModalVisible(false);
-        return;
-      }
-
-      // Update active session
-      await AsyncStorage.setItem('token', account.token);
-      await AsyncStorage.setItem('userId', account.userId);
-      setCurrentUsername(account.username); // Instantly update header UI
-      setIsAccountModalVisible(false);
-      
-      // Force socket to disconnect the old user and reconnect as the new user
-      await connect(true);
-      
-      Alert.alert(
-        "Account Switched", 
-        `Switched to ${account.username}`,
-        [{ text: "OK", onPress: () => router.replace('/(tabs)') }] // Quick "reload" via router replacing root
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to switch accounts');
-    }
-  };
-
-  const handleAddAccount = () => {
-    setIsAccountModalVisible(false);
-    router.push('/auth/login');
-  };
 
   // Fetch flicks
   const fetchFlicks = async (isRefresh = false) => {
@@ -405,22 +332,11 @@ export default function HomeScreen() {
   // --- MAIN RENDER ---
   return (
     <ThemedView style={styles.container}>
-      {/* Top Header */}
+      {/* Top Header - now handles username switcher */}
       <TopHeaderComponent />
 
       {/* Main Content Area */}
       <View style={styles.contentArea}>
-        
-        {/* Username Header Selector */}
-        <TouchableOpacity 
-          style={styles.usernameHeaderSelector} 
-          activeOpacity={0.7}
-          onPress={handleOpenAccountSwitcher}
-        >
-          <Text style={styles.usernameHeaderText}>{currentUsername}</Text>
-          <Ionicons name="chevron-down" size={20} color="white" style={styles.usernameHeaderIcon} />
-        </TouchableOpacity>
-
         {/* Top Tabs */}
         <View style={styles.tabContainer}>
           <TouchableOpacity 
@@ -446,8 +362,6 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-
-        {/* Tab Indicator Removed for Premium Pill Layout */}
 
         {/* Content based on active tab */}
         {activeTab === 'flicks' ? (
@@ -505,48 +419,6 @@ export default function HomeScreen() {
           </>
         )}
       </View>
-
-      {/* --- MULTI-ACCOUNT BOTTOM SHEET MODAL --- */}
-      <Modal
-        visible={isAccountModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setIsAccountModalVisible(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setIsAccountModalVisible(false)}
-        >
-          <View style={styles.bottomSheetModal}>
-            <View style={styles.modalDragIndicator} />
-            <Text style={styles.modalTitle}>Switch Account</Text>
-            
-            <FlatList
-              data={savedAccounts}
-              keyExtractor={(item) => item.userId}
-              renderItem={({ item }) => (
-                <TouchableOpacity 
-                  style={styles.accountRow}
-                  onPress={() => handleSwitchAccount(item)}
-                >
-                  <Image source={{ uri: item.profilePicture }} style={styles.accountAvatar} />
-                  <Text style={styles.accountUsername}>{item.username}</Text>
-                  {item.username === currentUsername && (
-                    <Ionicons name="checkmark-circle" size={24} color="#4ADDAE" />
-                  )}
-                </TouchableOpacity>
-              )}
-            />
-
-            <TouchableOpacity style={styles.addAccountButton} onPress={handleAddAccount}>
-              <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 10 }} />
-              <Text style={styles.addAccountText}>Add Account</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
     </ThemedView>
   );
 }

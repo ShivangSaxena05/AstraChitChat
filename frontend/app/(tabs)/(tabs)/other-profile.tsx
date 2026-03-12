@@ -406,14 +406,28 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
             <ThemedText style={styles.statLabel}>Posts</ThemedText>
           </View>
-          <View style={styles.stat}>
+          <TouchableOpacity 
+            style={styles.stat}
+            onPress={() => router.push({
+              pathname: 'followers-list',
+              params: { userId: userId, username: user.username, type: 'followers' }
+            })}
+            activeOpacity={0.7}
+          >
             <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.stat}
+            onPress={() => router.push({
+              pathname: 'followers-list',
+              params: { userId: userId, username: user.username, type: 'following' }
+            })}
+            activeOpacity={0.7}
+          >
             <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
-          </View>
+          </TouchableOpacity>
           {user.stats.posts > 0 && (
             <View style={styles.stat}>
               <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>

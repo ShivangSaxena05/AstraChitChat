@@ -210,6 +210,7 @@ export default function NotificationsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* Top Header with username switcher */}
       <TopHeaderComponent />
       
       <FlatList

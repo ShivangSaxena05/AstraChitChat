@@ -121,23 +121,57 @@ io.on('connection', (socket) => {
         console.log('User joined room: ' + room);
     });
 
-    // Handle sending messages
-    socket.on('new message', async (newMessageReceived) => {
+    // ✅ SECURITY: Validate 'new message' payload before processing
+    socket.on('new message', async (rawData) => {
         const Message = require('./models/Message');
         const mongoose = require('mongoose');
+        const User = require('./models/User');
+
+        // Validation schema (prevent DoS/malformed data)
+        const validateMessageData = (data: any) => {
+            return data &&
+                typeof data.sender === 'string' && data.sender.length === 24 && mongoose.Types.ObjectId.isValid(data.sender) &&
+                typeof data.receiver === 'string' && data.receiver.length === 24 && mongoose.Types.ObjectId.isValid(data.receiver) &&
+                typeof data.chat === 'string' && data.chat.length === 24 && mongoose.Types.ObjectId.isValid(data.chat) &&
+                (typeof data.bodyText === 'string' && data.bodyText.length <= 5000 || !data.bodyText) &&
+                (typeof data.msgType === 'string' && ['text','image','audio','video','file'].includes(data.msgType) || !data.msgType) &&
+                (Array.isArray(data.attachments) && data.attachments.length <= 10 || !data.attachments) &&
+                (!data.quotedMsgId || (typeof data.quotedMsgId === 'string' && data.quotedMsgId.length === 24 && mongoose.Types.ObjectId.isValid(data.quotedMsgId)));
+        };
+
+        if (!validateMessageData(rawData)) {
+            console.warn('Socket: Invalid new message payload rejected');
+            socket.emit('error', { message: 'Invalid message format' });
+            return;
+        }
+
+        // Quick auth check - verify sender exists (cheap query)
+        try {
+            const sender = await User.findById(rawData.sender).select('_id');
+            if (!sender) {
+                console.warn('Socket: Invalid sender:', rawData.sender);
+                socket.emit('error', { message: 'Invalid sender' });
+                return;
+            }
+        } catch (e) {
+            console.error('Sender validation failed:', e);
+            return;
+        }
 
         try {
-            // Save message to database
-            const message = await Message.create({
-                sender: newMessageReceived.sender,
-                receiver: newMessageReceived.receiver,
-                chat: newMessageReceived.chat,
-                bodyText: newMessageReceived.bodyText || newMessageReceived.content,
-                msgType: newMessageReceived.msgType || newMessageReceived.chatType || 'text',
-                attachments: newMessageReceived.attachments || [],
-                quotedMsgId: newMessageReceived.quotedMsgId ? new mongoose.Types.ObjectId(newMessageReceived.quotedMsgId) : undefined,
-                readBy: [{ user: newMessageReceived.sender, readAt: new Date() }]
-            });
+            const messageData = {
+                sender: new mongoose.Types.ObjectId(rawData.sender),
+                receiver: new mongoose.Types.ObjectId(rawData.receiver),
+                chat: new mongoose.Types.ObjectId(rawData.chat),
+                bodyText: rawData.bodyText?.trim() || rawData.content?.trim() || '',
+                msgType: rawData.msgType || rawData.chatType || 'text',
+                attachments: rawData.attachments || [],
+                quotedMsgId: rawData.quotedMsgId ? new mongoose.Types.ObjectId(rawData.quotedMsgId) : undefined,
+                readBy: [{ user: new mongoose.Types.ObjectId(rawData.sender), readAt: new Date() }]
+            };
+
+            // Create message
+            const message = await Message.create(messageData);
 
             // Populate sender, receiver, and quoted message details
             await message.populate('sender', 'name username profilePicture');

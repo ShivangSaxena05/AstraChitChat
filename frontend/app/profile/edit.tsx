@@ -147,7 +147,7 @@ export default function EditProfileScreen() {
       });
 
       Alert.alert('Success', 'Profile updated successfully!');
-      router.back(); // Go back to the profile screen
+      router.dismiss(); // Dismiss modal
     } catch (error: any) {
       console.error('Save changes error:', error);
       Alert.alert('Error', error.response?.data?.message || 'Failed to save changes.');
@@ -335,16 +335,7 @@ const styles = StyleSheet.create({
   suggestionsContainer: {
     position: 'absolute',
     top: 50, // slightly below input
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderColor: '#ccc',
-    borderWidth: 1,
-    borderRadius: 10,
-    maxHeight: 150,
-    zIndex: 1000,
-    elevation: 5, // shadow for android
-    shadowColor: '#000', // shadow for ios
+      left: 0, // shadow for ios
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,

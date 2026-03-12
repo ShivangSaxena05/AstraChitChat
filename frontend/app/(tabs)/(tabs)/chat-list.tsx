@@ -197,7 +197,7 @@ export default function ChatListScreen() {
   // --- MAIN RENDER ---
   return (
     <ThemedView style={styles.container}>
-      {/* Top Header */}
+      {/* Top Header - now includes username switcher */}
       <TopHeaderComponent />
       <SearchBarComponent />
       <StoriesReelsComponent />

@@ -1,3 +1,4 @@
+import TopHeaderComponent from '@/components/TopHeaderComponent';
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -75,12 +76,8 @@ export default function AddChatScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>←</Text>
-        </TouchableOpacity>
-        <ThemedText type="subtitle">Start New Chat</ThemedText>
-      </View>
+      {/* Top Header now handles back navigation */}
+      <TopHeaderComponent />
 
       <View style={styles.searchContainer}>
         <TextInput

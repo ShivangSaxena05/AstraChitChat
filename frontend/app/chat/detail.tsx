@@ -179,6 +179,7 @@ export default function ChatDetailScreen() {
 
   // Reply/Quote feature state
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -363,17 +364,6 @@ export default function ChatDetailScreen() {
             ...message.quotedMessage,
             bodyText: sanitizeMessage(message.quotedMessage.bodyText || '')
           };
-        } else if (message.quotedMsgId) {
-          // Fallback: try local lookup (defensive)
-          const quotedMsg = messages.find(m => String(m._id) === String(message.quotedMsgId));
-          if (quotedMsg) {
-            finalMessage.quotedMessage = {
-              _id: quotedMsg._id,
-              bodyText: sanitizeMessage(quotedMsg.bodyText || quotedMsg.content || ''),
-              sender: quotedMsg.sender,
-              msgType: quotedMsg.msgType
-            };
-          }
         }
         
         messageIdsRef.current.add(messageId);
@@ -384,7 +374,22 @@ export default function ChatDetailScreen() {
             console.log('State dedup: Message already exists:', messageId);
             return prev;
           }
-          return [...prev, finalMessage];
+
+          // Hydrate quoted message from local state if missing in incoming message
+          let msgToStore = { ...finalMessage };
+          if (msgToStore.quotedMsgId && !msgToStore.quotedMessage) {
+            const found = prev.find(m => m._id === msgToStore.quotedMsgId);
+            if (found) {
+              msgToStore.quotedMessage = {
+                _id: found._id,
+                bodyText: sanitizeMessage(found.bodyText || found.content || ''),
+                sender: found.sender,
+                msgType: found.msgType
+              };
+            }
+          }
+
+          return [...prev, msgToStore];
         });
 
         if (message.sender._id !== currentUserId) {
@@ -501,12 +506,7 @@ export default function ChatDetailScreen() {
       
       const data = await get(`/chats/${chatId}/messages?${queryParams}`);
       
-      // Process messages to ensure quotedMessage is properly set
-      const processedMessages = (data.messages || []).map((msg: Message) => {
-        // If quotedMessage is missing but quotedMsgId exists, we need to handle it
-        // For now, just return as-is since the backend should populate it
-        return msg;
-      });
+      const processedMessages = (data.messages || []);
       
       if (processedMessages.length > 0) {
         processedMessages.forEach((msg: Message) => {
@@ -516,13 +516,54 @@ export default function ChatDetailScreen() {
       
       if (isLoadMore) {
         setMessages(prevMessages => {
-          const updatedMessages = [...processedMessages, ...prevMessages];
+          // Hydrate messages using both new batch and existing messages
+          const allMessagesMap = new Map([...processedMessages, ...prevMessages].map(m => [m._id, m]));
+          
+          const hydratedNewMessages = processedMessages.map((msg: Message) => {
+            if (msg.quotedMsgId && !msg.quotedMessage) {
+              const found = allMessagesMap.get(msg.quotedMsgId);
+              if (found) {
+                return {
+                  ...msg,
+                  quotedMessage: {
+                    _id: found._id,
+                    bodyText: sanitizeMessage(found.bodyText || found.content || ''),
+                    sender: found.sender,
+                    msgType: found.msgType
+                  }
+                };
+              }
+            }
+            return msg;
+          });
+
+          const updatedMessages = [...hydratedNewMessages, ...prevMessages];
           setGroupedMessages(groupMessagesByDate(updatedMessages));
           return updatedMessages;
         });
       } else {
-        setMessages(processedMessages);
-        setGroupedMessages(groupMessagesByDate(processedMessages));
+        // Initial load hydration
+        const msgMap = new Map(processedMessages.map((m: Message) => [m._id, m]));
+        const hydratedMessages = processedMessages.map((msg: Message) => {
+          if (msg.quotedMsgId && !msg.quotedMessage) {
+            const found = msgMap.get(msg.quotedMsgId);
+            if (found) {
+              return {
+                ...msg,
+                quotedMessage: {
+                  _id: found._id,
+                  bodyText: sanitizeMessage(found.bodyText || found.content || ''),
+                  sender: found.sender,
+                  msgType: found.msgType
+                }
+              };
+            }
+          }
+          return msg;
+        });
+
+        setMessages(hydratedMessages);
+        setGroupedMessages(groupMessagesByDate(hydratedMessages));
       }
       
       setHasMore(data.hasMore !== false);
@@ -719,13 +760,17 @@ const sendMessage = async () => {
             const progress = Math.min(elapsed / 2000, 1);
             setCallProgress(progress);
             
-            if (progress >= 1) {
-              if (callTimerRef.current) clearInterval(callTimerRef.current);
-              callTimerRef.current = null;
-              setIsHoldingTop(false);
-              setCallProgress(0);
-              triggerCall();
-            }
+              if (progress >= 1) {
+                if (callTimerRef.current) clearInterval(callTimerRef.current);
+                callTimerRef.current = null;
+                setIsHoldingTop(false);
+                setCallProgress(0);
+                if (otherUserId && chatId) {
+                  initiateCall([otherUserId], chatId);
+                } else {
+                  Alert.alert("Error", "Cannot initiate call right now.");
+                }
+              }
           }, 50);
         }
       }
@@ -741,13 +786,7 @@ const sendMessage = async () => {
     }
   }, [hasMore, loadingMore, loadMoreMessages, isHoldingTop]);
 
-  const triggerCall = () => {
-    if (otherUserId && chatId) {
-      initiateCall([otherUserId], chatId);
-    } else {
-      Alert.alert("Error", "Cannot initiate call right now.");
-    }
-  };
+
 
   // Handle long press on message to reply
   const handleMessageLongPress = useCallback((message: Message) => {
@@ -868,14 +907,7 @@ const sendMessage = async () => {
           </View>
         </View>
 
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerIcon} onPress={triggerCall}>
-            <Ionicons name="call-outline" size={22} color="#4ADDAE" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => Alert.alert("Video", "Video calling coming soon")}>
-            <Ionicons name="videocam-outline" size={22} color="#4ADDAE" />
-          </TouchableOpacity>
-        </View>
+
       </View>
 
       <FlatList

@@ -128,7 +128,7 @@ io.on('connection', (socket) => {
         const User = require('./models/User');
 
         // Validation schema (prevent DoS/malformed data)
-        const validateMessageData = (data: any) => {
+        const validateMessageData = (data) => {
             return data &&
                 typeof data.sender === 'string' && data.sender.length === 24 && mongoose.Types.ObjectId.isValid(data.sender) &&
                 typeof data.receiver === 'string' && data.receiver.length === 24 && mongoose.Types.ObjectId.isValid(data.receiver) &&

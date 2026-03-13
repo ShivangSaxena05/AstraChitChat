@@ -111,6 +111,8 @@ const ChatItem = memo(({
   );
 });
 
+ChatItem.displayName = 'ChatItem';
+
 export default function ChatListScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -293,27 +295,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  avatarContainer: {
-    position: 'relative',
-    marginRight: 16
-  },
-  avatar: { 
-    width: 56, 
-    height: 56, 
-    borderRadius: 28,
-    backgroundColor: '#f0f0f0'
-  },
-  unreadDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#007AFF',
-    borderWidth: 3,
-    borderColor: 'white'
-  },
   chatInfo: { 
     flex: 1 
   },
@@ -321,12 +302,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', 
     justifyContent: 'space-between', 
     alignItems: 'flex-end',
-    marginBottom: 4 
-  },
-  username: {
-    fontWeight: '700',
-    fontSize: 17,
-    flex: 1
+    marginBottom: 4
   },
   timestamp: { 
     color: '#8e8e93', 

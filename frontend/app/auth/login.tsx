@@ -144,7 +144,7 @@ export default function LoginScreen() {
       
       {!requires2FA && (
         <TouchableOpacity onPress={() => router.push('/auth/signup')}>
-          <Text style={styles.link}>Don't have an account? Sign up</Text>
+          <Text style={styles.link}>Don&apos;t have an account? Sign up</Text>
         </TouchableOpacity>
       )}
       {requires2FA && (

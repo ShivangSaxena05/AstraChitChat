@@ -245,10 +245,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activeIcon: {
-    backgroundColor: '#fff',
-    // Icon inside should be dark if needed, but white on white needs handling. 
+    backgroundColor: '#4ADDAE',
+    // Icon inside should be dark if needed, but white on white needs handling.
     // For simplicity using opacity or different color logic in component.
-    backgroundColor: '#4ADDAE', 
   },
   endButton: {
     backgroundColor: '#FF3B30',

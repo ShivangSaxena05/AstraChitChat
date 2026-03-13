@@ -191,7 +191,7 @@ export default function NotificationsScreen() {
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyIcon}>🔔</Text>
         <Text style={styles.emptyText}>No notifications yet</Text>
-        <Text style={styles.emptySubtext}>When you get notifications, they'll show up here</Text>
+        <Text style={styles.emptySubtext}>When you get notifications, they&apos;ll show up here</Text>
       </View>
     );
   };

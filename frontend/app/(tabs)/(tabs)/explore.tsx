@@ -115,7 +115,7 @@ export default function ExploreScreen() {
         />
       ) : searchQuery.trim().length > 0 ? (
         <View style={styles.centerContainer}>
-          <ThemedText style={styles.noResultsText}>No results found for "{searchQuery}"</ThemedText>
+          <ThemedText style={styles.noResultsText}>No results found for &quot;{searchQuery}&quot;</ThemedText>
         </View>
       ) : (
         <View style={styles.centerContainer}>

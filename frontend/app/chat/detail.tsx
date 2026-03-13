@@ -72,6 +72,13 @@ const MessageItem = memo(({
   onReplyPress?: (messageId: string) => void;
   highlightedMessageId?: string | null;
 }) => {
+  // Handle swipe to reply - must be called unconditionally
+  const handleSwipe = useCallback(() => {
+    if (item.type === 'message') {
+      onSwipeReply?.(item.data);
+    }
+  }, [item, onSwipeReply]);
+
   if (item.type === 'dateSeparator') {
     return (
       <View style={styles.dateSeparator}>
@@ -83,17 +90,12 @@ const MessageItem = memo(({
   const message = item.data;
   const isOwnMessage = String(message.sender._id) === String(currentUserId);
   const isRead = isMessageRead(message, currentUserId);
-  const isDelivered = message.deliveredTo && 
-                      currentUserId && 
+  const isDelivered = message.deliveredTo &&
+                      currentUserId &&
                       message.deliveredTo.some(id => String(id) !== String(currentUserId));
 
   const isGroupChat = typeof message.chat === 'object' ? message.chat?.convoType === 'group' : false;
   const isHighlighted = highlightedMessageId === message._id;
-
-  // Handle swipe to reply
-  const handleSwipe = useCallback(() => {
-    onSwipeReply?.(message);
-  }, [message, onSwipeReply]);
 
   return (
     <SwipeableMessage
@@ -158,6 +160,8 @@ const MessageItem = memo(({
     </SwipeableMessage>
   );
 });
+
+MessageItem.displayName = 'MessageItem';
 
 export default function ChatDetailScreen() {
   const [messages, setMessages] = useState<Message[]>([]);

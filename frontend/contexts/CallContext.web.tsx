@@ -55,7 +55,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
         return;
       }
-
       console.log('Received call offer from:', callerId);
       setCallState(prev => ({ ...prev, incomingCall: { offer, callerId, chatId } }));
     });
@@ -119,10 +118,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     pc.ontrack = (event: any) => {
-      setCallState(prev => ({
-        ...prev,
-        remoteStream: event.streams[0]
-      }));
       setCallState(prev => ({ ...prev, remoteStream: event.streams[0] }));
     };
 
@@ -140,24 +135,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const initiateCall = async (targetIds: string[], chatId: string) => {
     if (targetIds.length === 0 || !socket || !currentUserId) return;
-
     const targetId = targetIds[0];
 
     try {
       setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
-
-      const pc = await setupMediaAndPC(targetId);
-
-      const offer = await pc.createOffer({});
-      await pc.setLocalDescription(offer);
-
-      socket.emit('webrtc-offer', {
-        targetId,
-        offer,
-        callerId: currentUserId,
-        chatId
-      });
-
       const pc = await setupMediaAndPC(targetId);
       const offer = await pc.createOffer({});
       await pc.setLocalDescription(offer);
@@ -175,9 +156,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       setCallState(prev => ({ ...prev, isCalling: true, incomingCall: null, activeChatId: chatId }));
-
-      const pc = await setupMediaAndPC(callerId);
-
       const pc = await setupMediaAndPC(callerId);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
@@ -209,14 +187,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-
+    
     setCallState(prev => {
       if (prev.localStream) {
         prev.localStream.getTracks().forEach((t: any) => t.stop());
       }
       return { isCalling: false, isConnected: false, incomingCall: null, localStream: null, remoteStream: null, isMuted: false, isSpeaker: false, activeChatId: null };
     });
-
+    
     activeCallTargetIdRef.current = null;
   }, []);
 

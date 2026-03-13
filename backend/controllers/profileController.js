@@ -2,7 +2,10 @@ const User = require('../models/User');
 const Post = require('../models/Post');
 const Follow = require('../models/Follow');
 const Like = require('../models/Like');
+<<<<<<< HEAD
+=======
 const { getPresignedUploadUrl } = require('../services/mediaService');
+>>>>>>> upstream/master
 
 // @desc    Get current user's profile
 // @route   GET /api/profile/me
@@ -28,7 +31,10 @@ const getUserProfile = async (req, res) => {
 
         res.json({
             _id: user._id,
+<<<<<<< HEAD
+=======
             name: user.name,
+>>>>>>> upstream/master
             username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
             profilePicture: user.profilePicture,
             coverPhoto: user.coverPhoto || '',
@@ -74,6 +80,8 @@ const getUserProfileById = async (req, res) => {
         const postIds = userPosts.map(p => p._id);
         const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
 
+<<<<<<< HEAD
+=======
         // Check block/mute status
         let isBlocked = false;
         let isMuted = false;
@@ -83,6 +91,7 @@ const getUserProfileById = async (req, res) => {
             isMuted = currentUser.mutedUsers && currentUser.mutedUsers.includes(userId);
         }
 
+>>>>>>> upstream/master
         res.json({
             _id: user._id,
             name: user.name,

@@ -50,7 +50,7 @@ export default function NotificationsScreen() {
 
     try {
       const data = await get(`/notifications?page=${pageNum}`);
-
+      
       if (isRefresh) {
         setNotifications(data.notifications || []);
       } else {
@@ -87,7 +87,7 @@ export default function NotificationsScreen() {
 
   const handleNotificationPress = (notification: Notification) => {
     if (!notification.read) {
-      setNotifications(prev =>
+      setNotifications(prev => 
         prev.map(n => n._id === notification._id ? { ...n, read: true } : n)
       );
     }
@@ -124,7 +124,6 @@ export default function NotificationsScreen() {
     const date = new Date(dateString);
     const now = new Date();
     const diff = now.getTime() - date.getTime();
-
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
@@ -149,7 +148,7 @@ export default function NotificationsScreen() {
           </View>
         )}
       </View>
-
+      
       <View style={styles.content}>
         <Text style={styles.message}>
           {item.from ? <Text style={styles.username}>{item.from.username}</Text> : null}
@@ -213,7 +212,7 @@ export default function NotificationsScreen() {
     <ThemedView style={styles.container}>
       {/* Top Header with username switcher */}
       <TopHeaderComponent />
-
+      
       <FlatList
         data={notifications}
         renderItem={renderNotification}
@@ -242,117 +241,6 @@ function getMockNotifications(): Notification[] {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#888',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  followRequestBanner: {
-    padding: 16,
-    backgroundColor: '#111',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  followRequestText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  followRequestArrow: {
-    color: '#4ADDAE',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  notificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222',
-    backgroundColor: '#000',
-  },
-  unreadItem: {
-    backgroundColor: '#111',
-  },
-  iconContainer: {
-    marginRight: 12,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#222',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconText: {
-    fontSize: 20,
-  },
-  content: {
-    flex: 1,
-  },
-  username: {
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  message: {
-    color: '#ccc',
-    fontSize: 14,
-  },
-  time: {
-    color: '#666',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  thumbnail: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    marginLeft: 8,
-  },
-  footer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyText: {
-    fontSize: 18,
-    color: '#fff',
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
   container: { flex: 1, backgroundColor: '#000' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#888', marginTop: 10, fontSize: 16 },
@@ -376,3 +264,4 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 18, color: '#fff', fontWeight: 'bold', marginBottom: 8 },
   emptySubtext: { fontSize: 14, color: '#666', textAlign: 'center', paddingHorizontal: 40 },
 });
+

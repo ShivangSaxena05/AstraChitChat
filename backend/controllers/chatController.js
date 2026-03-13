@@ -213,18 +213,6 @@ async function getChatMessages(req, res) {
       } }
     ];
 
-    // Fetch messages - always sort by createdAt descending to get the newest messages in the range
-    const sortOrder = { createdAt: -1 };
-
-    const messages = await Message.find(messageQuery)
-      .populate('sender', 'name username profilePicture')
-      .populate({
-        path: 'quotedMsgId',
-        populate: { path: 'sender', select: 'name username profilePicture' }
-      })
-      .sort(sortOrder)
-      .limit(pageSize + 1) // Fetch one extra to check if there are more
-      .lean();
     const messages = await Message.aggregate(pipeline);
 
     let hasMore = false;
@@ -257,29 +245,6 @@ async function getChatMessages(req, res) {
         { $push: { readBy: { user: toObjectId(userId), readAt: new Date() } } }
       );
     }
-
-    // convert readBy and deliveredTo structure to simple array of userIds for API (per your request)
-    const responseMessages = messages.map(m => {
-      const simpleReadBy = Array.isArray(m.readBy) ? m.readBy.map(r => (r.user ? r.user.toString() : r.toString())) : [];
-      const simpleDeliveredTo = Array.isArray(m.deliveredTo) ? m.deliveredTo.map(r => (r.user ? r.user.toString() : r.toString())) : [];
-
-      // Transform quotedMsgId (populated) to quotedMessage for frontend compatibility
-      let quotedMessage = null;
-      if (m.quotedMsgId) {
-        quotedMessage = {
-          _id: m.quotedMsgId._id,
-          bodyText: m.quotedMsgId.bodyText,
-          sender: m.quotedMsgId.sender
-        };
-      }
-
-      return {
-        ...m,
-        readBy: simpleReadBy,
-        deliveredTo: simpleDeliveredTo,
-        quotedMessage: quotedMessage
-      };
-    });
 
     return res.json({
       messages,

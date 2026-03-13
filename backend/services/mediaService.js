@@ -3,8 +3,14 @@
  * ---------------
  * Centralised helpers for all S3 / CloudFront media operations.
  *
+ * S3 folder structure:
+ *   profile/{userId}/{timestamp}-{filename}   — profile pictures
+ *   cover/{userId}/{timestamp}-{filename}     — cover photos
+ *   posts/{userId}/{timestamp}-{filename}     — post images/videos
+ *   chat/{chatId}/{timestamp}-{filename}      — chat media files
+ *
  * Exports:
- *   getPresignedUploadUrl(userId, fileName, fileType, expiresIn?)
+ *   getPresignedUploadUrl(options)
  *     → { presignedUrl, key, cloudfrontUrl }
  *     Client PUTs directly to S3; saves cloudfrontUrl in MongoDB.
  *
@@ -22,12 +28,46 @@ const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const s3 = require('../config/s3');
 
+// Valid media categories → S3 folder prefixes
+const MEDIA_FOLDERS = {
+    profile: 'profile',
+    cover:   'cover',
+    post:    'posts',
+    chat:    'chat',
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Presigned upload URL — client uploads directly to S3
+//
+//    options: {
+//      folder:    'profile' | 'cover' | 'post' | 'chat'  (required)
+//      ownerId:   userId or chatId — used as subfolder    (required)
+//      fileName:  original file name                      (required)
+//      fileType:  MIME type (e.g. 'image/jpeg')          (required)
+//      expiresIn: presigned URL TTL in seconds            (default 300)
+//    }
 // ─────────────────────────────────────────────────────────────────────────────
-const getPresignedUploadUrl = async (userId, fileName, fileType, expiresIn = 300) => {
+const getPresignedUploadUrl = async (options) => {
+    // Support legacy call signature: (userId, fileName, fileType, expiresIn)
+    let folder, ownerId, fileName, fileType, expiresIn;
+    if (typeof options === 'string') {
+        // Legacy: getPresignedUploadUrl(userId, fileName, fileType, expiresIn)
+        ownerId   = options;
+        fileName  = arguments[1];
+        fileType  = arguments[2];
+        expiresIn = arguments[3] || 300;
+        folder    = 'posts'; // default folder for legacy calls
+    } else {
+        ({ folder, ownerId, fileName, fileType, expiresIn = 300 } = options);
+    }
+
+    if (!MEDIA_FOLDERS[folder]) {
+        throw new Error(`Invalid media folder: "${folder}". Must be one of: ${Object.keys(MEDIA_FOLDERS).join(', ')}`);
+    }
+
     const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const key = `${userId}/${Date.now()}-${safeFileName}`;
+    const prefix = MEDIA_FOLDERS[folder];
+    const key = `${prefix}/${ownerId}/${Date.now()}-${safeFileName}`;
     const bucket = process.env.AWS_BUCKET_NAME;
     const cloudfrontBase = process.env.CLOUDFRONT_URL.replace(/\/$/, '');
 
@@ -91,4 +131,4 @@ const getSignedCloudfrontUrl = (s3Key, expiresInSeconds = 3600) => {
     }
 };
 
-module.exports = { getPresignedUploadUrl, deleteS3Object, getSignedCloudfrontUrl };
+module.exports = { getPresignedUploadUrl, deleteS3Object, getSignedCloudfrontUrl, MEDIA_FOLDERS };

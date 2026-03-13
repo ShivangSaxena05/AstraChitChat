@@ -162,12 +162,13 @@ const getAvatarUploadUrl = async (req, res) => {
 
     try {
         const ext = fileType.split('/')[1];
-        const { presignedUrl, key, cloudfrontUrl } = await getPresignedUploadUrl(
-            req.user._id.toString(),
-            `avatar.${ext}`,
+        const { presignedUrl, key, cloudfrontUrl } = await getPresignedUploadUrl({
+            folder: 'profile',
+            ownerId: req.user._id.toString(),
+            fileName: `avatar.${ext}`,
             fileType,
-            300 // 5 minutes
-        );
+            expiresIn: 300,
+        });
 
         res.json({ presignedUrl, key, cloudfrontUrl });
     } catch (err) {
@@ -175,4 +176,40 @@ const getAvatarUploadUrl = async (req, res) => {
     }
 };
 
-module.exports = { getUserProfile, getUserProfileById, updateUserProfile, getAvatarUploadUrl };
+// @desc    Get a presigned URL for cover photo upload
+// @route   GET /api/profile/cover-upload-url
+// @access  Private
+//
+// Client flow:
+//   1. GET /api/profile/cover-upload-url?fileType=image/jpeg
+//   2. PUT <presignedUrl> with the image binary
+//   3. PUT /api/profile/me with { coverPhoto: cloudfrontUrl }
+const getCoverUploadUrl = async (req, res) => {
+    const { fileType } = req.query;
+
+    if (!fileType) {
+        return res.status(400).json({ message: 'fileType query param is required (e.g. image/jpeg).' });
+    }
+
+    const allowedImageTypes = /^image\/(jpeg|jpg|png|webp)$/;
+    if (!allowedImageTypes.test(fileType)) {
+        return res.status(400).json({ message: 'Only JPEG, PNG, or WebP images are supported for cover photos.' });
+    }
+
+    try {
+        const ext = fileType.split('/')[1];
+        const { presignedUrl, key, cloudfrontUrl } = await getPresignedUploadUrl({
+            folder: 'cover',
+            ownerId: req.user._id.toString(),
+            fileName: `cover.${ext}`,
+            fileType,
+            expiresIn: 300,
+        });
+
+        res.json({ presignedUrl, key, cloudfrontUrl });
+    } catch (err) {
+        res.status(500).json({ message: 'Could not generate cover photo upload URL.', error: err.message });
+    }
+};
+
+module.exports = { getUserProfile, getUserProfileById, updateUserProfile, getAvatarUploadUrl, getCoverUploadUrl };

@@ -1,27 +1,63 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, Modal, SafeAreaView } from 'react-native';
-import { RTCView, MediaStream } from 'react-native-webrtc';
 import { Ionicons } from '@expo/vector-icons';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+
+let RTCView: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    RTCView = require('react-native-webrtc').RTCView;
+  } catch (e) {
+    console.log('RTCView load failed');
+  }
+}
+
+const WebVideo = ({ stream, isLocal, style }: { stream: any, isLocal: boolean, style: any }) => {
+  const videoRef = useRef<any>(null);
+  
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return React.createElement('video', {
+    ref: videoRef,
+    autoPlay: true,
+    playsInline: true,
+    muted: isLocal,
+    style: {
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      transform: isLocal ? 'scaleX(-1)' : 'none',
+      ...style
+    }
+  });
+};
 
 const { width, height } = Dimensions.get('window');
 
 interface CallScreenProps {
   visible: boolean;
-  status: 'incoming' | 'outgoing' | 'connected';
+  status: 'incoming' | 'outgoing' | 'connecting' | 'connected';
   otherUser?: { username: string; profilePicture: string };
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
-  isVideoCall: boolean;
+  localStream: any | null;
+  remoteStream: any | null;
+  isVideoEnabled: boolean;
   isMuted: boolean;
   isSpeaker: boolean;
   duration: number;
-  onAccept: () => void;
+  onAccept: (video: boolean) => void;
   onDecline: () => void;
   onEnd: () => void;
   onMute: () => void;
   onSpeaker: () => void;
-  onSwitchVideo: () => void;
+  onSwitchVideo: () => void; // Normal toggle
+  onUpgradeToVideo: () => void; // Mid-call renegotiation from Audio to Video
   onSwitchCamera: () => void;
+  isVideoCallContext: boolean; // Was the call physically initiated as a Video call or upgraded?
 }
 
 const formatDuration = (seconds: number) => {
@@ -30,8 +66,44 @@ const formatDuration = (seconds: number) => {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 };
 
+// Reanimated Draggable Picture-in-Picture
+const DraggablePIP = ({ children, isVisible }: { children: React.ReactNode, isVisible: boolean }) => {
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+
+  const panGesture = Gesture.Pan()
+    .onChange((event) => {
+      translateX.value += event.changeX;
+      translateY.value += event.changeY;
+    })
+    .onEnd(() => {
+      // Optional: Snap to edges. For now, we just leave it where dragged gently.
+    });
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: withTiming(isVisible ? 1 : 0),
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+      ],
+      zIndex: isVisible ? 10 : -1,
+    };
+  });
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={[styles.localVideoContainer, animatedStyle]}>
+        {children}
+      </Animated.View>
+    </GestureDetector>
+  );
+};
+
 export default function CallScreen(props: CallScreenProps) {
   if (!props.visible) return null;
+
+  const isConnecting = props.status === 'connecting' || props.status === 'outgoing';
 
   const renderButtons = () => {
     if (props.status === 'incoming') {
@@ -41,9 +113,13 @@ export default function CallScreen(props: CallScreenProps) {
             <Ionicons name="close" size={32} color="#fff" />
             <Text style={styles.controlText}>Decline</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.controlButton, styles.acceptButton]} onPress={props.onAccept}>
+          <TouchableOpacity style={[styles.controlButton, styles.acceptButton]} onPress={() => props.onAccept(false)}>
             <Ionicons name="call" size={32} color="#fff" />
             <Text style={styles.controlText}>Accept</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.controlButton, styles.acceptVideoButton]} onPress={() => props.onAccept(true)}>
+            <Ionicons name="videocam" size={32} color="#fff" />
+            <Text style={styles.controlText}>Accept Video</Text>
           </TouchableOpacity>
         </View>
       );
@@ -51,90 +127,122 @@ export default function CallScreen(props: CallScreenProps) {
 
     return (
       <View style={styles.activeControls}>
-        <TouchableOpacity style={[styles.iconButton, props.isMuted && styles.activeIcon]} onPress={props.onMute}>
+        <TouchableOpacity 
+           style={[styles.iconButton, props.isMuted && styles.activeIcon]} 
+           onPress={props.onMute}
+           disabled={isConnecting}
+           activeOpacity={isConnecting ? 1 : 0.7}
+        >
           <Ionicons name={props.isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
         </TouchableOpacity>
         
-        {!props.isVideoCall && (
-          <TouchableOpacity style={[styles.iconButton, props.isSpeaker && styles.activeIcon]} onPress={props.onSpeaker}>
+        {!props.isVideoCallContext && !props.isVideoEnabled && (
+          <TouchableOpacity 
+             style={[styles.iconButton, props.isSpeaker && styles.activeIcon]} 
+             onPress={props.onSpeaker}
+             disabled={isConnecting}
+          >
             <Ionicons name={props.isSpeaker ? "volume-high" : "volume-medium"} size={24} color="#fff" />
           </TouchableOpacity>
         )}
 
-        {!props.isVideoCall ? (
-           <TouchableOpacity style={styles.iconButton} onPress={props.onSwitchVideo}>
-             <Ionicons name="videocam" size={24} color="#fff" />
-           </TouchableOpacity>
-        ) : (
-           <TouchableOpacity style={styles.iconButton} onPress={props.onSwitchCamera}>
+        <TouchableOpacity 
+           style={[styles.iconButton, props.isVideoEnabled && styles.activeIcon]} 
+           onPress={() => {
+              if (props.isVideoCallContext) {
+                 props.onSwitchVideo?.(); // Simply toggle track enabled
+              } else if (!props.isVideoEnabled) {
+                 props.onUpgradeToVideo?.(); // Trigger RTCPeerConnection Renegotiation
+              }
+           }}
+           disabled={isConnecting}
+        >
+          <Ionicons name={props.isVideoEnabled ? "videocam" : "videocam-off"} size={24} color="#fff" />
+        </TouchableOpacity>
+
+        {props.isVideoEnabled && (
+           <TouchableOpacity style={styles.iconButton} onPress={props.onSwitchCamera} disabled={isConnecting}>
              <Ionicons name="camera-reverse" size={24} color="#fff" />
            </TouchableOpacity>
         )}
 
         <TouchableOpacity style={[styles.iconButton, styles.endButton]} onPress={props.onEnd}>
-          <Ionicons name="call" size={24} color="#fff" />
+          <Ionicons name="call" size={24} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
         </TouchableOpacity>
       </View>
     );
   };
 
-  // Video Call Render
-  if (props.isVideoCall && props.status === 'connected') {
-    return (
-      <Modal visible={props.visible} animationType="slide" transparent={false}>
-        <View style={styles.container}>
-          {/* Remote Video (Full Screen) */}
-          {props.remoteStream && (
-            <RTCView
-              streamURL={props.remoteStream.toURL()}
-              style={styles.remoteVideo}
-              objectFit="cover"
-            />
-          )}
-
-          {/* Local Video (PIP) */}
-          {props.localStream && (
-            <View style={styles.localVideoContainer}>
-              <RTCView
-                streamURL={props.localStream.toURL()}
-                style={styles.localVideo}
-                objectFit="cover"
-                mirror={true}
-              />
-            </View>
-          )}
-
-          {/* Overlay Controls */}
-          <SafeAreaView style={styles.videoOverlay}>
-            <View style={styles.header}>
-              <Text style={styles.nameText}>{props.otherUser?.username || 'User'}</Text>
-              <Text style={styles.timerText}>{formatDuration(props.duration)}</Text>
-            </View>
-            {renderButtons()}
-          </SafeAreaView>
-        </View>
-      </Modal>
-    );
-  }
-
-  // Audio Call / Incoming / Outgoing Render
   return (
-    <Modal visible={props.visible} animationType="slide" transparent={false}>
-      <View style={styles.audioContainer}>
-        <View style={styles.profileContainer}>
-          <Image
-            source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}
-            style={styles.profileImage}
-          />
-          <Text style={styles.nameTextLarge}>{props.otherUser?.username || 'Unknown'}</Text>
-          <Text style={styles.statusText}>
-            {props.status === 'incoming' ? 'Incoming Audio Call...' : 
-             props.status === 'outgoing' ? 'Calling...' : 
-             formatDuration(props.duration)}
-          </Text>
+    <Modal visible={props.visible} animationType="fade" transparent={false}>
+      <View style={styles.container}>
+        
+        {/* Fullscreen Background Layer (Remote Video OR Fallback) */}
+        <View style={StyleSheet.absoluteFill}>
+           {(props.isVideoEnabled && props.remoteStream) ? (
+             Platform.OS === 'web' ? (
+               <WebVideo stream={props.remoteStream} isLocal={false} style={{}} />
+             ) : RTCView ? (
+               <RTCView
+                 streamURL={props.remoteStream.toURL ? props.remoteStream.toURL() : ''}
+                 style={styles.remoteVideo}
+                 objectFit="cover"
+               />
+             ) : null
+           ) : (
+             <View style={styles.fallbackBackground}>
+                <Image
+                  source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}
+                  style={[styles.profileImageBlur, props.status === 'incoming' && { opacity: 0.5 }]}
+                  blurRadius={props.isVideoEnabled ? 0 : 20}
+                />
+             </View>
+           )}
         </View>
 
-        {renderButtons()}
+        {/* Local Video PIP Layer */}
+        {props.status === 'connected' && (
+          <DraggablePIP isVisible={props.isVideoEnabled}>
+             {props.localStream && props.isVideoEnabled ? (
+                Platform.OS === 'web' ? (
+                  <WebVideo stream={props.localStream} isLocal={true} style={{}} />
+                ) : RTCView ? (
+                  <RTCView
+                    streamURL={props.localStream.toURL ? props.localStream.toURL() : ''}
+                    style={styles.localVideo}
+                    objectFit="cover"
+                    mirror={true}
+                  />
+                ) : null
+             ) : (
+                <View style={styles.pipFallback}>
+                   <Ionicons name="person" size={40} color="#fff" />
+                </View>
+             )}
+          </DraggablePIP>
+        )}
+
+        {/* Foreground Controls Layer */}
+        <SafeAreaView style={styles.videoOverlay} pointerEvents="box-none">
+          <View style={styles.header}>
+            <Image
+              source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}
+              style={styles.headerProfileImage}
+            />
+            <Text style={styles.nameText}>{props.otherUser?.username || 'Unknown'}</Text>
+            
+            <Text style={styles.timerText}>
+              {props.status === 'incoming' ? 'Incoming Call...' : 
+               isConnecting ? 'Connecting...' : 
+               formatDuration(props.duration)}
+            </Text>
+          </View>
+          
+          <View style={styles.controlsBottomWrapper}>
+            {renderButtons()}
+          </View>
+        </SafeAreaView>
+
       </View>
     </Modal>
   );
@@ -145,115 +253,115 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  audioContainer: {
-    flex: 1,
-    backgroundColor: '#151718',
-    justifyContent: 'space-between',
-    paddingVertical: 60,
-  },
-  profileContainer: {
-    alignItems: 'center',
-    marginTop: 60,
-  },
-  profileImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  nameText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowRadius: 4,
-  },
-  nameTextLarge: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  statusText: {
-    color: '#4ADDAE',
-    fontSize: 16,
-  },
-  timerText: {
-    color: '#eee',
-    fontSize: 14,
-    marginTop: 4,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowRadius: 4,
-  },
   remoteVideo: {
     flex: 1,
     width: width,
     height: height,
     backgroundColor: '#000',
   },
+  fallbackBackground: {
+    flex: 1,
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileImageBlur: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.3,
+  },
   localVideoContainer: {
     position: 'absolute',
     top: 50,
     right: 20,
-    width: 100,
-    height: 150,
-    borderRadius: 12,
+    width: 110,
+    height: 160,
+    borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#fff',
-    zIndex: 10,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: '#222',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
   },
   localVideo: {
     flex: 1,
     width: '100%',
     height: '100%',
   },
+  pipFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#333',
+  },
   videoOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     justifyContent: 'space-between',
-    paddingVertical: 40,
   },
   header: {
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 40,
+  },
+  headerProfileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#4ADDAE',
+  },
+  nameText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 4,
+  },
+  timerText: {
+    color: '#4ADDAE',
+    fontSize: 16,
+    fontWeight: '500',
+    marginTop: 8,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 4,
+  },
+  controlsBottomWrapper: {
+    paddingBottom: 40,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingTop: 20,
   },
   activeControls: {
     flexDirection: 'row',
     justifyContent: 'space-evenly',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: 10,
   },
   incomingControls: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingHorizontal: 40,
-    marginBottom: 40,
+    paddingHorizontal: 20,
   },
   iconButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   activeIcon: {
-    backgroundColor: '#4ADDAE',
-    // Icon inside should be dark if needed, but white on white needs handling.
-    // For simplicity using opacity or different color logic in component.
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
   },
   endButton: {
     backgroundColor: '#FF3B30',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
   },
   controlButton: {
     alignItems: 'center',
@@ -261,6 +369,12 @@ const styles = StyleSheet.create({
   },
   acceptButton: {
     backgroundColor: '#34C759',
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+  },
+  acceptVideoButton: {
+    backgroundColor: '#007AFF',
     width: 70,
     height: 70,
     borderRadius: 35,
@@ -275,5 +389,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginTop: 8,
     fontSize: 14,
+    fontWeight: '600',
   },
 });

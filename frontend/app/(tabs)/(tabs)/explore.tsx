@@ -9,6 +9,7 @@ import TopHeaderComponent from '@/components/TopHeaderComponent';
 
 export default function ExploreScreen() {
   const router = require('expo-router').useRouter();
+  const { q } = require('expo-router').useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,6 +37,12 @@ export default function ExploreScreen() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (q) {
+      setSearchQuery(String(q));
+    }
+  }, [q]);
 
   useEffect(() => {
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);

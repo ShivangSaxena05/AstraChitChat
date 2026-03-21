@@ -11,7 +11,9 @@ export default function CallOverlay() {
     remoteStream,
     isVideoEnabled,
     isMuted, 
-    isSpeaker, 
+    isSpeaker,
+    videoUpgradeRequest,
+    isVideoUpgradePending,
     acceptCall, 
     declineCall, 
     endCall, 
@@ -19,6 +21,8 @@ export default function CallOverlay() {
     toggleSpeaker,
     toggleVideo,
     upgradeToVideo,
+    acceptVideoUpgrade,
+    declineVideoUpgrade,
     switchCamera
   } = useCall();
   
@@ -73,6 +77,8 @@ export default function CallOverlay() {
       isMuted={isMuted}
       isSpeaker={isSpeaker}
       duration={callDuration}
+      videoUpgradeRequest={videoUpgradeRequest}
+      isVideoUpgradePending={isVideoUpgradePending}
       onAccept={(video: boolean) => acceptCall(video)}
       onDecline={declineCall}
       onEnd={endCall}
@@ -80,6 +86,8 @@ export default function CallOverlay() {
       onSpeaker={toggleSpeaker}
       onSwitchVideo={toggleVideo}
       onUpgradeToVideo={upgradeToVideo}
+      onAcceptVideoUpgrade={acceptVideoUpgrade}
+      onDeclineVideoUpgrade={declineVideoUpgrade}
       onSwitchCamera={switchCamera}
       isVideoCallContext={incomingCall ? incomingCall.isVideo : isVideoEnabled} // Rough tracking of if the call originated as Video
     />

@@ -49,6 +49,8 @@ interface CallScreenProps {
   isMuted: boolean;
   isSpeaker: boolean;
   duration: number;
+  videoUpgradeRequest: any | null;
+  isVideoUpgradePending: boolean;
   onAccept: (video: boolean) => void;
   onDecline: () => void;
   onEnd: () => void;
@@ -56,6 +58,8 @@ interface CallScreenProps {
   onSpeaker: () => void;
   onSwitchVideo: () => void; // Normal toggle
   onUpgradeToVideo: () => void; // Mid-call renegotiation from Audio to Video
+  onAcceptVideoUpgrade: () => void;
+  onDeclineVideoUpgrade: () => void;
   onSwitchCamera: () => void;
   isVideoCallContext: boolean; // Was the call physically initiated as a Video call or upgraded?
 }
@@ -113,13 +117,9 @@ export default function CallScreen(props: CallScreenProps) {
             <Ionicons name="close" size={32} color="#fff" />
             <Text style={styles.controlText}>Decline</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.controlButton, styles.acceptButton]} onPress={() => props.onAccept(false)}>
+          <TouchableOpacity style={[styles.controlButton, styles.acceptButton]} onPress={() => props.onAccept(props.isVideoCallContext)}>
             <Ionicons name="call" size={32} color="#fff" />
             <Text style={styles.controlText}>Accept</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.controlButton, styles.acceptVideoButton]} onPress={() => props.onAccept(true)}>
-            <Ionicons name="videocam" size={32} color="#fff" />
-            <Text style={styles.controlText}>Accept Video</Text>
           </TouchableOpacity>
         </View>
       );
@@ -149,10 +149,10 @@ export default function CallScreen(props: CallScreenProps) {
         <TouchableOpacity 
            style={[styles.iconButton, props.isVideoEnabled && styles.activeIcon]} 
            onPress={() => {
-              if (props.isVideoCallContext) {
+              if (props.isVideoCallContext || props.isVideoEnabled) {
                  props.onSwitchVideo?.(); // Simply toggle track enabled
               } else if (!props.isVideoEnabled) {
-                 props.onUpgradeToVideo?.(); // Trigger RTCPeerConnection Renegotiation
+                 props.onUpgradeToVideo?.(); // Request RTCPeerConnection Renegotiation
               }
            }}
            disabled={isConnecting}
@@ -234,12 +234,27 @@ export default function CallScreen(props: CallScreenProps) {
             <Text style={styles.timerText}>
               {props.status === 'incoming' ? 'Incoming Call...' : 
                isConnecting ? 'Connecting...' : 
+               props.isVideoUpgradePending ? 'Requesting Video Upgrade...' :
                formatDuration(props.duration)}
             </Text>
           </View>
           
           <View style={styles.controlsBottomWrapper}>
-            {renderButtons()}
+            {props.videoUpgradeRequest && !props.isVideoEnabled ? (
+              <View style={styles.upgradeRequestBox}>
+                 <Text style={styles.upgradeRequestText}>
+                    {props.otherUser?.username || 'User'} is requesting to switch to a Video Call.
+                 </Text>
+                 <View style={styles.upgradeRequestActions}>
+                    <TouchableOpacity style={[styles.actionBtn, styles.declineButton]} onPress={props.onDeclineVideoUpgrade}>
+                       <Text style={styles.actionBtnText}>Decline</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionBtn, styles.acceptVideoButton]} onPress={props.onAcceptVideoUpgrade}>
+                       <Text style={styles.actionBtnText}>Accept</Text>
+                    </TouchableOpacity>
+                 </View>
+              </View>
+            ) : renderButtons()}
           </View>
         </SafeAreaView>
 
@@ -390,5 +405,34 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     fontWeight: '600',
+  },
+  upgradeRequestBox: {
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 16,
+    marginHorizontal: 20,
+    marginBottom: 10,
+  },
+  upgradeRequestText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  upgradeRequestActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  actionBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+  },
+  actionBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

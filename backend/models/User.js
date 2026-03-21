@@ -9,7 +9,9 @@ const userSchema = new mongoose.Schema({
     username: {
         type: String,
         unique: true,
-        sparse: true // Allow null values but enforce uniqueness when present
+        sparse: true, // Allow null values but enforce uniqueness when present
+        lowercase: true,
+        index: true
     },
     email: {
         type: String,
@@ -89,6 +91,22 @@ const userSchema = new mongoose.Schema({
     isTwoFactorEnabled: {
         type: Boolean,
         default: false
+    },
+    postsCount: {
+        type: Number,
+        default: 0
+    },
+    followersCount: {
+        type: Number,
+        default: 0
+    },
+    followingCount: {
+        type: Number,
+        default: 0
+    },
+    totalLikesCount: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true // Adds createdAt and updatedAt fields

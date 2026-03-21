@@ -21,6 +21,9 @@ const createPost = async (req, res) => {
             caption,
         });
 
+        // Atomically increment user's post count
+        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: 1 } });
+
         res.status(201).json({
             message: 'Post created successfully',
             post
@@ -57,6 +60,9 @@ const deletePost = async (req, res) => {
         }
 
         await post.deleteOne();
+
+        // Atomically decrement user's post count
+        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: -1 } });
 
         res.json({ message: 'Post deleted successfully.' });
     } catch (error) {

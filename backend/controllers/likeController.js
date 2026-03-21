@@ -1,5 +1,6 @@
 const Like = require('../models/Like');
 const Post = require('../models/Post');
+const User = require('../models/User');
 
 // @desc    Like or unlike a post
 // @route   POST /api/posts/:postId/like
@@ -21,10 +22,18 @@ const likePost = async (req, res) => {
     if (existingLike) {
       // Unlike the post
       await Like.findByIdAndDelete(existingLike._id);
+      
+      // Atomically decrement post author's total likes
+      await User.findByIdAndUpdate(post.user, { $inc: { totalLikesCount: -1 } });
+
       res.json({ message: 'Post unliked successfully' });
     } else {
       // Like the post
       await Like.create({ user: userId, post: postId });
+
+      // Atomically increment post author's total likes
+      await User.findByIdAndUpdate(post.user, { $inc: { totalLikesCount: 1 } });
+
       res.status(201).json({ message: 'Post liked successfully' });
     }
   } catch (error) {

@@ -49,6 +49,17 @@ router.get('/search', protect, searchChats);
 // Get user online status
 router.get('/user-status/:userId', protect, getUserStatus);
 
+// Get chat info
+router.get('/:chatId/info', protect, getChatInfo);
+
+// Get chat media
+router.get('/:chatId/media', protect, getChatMedia);
+
+// Chat settings
+router.post('/:chatId/mute', protect, muteChat);
+router.post('/:chatId/pin', protect, pinChat);
+router.post('/:chatId/clear', protect, clearChat);
+
 // Get messages for a specific chat
 router.get('/:chatId/messages', protect, getChatMessages);
 

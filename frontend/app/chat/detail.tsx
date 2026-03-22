@@ -899,10 +899,8 @@ const sendMessage = async () => {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        
-        <View style={styles.headerInfo}>
-          <Text style={styles.partnerName} numberOfLines={1}>{otherUsername || 'User'}</Text>
-          <View style={styles.statusRow}>
+
+        <View style={styles.statusRow}>
             {otherUserTyping ? (
               <Text style={styles.typingText}>Typing...</Text>
             ) : (
@@ -916,7 +914,6 @@ const sendMessage = async () => {
               </>
             )}
           </View>
-        </View>
 
 
       </View>

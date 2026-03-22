@@ -219,14 +219,16 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
       setCurrentUserId(userId);
 
-      const newSocket = io(SOCKET_URL, {
+        const newSocket = io(SOCKET_URL, {
         auth: { token },
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'], // ✅ Fallback for Render cold starts
         reconnection: true,
-        reconnectionAttempts: 10, // ✅ Increased attempts
+        reconnectionAttempts: 15, // ✅ More attempts for prod
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
+        randomizationFactor: 0.5,
+        reconnectionDelayMax: 10000, // ✅ 10s max delay
+        timeout: 30000, // ✅ 30s for Render cold starts
+        query: { EIO: '4' }, // ✅ Engine.IO v4 compatibility
         forceNew: force
       });
 
@@ -259,6 +261,10 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
       newSocket.on('connect_error', (error) => {
         console.error('Socket: ❌ Connect error:', error.message);
+        // ✅ Render-specific handling
+        if (error.message.includes('timeout') || error.message.includes('handshake')) {
+          console.log('Socket: Render cold start detected, retrying with polling...');
+        }
         setIsConnected(false);
       });
 

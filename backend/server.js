@@ -76,10 +76,11 @@ const server = http.createServer(app);
 // Allow multiple origins for production (Expo, web, mobile)
 const socketOrigins = process.env.SOCKET_ORIGINS 
     ? process.env.SOCKET_ORIGINS.split(',') 
-    : ['http://localhost:8081', 'http://localhost:8082', 'exp://localhost:8081'];
+    : ['https://astrachitchat.onrender.com', 'http://localhost:8081', 'http://localhost:8082', 'exp://localhost:8081', '*'];
 
 const io = new Server(server, {
-    pingTimeout: 60000,
+    pingTimeout: 120000, // ✅ 2min for Render free tier
+    pingInterval: 25000,
     cors: {
         origin: socketOrigins,
         methods: ['GET', 'POST'],

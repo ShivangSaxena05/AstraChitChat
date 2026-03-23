@@ -24,6 +24,9 @@ export default function FollowersListScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const router = useRouter();
@@ -32,31 +35,46 @@ export default function FollowersListScreen() {
 
   const listType: ListType = type || 'followers';
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async (pageNum = 1) => {
     try {
+      if (pageNum === 1) setLoading(true);
+      else setLoadingMore(true);
+
+      const limit = 20;
       const endpoint = listType === 'followers' 
-        ? `/follow/${userId}/followers` 
-        : `/follow/${userId}/following`;
+        ? `/follow/${userId}/followers?page=${pageNum}&limit=${limit}` 
+        : `/follow/${userId}/following?page=${pageNum}&limit=${limit}`;
       
       const data = await get(endpoint);
-      setUsers(listType === 'followers' ? data.followers : data.following);
+      const fetchedUsers = listType === 'followers' ? data.followers : data.following;
+      
+      setUsers(prev => pageNum === 1 ? fetchedUsers : [...prev, ...fetchedUsers]);
+      setHasMore(data.hasMore);
+      setPage(pageNum);
     } catch (error: any) {
       console.error('Fetch users error:', error);
       Alert.alert('Error', `Failed to fetch ${listType}`);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [userId, listType]);
 
   // Fetch data when screen comes into focus
   React.useEffect(() => {
-    fetchUsers();
+    fetchUsers(1);
   }, [fetchUsers]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchUsers();
+    fetchUsers(1);
+  };
+
+  const loadMore = () => {
+    if (!loading && !loadingMore && hasMore) {
+      fetchUsers(page + 1);
+    }
   };
 
   const handleUserPress = (selectedUserId: string) => {
@@ -115,6 +133,9 @@ export default function FollowersListScreen() {
         ListEmptyComponent={renderEmptyState}
         refreshing={refreshing}
         onRefresh={handleRefresh}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={loadingMore ? <ActivityIndicator style={{ padding: 20 }} /> : null}
         contentContainerStyle={users.length === 0 ? styles.emptyList : undefined}
       />
       

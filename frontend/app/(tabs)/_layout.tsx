@@ -23,10 +23,12 @@ export default function TabLayout() {
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="profile/[userId]" options={{ headerShown: false }} />
       <Stack.Screen name="user-profile" options={{ headerShown: false, presentation: 'modal' }} />
       <Stack.Screen name="chat" options={{ headerShown: false, presentation: 'modal' }} />
     </Stack>
   );
+
 }
 
 const styles = StyleSheet.create({

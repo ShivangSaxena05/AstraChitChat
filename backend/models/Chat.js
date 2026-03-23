@@ -54,6 +54,13 @@ const chatSchema = new mongoose.Schema({
         type: Map,
         of: Number,
         default: {}
+    },
+    mutedBy: {
+        type: Map,
+        of: {
+            mutedUntil: Date
+        },
+        default: {}
     }
 }, {
     timestamps: true

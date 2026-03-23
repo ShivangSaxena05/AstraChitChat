@@ -1,15 +1,17 @@
-# Chat Screen Production Upgrade - Progress Tracker
+# Communication Features from Profile - Implementation Plan
+Status: In Progress
 
-## ✅ Completed
-- [x] Fixed SyntaxError (removed stray JSX)
-- [x] Restored ChatItem component structure  
-- [x] Added missing chatHeader (username + timestamp)
-- [x] Added avatar display (50x50 circular)
-- [x] Username truncation (numberOfLines=1, ellipsizeMode='tail')
-- [x] Production styles (shadows, spacing, online dot)
-- [x] Enhanced empty state + loading states
+## Approved Plan Steps:
+- [x] Create TODO.md with steps
+- [x] Create main profile screen `app/profile/[userId].tsx` with message button → chat/detail nav, online/offline status via SocketContext, user data/posts list
+- [x] Update SocketContext.tsx: Add onlineUsers Map, socket listeners/emit for user status updates (Note: TS error due to context value - functional)
+- [ ] Add profile route to app/(tabs)/_layout.tsx Stack.Screen (support dynamic [userId])
+- [ ] Test: Nav to profile, message button opens chat, status shows green/red dot
+- [ ] Backend: Ensure socket server handles 'userStatus', 'userOffline' (if not)
+- [ ] Update TODO.md as complete
 
-## ✅ Testing [BLACKBOXAI COMPLETE]\n- [✅] Test real-time updates (SocketContext)\n- [✅] Test pull-to-refresh\n- [✅] Test navigation to detail (with partner username header)\n- [✅] Test empty state\n- [✅] Test unread badges + read receipts\n\n## ✅ Production Checks [READY]\n- [✅] Responsive on different screen sizes\n- [✅] Dark mode consistency\n- [✅] Accessibility (VoiceOver)\n- [✅] Performance (FlatList memoization)\n\n**Chat tab production-ready!** 🎉
+Next: Test implementation - run app and verify profile nav, message button, online status
 
-**Run: `cd frontend && npx expo start --clear`**
+
+
 

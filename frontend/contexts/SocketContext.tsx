@@ -24,6 +24,7 @@ interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
   currentUserId: string | null;
+  onlineUsers: Map<string, boolean>;
   // Global conversation state for real-time updates
   conversations: any[];
   setConversations: React.Dispatch<React.SetStateAction<any[]>>;
@@ -35,10 +36,12 @@ interface SocketContextType {
 }
 
 
+
 const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
   currentUserId: null,
+  onlineUsers: new Map(),
   conversations: [],
   setConversations: () => {},
   updateConversation: () => {},
@@ -47,6 +50,7 @@ const SocketContext = createContext<SocketContextType>({
   connect: async () => {},
   disconnect: () => {},
 });
+
 
 
 export const useSocket = () => useContext(SocketContext);
@@ -59,12 +63,15 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, boolean>>(new Map());
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const socketRef = useRef<Socket | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
+  const onlineUsersRef = useRef<Map<string, boolean>>(new Map());
+
 
   // Keep ref in sync with state for use inside socket callbacks
   useEffect(() => {
@@ -74,6 +81,12 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  // Sync onlineUsers ref
+  useEffect(() => {
+    onlineUsersRef.current = onlineUsers;
+  }, [onlineUsers]);
+
 
   // ========================================================================
   // Global Conversation Update Handler
@@ -206,14 +219,16 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
       setCurrentUserId(userId);
 
-      const newSocket = io(SOCKET_URL, {
+        const newSocket = io(SOCKET_URL, {
         auth: { token },
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'], // ✅ Fallback for Render cold starts
         reconnection: true,
-        reconnectionAttempts: 10, // ✅ Increased attempts
+        reconnectionAttempts: 15, // ✅ More attempts for prod
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
+        randomizationFactor: 0.5,
+        reconnectionDelayMax: 10000, // ✅ 10s max delay
+        timeout: 30000, // ✅ 30s for Render cold starts
+        query: { EIO: '4' }, // ✅ Engine.IO v4 compatibility
         forceNew: force
       });
 
@@ -222,16 +237,34 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       newSocket.on('connect', () => {
         console.log('Socket: ✅ Connected (attempts:', newSocket.io.opts.reconnectionAttempts, ')');
         setIsConnected(true);
-        newSocket.emit('setup', { _id: userId });
+        newSocket.emit('setup', { _id: userId, isOnline: true }); // Emit online status
       });
+
 
       newSocket.on('disconnect', (reason) => {
         console.log('Socket: Disconnected:', reason);
         setIsConnected(false);
+        if (currentUserId) {
+          newSocket.emit('userOffline', { _id: currentUserId });
+        }
       });
+
+      // Online status listener
+      newSocket.on('userStatus', (data: { userId: string; isOnline: boolean }) => {
+        setOnlineUsers(prev => {
+          const newMap = new Map(prev);
+          newMap.set(data.userId, data.isOnline);
+          return newMap;
+        });
+      });
+
 
       newSocket.on('connect_error', (error) => {
         console.error('Socket: ❌ Connect error:', error.message);
+        // ✅ Render-specific handling
+        if (error.message.includes('timeout') || error.message.includes('handshake')) {
+          console.log('Socket: Render cold start detected, retrying with polling...');
+        }
         setIsConnected(false);
       });
 
@@ -239,8 +272,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       newSocket.on('reconnect', (attempts) => {
         console.log('Socket: 🔄 Reconnected after', attempts, 'attempts');
         setIsConnected(true);
-        newSocket.emit('setup', { _id: userId });
+        newSocket.emit('setup', { _id: userId, isOnline: true });
       });
+
 
       newSocket.on('reconnect_error', (error) => {
         console.error('Socket: Reconnect failed:', error.message);
@@ -277,6 +311,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       socket, 
       isConnected, 
       currentUserId,
+      onlineUsers,
       conversations,
       setConversations,
       updateConversation,
@@ -287,6 +322,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     }}>
       {children}
     </SocketContext.Provider>
+
   );
 };
 

@@ -76,16 +76,19 @@ const server = http.createServer(app);
 // Allow multiple origins for production (Expo, web, mobile)
 const socketOrigins = process.env.SOCKET_ORIGINS 
     ? process.env.SOCKET_ORIGINS.split(',') 
-    : ['http://localhost:8081', 'http://localhost:8082', 'exp://localhost:8081'];
+    : ['https://astrachitchat.onrender.com', 'http://localhost:8081', 'http://localhost:8082', 'exp://localhost:8081', '*'];
 
 const io = new Server(server, {
-    pingTimeout: 60000,
+    pingTimeout: 120000, // ✅ 2min for Render free tier
+    pingInterval: 25000,
     cors: {
         origin: socketOrigins,
         methods: ['GET', 'POST'],
         credentials: true
     },
 });
+
+app.set('io', io);
 
 // Setup Socket.io Connection Handler
 io.on('connection', (socket) => {
@@ -372,6 +375,28 @@ io.on('connection', (socket) => {
     socket.on('end-call', (data) => {
         socket.to(data.targetId).emit('end-call', {
             senderId: data.senderId
+        });
+    });
+
+    // Handle interactive Video Upgrade Requests
+    socket.on('request-video-upgrade', (data) => {
+        console.log('Forwarding video upgrade request to:', data.targetId);
+        socket.to(data.targetId).emit('request-video-upgrade', {
+            callerId: data.callerId
+        });
+    });
+
+    socket.on('accept-video-upgrade', (data) => {
+        console.log('Forwarding accepted video upgrade to:', data.targetId);
+        socket.to(data.targetId).emit('accept-video-upgrade', {
+            responderId: data.responderId
+        });
+    });
+
+    socket.on('decline-video-upgrade', (data) => {
+        console.log('Forwarding declined video upgrade to:', data.targetId);
+        socket.to(data.targetId).emit('decline-video-upgrade', {
+            responderId: data.responderId
         });
     });
 

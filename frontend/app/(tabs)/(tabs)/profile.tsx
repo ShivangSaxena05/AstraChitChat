@@ -6,8 +6,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import ProfilePictureModal from '@/components/ProfilePictureModal';
+import ExpandableBio from '@/components/ExpandableBio';
+import { useSocket } from '@/contexts/SocketContext';
 
 interface UserProfile {
+  _id: string;
   username: string;
   name?: string;
   profilePicture: string;
@@ -40,9 +44,11 @@ export default function ProfileScreen() {
   const [posts, setPosts] = useState<UserPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('posts');
+  const [isProfileModalVisible, setProfileModalVisible] = useState(false);
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const { socket } = useSocket();
 
 
   useFocusEffect(
@@ -67,6 +73,28 @@ export default function ProfileScreen() {
       fetchData();
     }, [])
   );
+
+  // Real-Time Socket WebHooks for Follower Count
+  React.useEffect(() => {
+    if (!socket || !user?._id) return;
+    
+    const handleStatsUpdate = (data: any) => {
+      if (data.userId === user._id) {
+        setUser(prev => {
+          if (!prev) return prev;
+          let newStats = { ...prev.stats };
+          if (data.followersCount !== undefined) newStats.followers = data.followersCount;
+          if (data.followingCount !== undefined) newStats.following = data.followingCount;
+          return { ...prev, stats: newStats };
+        });
+      }
+    };
+
+    socket.on('profileStatsUpdated', handleStatsUpdate);
+    return () => {
+      socket.off('profileStatsUpdated', handleStatsUpdate);
+    };
+  }, [socket, user?._id]);
 
   const handleShareProfile = async () => {
     try {
@@ -199,13 +227,15 @@ export default function ProfileScreen() {
   const renderHeader = () => (
     <View style={styles.headerContentWrapper}>
       <View style={styles.header}>
-        {!user.profilePicture || user.profilePicture.includes('anonymous-avatar-icon') || user.profilePicture.includes('pravatar.cc') ? (
-          <View style={[styles.profileImage, { justifyContent: 'center', alignItems: 'center' }]}>
-            <Ionicons name="person" size={60} color={colorScheme === 'dark' ? '#aaa' : '#888'} />
-          </View>
-        ) : (
-           <Image source={{ uri: user.profilePicture }} style={styles.profileImage} />
-        )}
+        <TouchableOpacity activeOpacity={0.8} onPress={() => setProfileModalVisible(true)}>
+            {!user.profilePicture || user.profilePicture.includes('anonymous-avatar-icon') || user.profilePicture.includes('pravatar.cc') ? (
+              <View style={[styles.profileImage, { justifyContent: 'center', alignItems: 'center' }]}>
+                <Ionicons name="person" size={60} color={colorScheme === 'dark' ? '#aaa' : '#888'} />
+              </View>
+            ) : (
+               <Image source={{ uri: user.profilePicture }} style={styles.profileImage} />
+            )}
+        </TouchableOpacity>
 
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
@@ -215,7 +245,7 @@ export default function ProfileScreen() {
           <TouchableOpacity 
             style={styles.stat}
             onPress={() => router.push({
-              pathname: 'followers-list',
+              pathname: '/followers-list' as any,
               params: { userId: user._id, username: user.username, type: 'followers' }
             })}
             activeOpacity={0.7}
@@ -226,7 +256,7 @@ export default function ProfileScreen() {
           <TouchableOpacity 
             style={styles.stat}
             onPress={() => router.push({
-              pathname: 'followers-list',
+              pathname: '/followers-list' as any,
               params: { userId: user._id, username: user.username, type: 'following' }
             })}
             activeOpacity={0.7}
@@ -251,7 +281,7 @@ export default function ProfileScreen() {
         
         {user.name ? <ThemedText style={styles.username}>@{user.username}</ThemedText> : null}
         
-        {user.bio ? <ThemedText style={styles.bioText}>{user.bio}</ThemedText> : null}
+        {user.bio ? <ExpandableBio text={user.bio} maxLines={3} /> : null}
         
         <View style={styles.metadataRow}>
           {user.location ? (
@@ -318,6 +348,14 @@ export default function ProfileScreen() {
         ListEmptyComponent={renderEmptyState}
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+      />
+
+      <ProfilePictureModal 
+        visible={isProfileModalVisible}
+        uri={user.profilePicture}
+        isEditable={true}
+        onClose={() => setProfileModalVisible(false)}
+        onUpdate={(newUri) => setUser(prev => prev ? { ...prev, profilePicture: newUri } : null)}
       />
     </ThemedView>
   );

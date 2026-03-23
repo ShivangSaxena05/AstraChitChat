@@ -14,22 +14,12 @@ const getUserProfile = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Get post count
-        const postCount = await Post.countDocuments({ user: req.user._id });
-
-        // Get follower/following counts
-        const followersCount = await Follow.countDocuments({ following: req.user._id });
-        const followingCount = await Follow.countDocuments({ follower: req.user._id });
-
-        // Get total likes count
-        const userPosts = await Post.find({ user: req.user._id }).select('_id');
-        const postIds = userPosts.map(p => p._id);
-        const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
-
         res.json({
             _id: user._id,
+            displayName: user.name, // Aliased for client compatibility
             name: user.name,
-            username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
+            username: user.username,
+            profilePictureUrl: user.profilePicture, // Aliased
             profilePicture: user.profilePicture,
             coverPhoto: user.coverPhoto || '',
             bio: user.bio || '',
@@ -37,12 +27,14 @@ const getUserProfile = async (req, res) => {
             website: user.website || '',
             pronouns: user.pronouns || '',
             stats: {
-                posts: postCount,
-                followers: followersCount,
-                following: followingCount,
-                likes: totalLikes,
+                posts: user.postsCount || 0,
+                followers: user.followersCount || 0,
+                following: user.followingCount || 0,
+                likes: user.totalLikesCount || 0,
             },
             isPrivate: user.isPrivate,
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
         });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
@@ -62,50 +54,51 @@ const getUserProfileById = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        // Get post count
-        const postCount = await Post.countDocuments({ user: userId });
-
-        // Get follower/following counts
-        const followersCount = await Follow.countDocuments({ following: userId });
-        const followingCount = await Follow.countDocuments({ follower: userId });
-
-        // Get total likes count
-        const userPosts = await Post.find({ user: userId }).select('_id');
-        const postIds = userPosts.map(p => p._id);
-        const totalLikes = await Like.countDocuments({ post: { $in: postIds } });
-
         // Check block/mute status
         let isBlocked = false;
         let isMuted = false;
+        let isFollowing = false;
         if (req.user) {
             const currentUser = await User.findById(req.user._id);
-            isBlocked = currentUser.blockedUsers && currentUser.blockedUsers.includes(userId);
-            isMuted = currentUser.mutedUsers && currentUser.mutedUsers.includes(userId);
+            if (currentUser) {
+                isBlocked = currentUser.blockedUsers && currentUser.blockedUsers.includes(userId);
+                isMuted = currentUser.mutedUsers && currentUser.mutedUsers.includes(userId);
+                isFollowing = await Follow.findOne({
+                  follower: req.user._id,
+                  following: userId
+                });
+            }
         }
 
         res.json({
             _id: user._id,
+            displayName: user.name,
             name: user.name,
-            username: user.username || user.name.toLowerCase().replace(/\s+/g, ''),
+            username: user.username,
+            profilePictureUrl: user.profilePicture,
             profilePicture: user.profilePicture,
             bio: user.bio || '',
             stats: {
-                posts: postCount,
-                followers: followersCount,
-                following: followingCount,
-                likes: totalLikes,
+                posts: user.postsCount || 0,
+                followers: user.followersCount || 0,
+                following: user.followingCount || 0,
+                likes: user.totalLikesCount || 0,
             },
             isPrivate: user.isPrivate,
             isTwoFactorEnabled: user.isTwoFactorEnabled,
             role: user.role,
             isBlocked,
             isMuted,
+            isFollowing: !!isFollowing,
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
         });
     } catch (error) {
         console.error('Error fetching user profile:', error);
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
 
 // @desc    Update user profile
 // @route   PUT /api/profile/me

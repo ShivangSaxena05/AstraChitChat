@@ -4,6 +4,8 @@ import { TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, Sty
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { get, post } from '@/services/api';
@@ -175,11 +177,12 @@ export default function ChatDetailScreen() {
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
   
-  // Call Gesture State
+  // Call Gesture State (Reanimated)
   const [isHoldingTop, setIsHoldingTop] = useState(false);
   const [callProgress, setCallProgress] = useState(0);
-  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const holdStartTimeRef = useRef<number>(0);
+  
+  const isAtBottom = useSharedValue(true);
+  const pullDistance = useSharedValue(0);
 
   // Reply/Quote feature state
   const [quotedMessage, setQuotedMessage] = useState<Message | null>(null);
@@ -521,7 +524,7 @@ export default function ChatDetailScreen() {
       if (isLoadMore) {
         setMessages(prevMessages => {
           // Hydrate messages using both new batch and existing messages
-          const allMessagesMap = new Map([...processedMessages, ...prevMessages].map(m => [m._id, m]));
+          const allMessagesMap = new Map<string, Message>([...processedMessages, ...prevMessages].map(m => [m._id, m]));
           
           const hydratedNewMessages = processedMessages.map((msg: Message) => {
             if (msg.quotedMsgId && !msg.quotedMessage) {
@@ -547,7 +550,7 @@ export default function ChatDetailScreen() {
         });
       } else {
         // Initial load hydration
-        const msgMap = new Map(processedMessages.map((m: Message) => [m._id, m]));
+        const msgMap = new Map<string, Message>(processedMessages.map((m: Message) => [m._id, m]));
         const hydratedMessages = processedMessages.map((msg: Message) => {
           if (msg.quotedMsgId && !msg.quotedMessage) {
             const found = msgMap.get(msg.quotedMsgId);
@@ -739,56 +742,59 @@ const sendMessage = async () => {
     await fetchMessages(true);
   }, [loadingMore, hasMore, oldestMessageId, fetchMessages]);
 
-  // Handle scroll to detect when user wants to load more AND the scroll-and-hold calling gesture
+  // Refactored to use Reanimated & Gesture Handler for the specific bottom pull action
   const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
     
+    // In an inverted list, offsetY = 0 is the newest message (bottom of chat)
+    isAtBottom.value = offsetY <= 0;
+
     const contentHeight = event.nativeEvent.contentSize.height;
     const layoutHeight = event.nativeEvent.layoutMeasurement.height;
     const maxOffset = contentHeight - layoutHeight;
     
-    // Load more logic (approaching bottom)
+    // Load more logic (approaching oldest messages)
     if (offsetY > maxOffset - 100 && hasMore && !loadingMore) {
       loadMoreMessages();
     }
-    
-    // Pull-to-call logic (pulling past max offset)
-    if (offsetY > maxOffset + 30) {
-      if (!isHoldingTop) {
-        setIsHoldingTop(true);
-        holdStartTimeRef.current = Date.now();
-        
-        if (!callTimerRef.current) {
-          callTimerRef.current = setInterval(() => {
-            const elapsed = Date.now() - holdStartTimeRef.current;
-            const progress = Math.min(elapsed / 2000, 1);
-            setCallProgress(progress);
-            
-              if (progress >= 1) {
-                if (callTimerRef.current) clearInterval(callTimerRef.current);
-                callTimerRef.current = null;
-                setIsHoldingTop(false);
-                setCallProgress(0);
-                if (otherUserId && chatId) {
-                  initiateCall([otherUserId], chatId);
-                } else {
-                  Alert.alert("Error", "Cannot initiate call right now.");
-                }
-              }
-          }, 50);
-        }
-      }
+  }, [hasMore, loadingMore, loadMoreMessages, isAtBottom]);
+
+  const triggerAnimatedCall = useCallback(() => {
+    if (otherUserId && chatId) {
+      initiateCall([otherUserId], chatId);
     } else {
-      if (isHoldingTop) {
-        setIsHoldingTop(false);
-        setCallProgress(0);
-        if (callTimerRef.current) {
-          clearInterval(callTimerRef.current);
-          callTimerRef.current = null;
-        }
-      }
+      Alert.alert("Error", "Cannot initiate call right now.");
     }
-  }, [hasMore, loadingMore, loadMoreMessages, isHoldingTop]);
+  }, [otherUserId, chatId, initiateCall]);
+
+  const pullGesture = Gesture.Pan()
+    .onChange((event) => {
+       // Dragging heavily at the bottom (offset <= 0)
+       // A drag upwards on the screen is negative translationY. E.g. pulling up the content.
+       // However, in inverted lists dragging down (positive translation) overscrolls the bottom.
+       // The prompt says "upward drag from bottom". 
+       // We'll track purely vertical drags when at bottom.
+       if (isAtBottom.value && Math.abs(event.translationY) > 0) {
+           pullDistance.value = Math.abs(event.translationY);
+           runOnJS(setIsHoldingTop)(true);
+           runOnJS(setCallProgress)(Math.min(pullDistance.value / 150, 1));
+       }
+    })
+    .onEnd(() => {
+       if (pullDistance.value > 150) {
+          runOnJS(triggerAnimatedCall)();
+       }
+       pullDistance.value = withSpring(0);
+       runOnJS(setIsHoldingTop)(false);
+       runOnJS(setCallProgress)(0);
+    });
+
+  const animatedPullStyle = useAnimatedStyle(() => {
+    return {
+       transform: [{ translateY: withSpring(Math.max(0, 50 - pullDistance.value)) }],
+       opacity: withSpring(Math.min(pullDistance.value / 100, 1))
+    };
+  });
 
 
 
@@ -855,6 +861,7 @@ const sendMessage = async () => {
   }, [loadingMore]);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -862,7 +869,7 @@ const sendMessage = async () => {
     >
 
       {isHoldingTop && (
-        <View style={styles.callHoverContainer}>
+        <Animated.View style={[styles.callHoverContainer, animatedPullStyle]}>
           <View style={styles.callIconWrapper}>
             <Svg width="80" height="80" viewBox="0 0 80 80" style={styles.circularProgress}>
               <Circle cx="40" cy="40" r="36" stroke="#333" strokeWidth="4" fill="none" />
@@ -882,9 +889,9 @@ const sendMessage = async () => {
             <Ionicons name="call" size={32} color={callProgress >= 1 ? "#4ADDAE" : "#fff"} />
           </View>
           <Text style={styles.callHoverText}>
-            {callProgress >= 1 ? "Calling..." : "Hold to Call"}
+            {callProgress >= 1 ? "Calling..." : "Pull to Call"}
           </Text>
-        </View>
+        </Animated.View>
       )}
 
       {/* Chat Header */}
@@ -892,10 +899,8 @@ const sendMessage = async () => {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        
-        <View style={styles.headerInfo}>
-          <Text style={styles.partnerName} numberOfLines={1}>{otherUsername || 'User'}</Text>
-          <View style={styles.statusRow}>
+
+        <View style={styles.statusRow}>
             {otherUserTyping ? (
               <Text style={styles.typingText}>Typing...</Text>
             ) : (
@@ -909,29 +914,30 @@ const sendMessage = async () => {
               </>
             )}
           </View>
-        </View>
 
 
       </View>
 
-      <FlatList
-        ref={flatListRef}
-        data={[...groupedMessages].reverse()}
-        inverted
-        renderItem={renderItem}
-        keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}` : `msg-${item.data._id}`}
-        style={styles.messagesList}
-        contentContainerStyle={styles.messagesContainer}
-        initialNumToRender={20}
-        maxToRenderPerBatch={10}
-        windowSize={10}
-        removeClippedSubviews={Platform.OS === 'android'}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        onEndReached={hasMore && !loadingMore && messages.length > 0 ? loadMoreMessages : null}
-        onEndReachedThreshold={0.5}
-        ListHeaderComponent={renderHeader}
-      />
+      <GestureDetector gesture={pullGesture}>
+        <FlatList
+          ref={flatListRef}
+          data={[...groupedMessages].reverse()}
+          inverted
+          renderItem={renderItem}
+          keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}` : `msg-${item.data._id}`}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContainer}
+          initialNumToRender={20}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          removeClippedSubviews={Platform.OS === 'android'}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          onEndReached={hasMore && !loadingMore && messages.length > 0 ? loadMoreMessages : null}
+          onEndReachedThreshold={0.5}
+          ListHeaderComponent={renderHeader}
+        />
+      </GestureDetector>
 
       {/* Input Area - Using column layout to properly stack reply preview and input */}
       <View style={[styles.inputContainer, quotedMessage && styles.inputContainerWithReply]}>
@@ -979,6 +985,7 @@ const sendMessage = async () => {
         </View>
       </View>
     </KeyboardAvoidingView>
+    </GestureHandlerRootView>
   );
 }
 

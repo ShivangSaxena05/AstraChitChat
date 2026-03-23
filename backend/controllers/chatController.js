@@ -827,6 +827,190 @@ async function getUserStatus(req, res) {
   }
 }
 
+/**
+ * GET /api/chats/:chatId/info
+ * Get chat info for Chat Info screen
+ */
+async function getChatInfo(req, res) {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id.toString();
+
+    const chat = await Chat.findOne({ _id: toObjectId(chatId), 'participants.user': toObjectId(userId) })
+      .populate('participants.user', 'username profilePicture isOnline lastSeen')
+      .lean();
+
+    if (!chat) return res.status(404).json({ message: 'Chat not found' });
+
+    const participant = chat.participants.find(p => p.user._id.toString() === userId);
+    const otherUser = chat.participants.find(p => p.user._id.toString() !== userId);
+
+    if (!otherUser?.user) return res.status(400).json({ message: 'Invalid chat participants' });
+
+    // Media counts from Messages aggregate
+    const mediaCounts = await Message.aggregate([
+      { $match: { chat: toObjectId(chatId) } },
+      {
+        $group: {
+          _id: '$msgType',
+          photos: { $sum: { $cond: [{ $regexMatch: { input: '$msgType', regex: '^image' } }, 1, 0] } },
+          videos: { $sum: { $cond: [{ $regexMatch: { input: '$msgType', regex: '^video' } }, 1, 0] } },
+          links: { $sum: { $cond: [{ $eq: ['$msgType', 'link'] }, 1, 0] } },
+          files: { $sum: { $cond: [{ $eq: ['$msgType', 'file'] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    const counts = {
+      photos: mediaCounts.find(c => c._id === 'image')?.photos || 0,
+      videos: mediaCounts.find(c => c._id === 'video')?.videos || 0,
+      links: mediaCounts.find(c => c._id === 'link')?.links || 0,
+      files: mediaCounts.find(c => c._id === 'file')?.files || 0,
+    };
+
+    return res.json({
+      profilePicture: otherUser.user.profilePicture,
+      isMuted: chat.mutedBy?.has(userId) || false,
+      mutedUntil: chat.mutedBy?.get(userId)?.mutedUntil,
+      isPinned: chat.isPinnedBy?.includes(toObjectId(userId)) || false,
+      mediaCounts: counts
+    });
+  } catch (error) {
+    console.error('getChatInfo error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+/**
+ * GET /api/chats/:chatId/media
+ * Get shared media/files by type with pagination
+ */
+async function getChatMedia(req, res) {
+  try {
+    const { chatId } = req.params;
+    const { type, limit = '12', beforeId } = req.query;
+    const userId = req.user._id.toString();
+
+    const chat = await Chat.findOne({ _id: toObjectId(chatId), 'participants.user': toObjectId(userId) });
+    if (!chat) return res.status(403).json({ message: 'Chat not found' });
+
+    const match: any = { chat: toObjectId(chatId) };
+    if (type) {
+      if (type === 'photos') match.msgType = { $regex: '^image' };
+      else if (type === 'videos') match.msgType = { $regex: '^video' };
+      else if (type === 'files') match.msgType = 'file';
+      else if (type === 'links') match.msgType = 'link';
+    }
+    if (beforeId) match._id = { $lt: toObjectId(beforeId as string) };
+
+    const pageSize = Math.min(parseInt(limit as string), 50);
+
+    const pipeline = [
+      { $match: match },
+      { $sort: { createdAt: -1 } },
+      { $limit: pageSize + 1 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'sender',
+          foreignField: '_id',
+          as: 'sender',
+          pipeline: [{ $project: { username: 1 } }]
+        }
+      },
+      { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
+      { $project: { _id: 1, url: { $ifNull: ['$mediaUrl', '$bodyText'] }, mimeType: 1, sizeBytes: 1, createdAt: 1, sender: 1 } }
+    ];
+
+    const media = await Message.aggregate(pipeline);
+
+    const hasMore = media.length > pageSize;
+    if (hasMore) media.pop();
+
+    return res.json({ media, hasMore });
+  } catch (error) {
+    console.error('getChatMedia error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+/**
+ * POST /api/chats/:chatId/mute
+ * Mute chat for user
+ */
+async function muteChat(req, res) {
+  try {
+    const { chatId } = req.params;
+    const { duration } = req.body; // '7d' or 'inf'
+    const userId = req.user._id.toString();
+
+    const mutedUntil = duration === 'inf' ? null : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    
+    await Chat.updateOne(
+      { _id: toObjectId(chatId), 'participants.user': toObjectId(userId) },
+      { $set: { [`mutedBy.${userId}`]: { mutedUntil } } }
+    );
+
+    return res.json({ message: 'Chat muted' });
+  } catch (error) {
+    console.error('muteChat error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+/**
+ * POST /api/chats/:chatId/pin
+ * Toggle pin status
+ */
+async function pinChat(req, res) {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id.toString();
+
+    const chat = await Chat.findById(chatId);
+    if (!chat || !chat.participants.some(p => p.user.toString() === userId)) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const isPinned = chat.isPinnedBy.includes(toObjectId(userId));
+    const update = isPinned 
+      ? { $pull: { isPinnedBy: toObjectId(userId) } }
+      : { $addToSet: { isPinnedBy: toObjectId(userId) } };
+
+    await Chat.updateOne({ _id: toObjectId(chatId) }, update);
+    return res.json({ message: 'Pin status updated', isPinned: !isPinned });
+  } catch (error) {
+    console.error('pinChat error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+/**
+ * POST /api/chats/:chatId/clear
+ * Clear chat history for user
+ */
+async function clearChat(req, res) {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id.toString();
+
+    // Logic to soft-delete or mark messages as cleared for user
+    // For now, reset unreadCount and lastReadMsgId
+    await Chat.updateOne(
+      { _id: toObjectId(chatId), 'participants.user': toObjectId(userId) },
+      { 
+        $set: { [`unreadCount.${userId}`]: 0 },
+        $unset: { 'participants.$.lastReadMsgId': '' }
+      }
+    );
+
+    return res.json({ message: 'Chat cleared' });
+  } catch (error) {
+    console.error('clearChat error:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
 module.exports = {
   getChats,
   getChatMessages,
@@ -842,5 +1026,11 @@ module.exports = {
   getMessageReactions,
   searchChats,
   getUserStatus,
-  createGroupChat
+  createGroupChat,
+  getChatInfo,
+  getChatMedia,
+  muteChat,
+  pinChat,
+  clearChat
 };
+

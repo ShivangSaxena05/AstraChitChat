@@ -2,12 +2,20 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { del, get, post } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme, Modal } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import ProfilePictureModal from '@/components/ProfilePictureModal';
+import ExpandableBio from '@/components/ExpandableBio';
+import { useSocket } from '@/contexts/SocketContext';
 
 interface UserProfile {
+  _id: string;
   username: string;
+  name?: string;
+  isOnline?: boolean;
+  lastSeen?: string;
   profilePicture: string;
   bio: string;
   stats: {
@@ -19,6 +27,7 @@ interface UserProfile {
   isFollowing?: boolean;
   isBlocked?: boolean;
   isMuted?: boolean;
+  isPrivate?: boolean;
 }
 
 interface UserPost {
@@ -43,10 +52,15 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isRequested, setIsRequested] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isProfileModalVisible, setProfileModalVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const { socket } = useSocket();
 
   // useFocusEffect will refetch data every time the screen comes into view
   useFocusEffect(
@@ -63,6 +77,7 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           // Fetch follow status separately
           const followStatus = await get(`/follow/${userId}/check`);
           setIsFollowing(followStatus.isFollowing);
+          setIsRequested(followStatus.isRequested);
           // For now, skip posts to avoid additional API calls
           setPosts([]);
         } catch (error: any) {
@@ -78,38 +93,107 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
     }, [userId])
   );
 
+  // Real-Time Socket WebHooks for Follower Count
+  React.useEffect(() => {
+    if (!socket || !user?._id) return;
+    
+    const handleStatsUpdate = (data: any) => {
+      if (data.userId === user._id) {
+        setUser(prev => {
+          if (!prev) return prev;
+          let newStats = { ...prev.stats };
+          if (data.followersCount !== undefined) newStats.followers = data.followersCount;
+          if (data.followingCount !== undefined) newStats.following = data.followingCount;
+          return { ...prev, stats: newStats };
+        });
+      }
+    };
+
+    const handlePresenceUpdate = (data: any) => {
+      if (data.userId === user._id) {
+        setUser(prev => prev ? { ...prev, isOnline: data.isOnline, lastSeen: data.lastSeen || prev.lastSeen } : prev);
+      }
+    };
+
+    socket.on('profileStatsUpdated', handleStatsUpdate);
+    socket.on('user online', handlePresenceUpdate);
+    return () => {
+      socket.off('profileStatsUpdated', handleStatsUpdate);
+      socket.off('user online', handlePresenceUpdate);
+    };
+  }, [socket, user?._id]);
+
   const handleFollow = async () => {
+    if (isActionLoading) return;
+    setIsActionLoading(true);
+
+    // Optimistic Update
+    const wasFollowing = isFollowing;
+    const wasRequested = isRequested;
+
+    if (user?.isPrivate) {
+      setIsRequested(true);
+    } else {
+      setIsFollowing(true);
+    }
+
     try {
-      await post(`/follow/${userId}`, {});
-      // Refetch user data to get updated follower count and follow status
+      const response = await post(`/follow/${userId}`, {});
+      
+      // Update UI matching strict backend verdict
+      setIsFollowing(!!response.isFollowing);
+      setIsRequested(!!response.isRequested);
+
+      // Refetch user data to get accurate follower counts
       const updatedUserData = await get(`/users/${userId}`);
-      const followStatus = await get(`/follow/${userId}/check`);
       setUser(updatedUserData);
-      setIsFollowing(followStatus.isFollowing);
     } catch (error: any) {
+      // Rollback on failure
+      setIsFollowing(wasFollowing);
+      setIsRequested(wasRequested);
       console.error('Follow error:', error);
       Alert.alert('Error', error.response?.data?.message || 'Failed to follow user');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
   const handleUnfollow = async () => {
+    if (isActionLoading) return;
+    setIsActionLoading(true);
+
+    // Optimistic Update
+    const wasFollowing = isFollowing;
+    const wasRequested = isRequested;
+
+    setIsFollowing(false);
+    setIsRequested(false);
+
     try {
       await del(`/follow/${userId}`);
-      // Refetch user data to get updated follower count and follow status
+      
+      // Refetch user data to get updated follower count
       const updatedUserData = await get(`/users/${userId}`);
-      const followStatus = await get(`/follow/${userId}/check`);
       setUser(updatedUserData);
-      setIsFollowing(followStatus.isFollowing);
     } catch (error: any) {
+      // Rollback on failure
+      setIsFollowing(wasFollowing);
+      setIsRequested(wasRequested);
       console.error('Unfollow error:', error);
       Alert.alert('Error', error.response?.data?.message || 'Failed to unfollow user');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
   const handleMessage = async () => {
+    if (isActionLoading) return;
+    setIsActionLoading(true);
+
     try {
       if (!userId) {
         Alert.alert('Error', 'User ID is missing. Cannot start chat.');
+        setIsActionLoading(false);
         return;
       }
 
@@ -148,6 +232,8 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to start chat');
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
@@ -372,18 +458,30 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       color: colorScheme === 'dark' ? '#999' : '#999',
       textAlign: 'center',
     },
-    reportContainer: {
-      paddingHorizontal: 16,
-      marginBottom: 16,
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'flex-end',
     },
-    reportButton: {
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef',
-      paddingVertical: 8,
-      borderRadius: 8,
-      alignItems: 'center',
+    actionSheet: {
+      backgroundColor: colorScheme === 'dark' ? '#222' : '#fff',
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingBottom: 30,
     },
-    reportButtonText: {
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+    actionItem: {
+      paddingVertical: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: colorScheme === 'dark' ? '#333' : '#eee',
+    },
+    actionItemText: {
+      fontSize: 16,
+      textAlign: 'center',
+    },
+    actionItemTextDestructive: {
+      fontSize: 16,
+      color: '#ff4444',
+      textAlign: 'center',
       fontWeight: 'bold',
     },
   }), [colorScheme]);
@@ -398,9 +496,21 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
 
   return (
     <ThemedView style={styles.container}>
+      <Stack.Screen 
+        options={{
+          headerTitle: user.username || 'Profile',
+          headerRight: () => (
+            <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ marginRight: 15 }}>
+              <Ionicons name="ellipsis-vertical" size={24} color={colorScheme === 'dark' ? '#fff' : '#000'} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       {/* Profile Header */}
       <View style={styles.header}>
-        <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.profileImage} />
+        <TouchableOpacity activeOpacity={0.8} onPress={() => setProfileModalVisible(true)}>
+          <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.profileImage} />
+        </TouchableOpacity>
         <View style={styles.statsContainer}>
           <View style={styles.stat}>
             <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
@@ -409,7 +519,7 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           <TouchableOpacity 
             style={styles.stat}
             onPress={() => router.push({
-              pathname: 'followers-list',
+              pathname: '/followers-list' as any,
               params: { userId: userId, username: user.username, type: 'followers' }
             })}
             activeOpacity={0.7}
@@ -420,7 +530,7 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           <TouchableOpacity 
             style={styles.stat}
             onPress={() => router.push({
-              pathname: 'followers-list',
+              pathname: '/followers-list' as any,
               params: { userId: userId, username: user.username, type: 'following' }
             })}
             activeOpacity={0.7}
@@ -439,45 +549,45 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
 
       {/* Bio Section */}
       <View style={styles.bioContainer}>
-        <ThemedText style={styles.username}>{user.username}</ThemedText>
-        <ThemedText>{user.bio}</ThemedText>
+        <ThemedText style={styles.username}>@{user.username}</ThemedText>
+        
+        {/* ONLINE STATUS */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
+          <View style={{ 
+            width: 8, 
+            height: 8, 
+            borderRadius: 4, 
+            backgroundColor: user.isOnline ? '#4ADDAE' : '#FF4444',
+            marginRight: 6 
+          }} />
+          <ThemedText style={{ fontSize: 13, color: colorScheme === 'dark' ? '#aaa' : '#666' }}>
+            {user.isOnline ? 'Online now' : (user.lastSeen ? `Last seen ${new Date(user.lastSeen).toLocaleString()}` : 'Offline')}
+          </ThemedText>
+        </View>
+
+        <ExpandableBio text={user.bio} maxLines={3} />
       </View>
 
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
         {isFollowing ? (
           <>
-            <TouchableOpacity style={[styles.button, styles.messageButton]} onPress={handleMessage}>
+            <TouchableOpacity disabled={isActionLoading} style={[styles.button, styles.messageButton, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleMessage}>
               <ThemedText style={styles.messageButtonText}>Message</ThemedText>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.button} onPress={handleUnfollow}>
+            <TouchableOpacity disabled={isActionLoading} style={[styles.button, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleUnfollow}>
               <ThemedText style={{ color: '#ff4444', fontWeight: 'bold' }}>Unfollow</ThemedText>
             </TouchableOpacity>
           </>
+        ) : isRequested ? (
+          <TouchableOpacity disabled={isActionLoading} style={[styles.button, { backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef', opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleUnfollow}>
+            <ThemedText style={{ color: colorScheme === 'dark' ? '#fff' : '#000', fontWeight: 'bold' }}>Requested</ThemedText>
+          </TouchableOpacity>
         ) : (
-          <TouchableOpacity style={[styles.button, styles.followButton]} onPress={handleFollow}>
+          <TouchableOpacity disabled={isActionLoading} style={[styles.button, styles.followButton, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleFollow}>
             <ThemedText style={styles.followButtonText}>Follow</ThemedText>
           </TouchableOpacity>
         )}
-      </View>
-
-      {/* Report Button */}
-      <View style={styles.reportContainer}>
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-          <TouchableOpacity style={[styles.button, { backgroundColor: isBlocked ? '#ff4444' : (colorScheme === 'dark' ? '#333' : '#efefef') }]} onPress={handleBlock}>
-            <ThemedText style={{ color: isBlocked ? '#fff' : (colorScheme === 'dark' ? '#fff' : '#000'), fontWeight: 'bold' }}>
-              {isBlocked ? 'Unblock' : 'Block User'}
-            </ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, { backgroundColor: isMuted ? '#FFA500' : (colorScheme === 'dark' ? '#333' : '#efefef') }]} onPress={handleMute}>
-            <ThemedText style={{ color: isMuted ? '#fff' : (colorScheme === 'dark' ? '#fff' : '#000'), fontWeight: 'bold' }}>
-              {isMuted ? 'Unmute' : 'Mute User'}
-            </ThemedText>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
-          <ThemedText style={styles.reportButtonText}>Report User</ThemedText>
-        </TouchableOpacity>
       </View>
 
       {/* Tab Navigation */}
@@ -511,6 +621,39 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
         style={styles.grid}
         ListEmptyComponent={renderEmptyState}
       />
+
+      <ProfilePictureModal 
+        visible={isProfileModalVisible}
+        uri={user.profilePicture || 'https://i.pravatar.cc/150'}
+        isEditable={false}
+        onClose={() => setProfileModalVisible(false)}
+      />
+
+      {/* Action Menu Modal */}
+      <Modal
+        visible={menuVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setMenuVisible(false)}>
+          <View style={styles.actionSheet}>
+            <TouchableOpacity style={styles.actionItem} onPress={() => { setMenuVisible(false); handleBlock(); }}>
+              <ThemedText style={isBlocked ? styles.actionItemTextDestructive : styles.actionItemText}>
+                {isBlocked ? 'Unblock User' : 'Block User'}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionItem} onPress={() => { setMenuVisible(false); handleMute(); }}>
+              <ThemedText style={isMuted ? styles.actionItemTextDestructive : styles.actionItemText}>
+                {isMuted ? 'Unmute User' : 'Mute User'}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionItem, { borderBottomWidth: 0 }]} onPress={() => { setMenuVisible(false); handleReport(); }}>
+              <ThemedText style={styles.actionItemTextDestructive}>Report User</ThemedText>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ThemedView>
   );
 }

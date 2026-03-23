@@ -1,4 +1,5 @@
 import { get, post } from './api';
+import { Platform } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -39,6 +40,53 @@ export function getMimeType(uri: string): string {
     ogg: 'audio/ogg',
   };
   return mimeMap[ext || ''] || 'application/octet-stream';
+}
+
+/**
+ * Convert a file URI to a File object (web) or native object (mobile).
+ * 
+ * On web: Fetches the file from the URI and wraps it in a File object that
+ * FormData can properly serialize and send as multipart/form-data.
+ * 
+ * On native: Returns the native ImagePicker object format { uri, type, name }
+ * which React Native's FormData handles natively.
+ * 
+ * @param fileUri   File URI from image/video picker (e.g. "file://..." or "data://...")
+ * @param fileName  File name (e.g. "photo.jpg")
+ * @returns File object (web) or { uri, type, name } object (native)
+ */
+async function uriToFile(
+  fileUri: string,
+  fileName: string
+): Promise<File | { uri: string; type: string; name: string }> {
+  // On native platforms (iOS/Android), return the native format
+  // React Native's FormData handles this natively
+  if (Platform.OS === 'ios' || Platform.OS === 'android') {
+    return {
+      uri: fileUri,
+      type: getMimeType(fileUri),
+      name: fileName,
+    };
+  }
+
+  // On web: Convert URI to File object for proper FormData serialization
+  try {
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+
+    // Create a File object from the blob
+    // This allows FormData to properly serialize it as multipart/form-data
+    const file = new File([blob], fileName, { type: getMimeType(fileUri) });
+    return file;
+  } catch (error) {
+    console.error('Error converting URI to File:', error);
+    // Fallback to native format if conversion fails
+    return {
+      uri: fileUri,
+      type: getMimeType(fileUri),
+      name: fileName,
+    };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,6 +225,9 @@ export const uploadMediaDirect = async (
  * Uploads a media file through the backend (multer-s3 → S3 → CloudFront URL).
  * For new code, prefer uploadMediaDirect() which uploads straight to S3.
  *
+ * On web: Converts URI to File object for proper FormData serialization
+ * On native: Uses native { uri, type, name } format
+ *
  * @param fileUri  Local URI from image/video picker
  * @param fileName File name (e.g. "photo.jpg")
  * @returns `{ url, key }` — CloudFront URL and S3 object key
@@ -186,12 +237,13 @@ export const uploadMedia = async (
   fileName: string
 ): Promise<UploadResult> => {
   try {
+    // Convert URI to proper format for FormData
+    // On web: Creates a File object for multipart/form-data serialization
+    // On native: Returns native { uri, type, name } object
+    const fileData = await uriToFile(fileUri, fileName);
+
     const formData = new FormData();
-    formData.append('media', {
-      uri: fileUri,
-      type: getMimeType(fileUri),
-      name: fileName,
-    } as any);
+    formData.append('media', fileData as any);
 
     // POST to multer-s3 upload endpoint
     const response = await post('/media/upload', formData);

@@ -1,17 +1,24 @@
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const s3 = require('../config/s3');
+const cloudinary = require('../config/cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-/**
- * Creates a multer upload instance that stores files in a specific S3 folder.
- *
- * S3 key format: {folder}/{ownerId}/{timestamp}-{originalname}
- *
- * @param {string} folder - S3 folder prefix: 'profile', 'cover', 'posts', or 'chat'
- * @param {Function} [getOwnerId] - Function to extract the ownerId from the request.
- *   Defaults to req.user._id. For chat uploads, pass (req) => req.params.chatId.
- */
-const createUpload = (folder, getOwnerId) => {
+const STORAGE_TYPE = process.env.STORAGE_TYPE || 'cloudinary';
+
+const createCloudinaryStorage = (folder) => {
+    return new CloudinaryStorage({
+        cloudinary: cloudinary,
+        params: {
+            folder: `Astra/${folder}`,
+            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'ogg'],
+            resource_type: 'auto',
+            transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+        }
+    });
+};
+
+const createS3Upload = (folder, getOwnerId) => {
     return multer({
         storage: multerS3({
             s3: s3,
@@ -25,7 +32,7 @@ const createUpload = (folder, getOwnerId) => {
                 cb(null, key);
             },
         }),
-        limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
+        limits: { fileSize: 100 * 1024 * 1024 },
         fileFilter: function (req, file, cb) {
             const allowed = /image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|quicktime|x-msvideo)/;
             if (allowed.test(file.mimetype)) {
@@ -37,8 +44,15 @@ const createUpload = (folder, getOwnerId) => {
     });
 };
 
-// Default upload instance (posts folder, keyed by userId) — backward-compatible
+const createUpload = (folder, getOwnerId) => {
+    if (STORAGE_TYPE === 's3') {
+        return createS3Upload(folder, getOwnerId);
+    }
+    return multer({ storage: createCloudinaryStorage(folder) });
+};
+
 const upload = createUpload('posts');
 
 module.exports = upload;
 module.exports.createUpload = createUpload;
+module.exports.STORAGE_TYPE = STORAGE_TYPE;

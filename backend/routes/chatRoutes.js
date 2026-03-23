@@ -14,7 +14,12 @@ const {
     getMessageReceipts,
     getMessageReactions,
     getUserStatus,
-    createGroupChat
+    createGroupChat,
+    getChatInfo,
+    getChatMedia,
+    muteChat,
+    pinChat,
+    clearChat
 } = require('../controllers/chatController');
 
 // const {

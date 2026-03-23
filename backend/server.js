@@ -63,7 +63,7 @@ app.use('/api/follow', require('./routes/followRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/report', require('./routes/reportRoutes'));
-
+app.use('api/media', require('./routes/mediaRoutes1')); // Temporary route for direct S3 uploads (to be integrated into mediaRoutes later)
 // Basic route
 app.get('/', (req, res) => {
     res.send('Hello World');

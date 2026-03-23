@@ -894,16 +894,16 @@ async function getChatMedia(req, res) {
     const chat = await Chat.findOne({ _id: toObjectId(chatId), 'participants.user': toObjectId(userId) });
     if (!chat) return res.status(403).json({ message: 'Chat not found' });
 
-    const match: any = { chat: toObjectId(chatId) };
+    const match = { chat: toObjectId(chatId) };
     if (type) {
       if (type === 'photos') match.msgType = { $regex: '^image' };
       else if (type === 'videos') match.msgType = { $regex: '^video' };
       else if (type === 'files') match.msgType = 'file';
       else if (type === 'links') match.msgType = 'link';
     }
-    if (beforeId) match._id = { $lt: toObjectId(beforeId as string) };
+    if (beforeId) match._id = { $lt: toObjectId(beforeId) };
 
-    const pageSize = Math.min(parseInt(limit as string), 50);
+    const pageSize = Math.min(parseInt(limit), 50);
 
     const pipeline = [
       { $match: match },

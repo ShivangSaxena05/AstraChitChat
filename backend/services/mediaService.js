@@ -1,39 +1,140 @@
 /**
  * mediaService.js
  * ---------------
- * Centralised helpers for all S3 / CloudFront media operations.
+ * Centralised helpers for all Cloudinary / S3 media operations.
  *
- * S3 folder structure:
+ * Cloudinary folder structure:
+ *   Astra/profile/{userId}      — profile pictures
+ *   Astra/cover/{userId}        — cover photos
+ *   Astra/posts/{userId}        — post images/videos
+ *   Astra/chat/{chatId}         — chat media files
+ *
+ * S3 folder structure (backup):
  *   profile/{userId}/{timestamp}-{filename}   — profile pictures
  *   cover/{userId}/{timestamp}-{filename}     — cover photos
  *   posts/{userId}/{timestamp}-{filename}     — post images/videos
  *   chat/{chatId}/{timestamp}-{filename}      — chat media files
  *
  * Exports:
- *   getPresignedUploadUrl(options)
+ *   uploadToCloudinary(fileBuffer, options)
+ *     → { url, publicId, secure_url }
+ *
+ *   deleteFromCloudinary(publicId)
+ *     → void
+ *
+ *   getPresignedUploadUrl(options) - S3 only
  *     → { presignedUrl, key, cloudfrontUrl }
- *     Client PUTs directly to S3; saves cloudfrontUrl in MongoDB.
  *
- *   deleteS3Object(key)
- *     → void  (throws on error)
- *     Removes an object from the S3 bucket.
- *
- *   getSignedCloudfrontUrl(s3Key, expiresInSeconds?)
- *     → signed URL string
- *     Time-limited CF URL for private DM/chat media.
- *     Requires CLOUDFRONT_KEY_PAIR_ID + CLOUDFRONT_PRIVATE_KEY in .env.
+ *   deleteS3Object(key) - S3 only
+ *     → void
  */
 
 const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const s3 = require('../config/s3');
+const cloudinary = require('../config/cloudinary');
+const streamifier = require('streamifier');
 
-// Valid media categories → S3 folder prefixes
+const STORAGE_TYPE = process.env.STORAGE_TYPE || 'cloudinary';
+
 const MEDIA_FOLDERS = {
     profile: 'profile',
-    cover:   'cover',
-    post:    'posts',
-    chat:    'chat',
+    cover: 'cover',
+    post: 'posts',
+    chat: 'chat',
+};
+
+const uploadToCloudinary = (fileBuffer, options) => {
+    return new Promise((resolve, reject) => {
+        const { folder, ownerId, fileName, resourceType = 'auto' } = options;
+        
+        const uploadStream = cloudinary.uploader.upload_stream(
+            {
+                folder: `Astra/${folder}/${ownerId}`,
+                public_id: fileName.replace(/\.[^/.]+$/, ''),
+                resource_type: resourceType,
+                transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+            },
+            (error, result) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve({
+                        url: result.secure_url,
+                        publicId: result.public_id,
+                        secureUrl: result.secure_url,
+                        resourceType: result.resource_type,
+                        format: result.format,
+                        width: result.width,
+                        height: result.height
+                    });
+                }
+            }
+        );
+
+        streamifier.createReadStream(fileBuffer).pipe(uploadStream);
+    });
+};
+
+const uploadFileToCloudinary = (file) => {
+    return new Promise((resolve, reject) => {
+        cloudinary.uploader.upload(file.path, {
+            folder: `Astra/posts`,
+            resource_type: 'auto',
+            transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+        }, (error, result) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve({
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                    secureUrl: result.secure_url,
+                    resourceType: result.resource_type,
+                    format: result.format
+                });
+            }
+        });
+    });
+};
+
+const deleteFromCloudinary = async (publicId) => {
+    return new Promise((resolve, reject) => {
+        cloudinary.uploader.destroy(publicId, (error, result) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve(result);
+            }
+        });
+    });
+};
+
+const getCloudinaryUploadUrl = async (options) => {
+    const { folder, ownerId, fileName, resourceType = 'auto' } = options;
+    
+    const timestamp = Date.now();
+    const publicId = `Astra/${folder}/${ownerId}/${timestamp}-${fileName.replace(/\.[^/.]+$/, '')}`;
+    
+    const signedUpload = cloudinary.utils.api_sign_request({
+        timestamp: timestamp,
+        folder: `Astra/${folder}/${ownerId}`,
+        public_id: publicId,
+        resource_type: resourceType
+    }, process.env.CLOUDINARY_API_SECRET);
+
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+
+    return {
+        uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+        cloudName,
+        apiKey,
+        timestamp,
+        publicId,
+        signature: signedUpload,
+        folder: `Astra/${folder}/${ownerId}`
+    };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,4 +232,14 @@ const getSignedCloudfrontUrl = (s3Key, expiresInSeconds = 3600) => {
     }
 };
 
-module.exports = { getPresignedUploadUrl, deleteS3Object, getSignedCloudfrontUrl, MEDIA_FOLDERS };
+module.exports = { 
+    uploadToCloudinary,
+    uploadFileToCloudinary,
+    deleteFromCloudinary,
+    getCloudinaryUploadUrl,
+    getPresignedUploadUrl, 
+    deleteS3Object, 
+    getSignedCloudfrontUrl, 
+    MEDIA_FOLDERS,
+    STORAGE_TYPE
+};

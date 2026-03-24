@@ -1,18 +1,15 @@
-  import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   ScrollView,
   TouchableOpacity,
-  Text,
   StyleSheet,
-  FlatList,
   ActivityIndicator,
   Alert,
   Modal,
   Image,
   RefreshControl,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,9 +18,8 @@ import { ThemedText } from '@/components/themed-text';
 import { get, post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
 import { useCall } from '@/contexts/CallContext';
-import ChatMediaGrid from '@/components/ChatMediaGrid';
-import ProfilePictureModal from '@/components/ProfilePictureModal';
-import { ProfileSkeleton } from '@/components/ProfileSkeleton';
+import ProfileSkeleton from '@/components/ProfileSkeleton';
+import { Dimensions } from 'react-native';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -60,10 +56,26 @@ export default function ChatInfoScreen() {
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
 
-  const { socket } = useSocket();
-  const { initiateCall } = useCall();
+  // Safe context usage
+  const safeSocketResult = (() => {
+    try {
+      return useSocket();
+    } catch (e) {
+      console.warn('Socket context unavailable:', e);
+      return { socket: null as any };
+    }
+  })();
+  const safeCallResult = (() => {
+    try {
+      return useCall();
+    } catch (e) {
+      console.warn('Call context unavailable:', e);
+      return { initiateCall: (() => {}) as any };
+    }
+  })();
+  const { socket } = safeSocketResult;
+  const { initiateCall } = safeCallResult;
 
-  // Fetch initial chat info
   const fetchChatInfo = useCallback(async () => {
     try {
       const [infoRes, statusRes] = await Promise.all([
@@ -85,13 +97,13 @@ export default function ChatInfoScreen() {
         mediaCounts: infoRes?.mediaCounts || { photos: 0, videos: 0, links: 0, files: 0 },
       });
     } catch (error: any) {
+      console.error('fetchChatInfo error:', error);
       Alert.alert('Error', 'Failed to load chat info');
     } finally {
       setLoading(false);
     }
   }, [chatId, otherUserId, otherUsername]);
 
-  // Load media preview for a type
   const loadMediaPreview = useCallback(async (type: string) => {
     if (mediaData[type]?.length) return;
     setMediaLoading(prev => ({ ...prev, [type]: true }));
@@ -103,7 +115,7 @@ export default function ChatInfoScreen() {
     } finally {
       setMediaLoading(prev => ({ ...prev, [type]: false }));
     }
-  }, [chatId]);
+  }, [chatId, mediaData]);
 
   const handleMuteToggle = () => {
     Alert.alert(
@@ -144,6 +156,15 @@ export default function ChatInfoScreen() {
     );
   };
 
+  const handlePinToggle = async () => {
+    try {
+      await post(`/chats/${chatId}/pin`);
+      setData(prev => prev ? { ...prev, isPinned: !prev.isPinned } : null);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update pin');
+    }
+  };
+
   const blockUser = () => {
     Alert.alert(
       'Block user',
@@ -151,8 +172,7 @@ export default function ChatInfoScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Block', style: 'destructive', onPress: () => {
-          // Navigate to block/report flow or call API
-          router.push('/profile/block/' + otherUserId);
+          router.push(`/profile/${otherUserId}`);
         } },
       ]
     );
@@ -164,12 +184,15 @@ export default function ChatInfoScreen() {
     setRefreshing(false);
   }, [fetchChatInfo]);
 
-  // Real-time status update
+  useEffect(() => {
+    fetchChatInfo();
+  }, []);
+
   useEffect(() => {
     if (!socket) return;
 
     const handleUserStatus = (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
-      if (data.userId === otherUserId && data) {
+      if (data.userId === otherUserId) {
         setData(prev => prev ? {
           ...prev,
           otherUser: {
@@ -182,13 +205,8 @@ export default function ChatInfoScreen() {
     };
 
     socket.on('user online', handleUserStatus);
-
     return () => socket.off('user online', handleUserStatus);
   }, [socket, otherUserId]);
-
-  useEffect(() => {
-    fetchChatInfo();
-  }, []);
 
   if (loading) {
     return <ProfileSkeleton />;
@@ -202,6 +220,21 @@ export default function ChatInfoScreen() {
     );
   }
 
+  const formatLastSeen = (lastSeen: string | null): string => {
+    if (!lastSeen) return 'Last seen unknown';
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHour < 24) return `${diffHour}h ago`;
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString();
+  };
+
   const formatMuteUntil = (until: string | undefined) => {
     if (!until) return '';
     if (until === 'forever') return 'Forever';
@@ -211,16 +244,23 @@ export default function ChatInfoScreen() {
 
   const mediaTypes = ['photos', 'videos', 'links', 'files'] as const;
 
-  const renderMediaSection = (type: typeof mediaTypes[number]) => (
-    <ChatMediaGrid
-      key={type}
-      mediaType={type}
-      mediaItems={mediaData[type] || []}
-      chatId={chatId}
-      onViewAll={loadMediaPreview}
-      loading={mediaLoading[type]}
-      hasMore={data.mediaCounts[type as keyof typeof data.mediaCounts]! > (mediaData[type]?.length || 0)}
-    />
+  const renderMediaSection = (type: string, count: number) => (
+    <TouchableOpacity 
+      key={type} 
+      style={styles.mediaSection}
+      onPress={() => loadMediaPreview(type)}
+      disabled={mediaLoading[type]}
+    >
+      <View style={styles.mediaHeader}>
+        <ThemedText type="subtitle">{type.charAt(0).toUpperCase() + type.slice(1)}</ThemedText>
+        <ThemedText>{count}</ThemedText>
+      </View>
+      {mediaLoading[type] ? (
+        <ActivityIndicator size="small" />
+      ) : (
+        <ThemedText style={styles.viewAllText}>View all</ThemedText>
+      )}
+    </TouchableOpacity>
   );
 
   return (
@@ -257,7 +297,7 @@ export default function ChatInfoScreen() {
             <Ionicons name="call-outline" size={24} color="#10b981" />
             <ThemedText>Audio Call</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => initiateCall([otherUserId], chatId, true)}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => initiateCall([otherUserId], chatId)}>
             <Ionicons name="videocam-outline" size={24} color="#3b82f6" />
             <ThemedText>Video Call</ThemedText>
           </TouchableOpacity>
@@ -268,9 +308,10 @@ export default function ChatInfoScreen() {
         </View>
 
         {/* Media Sections */}
-        {mediaTypes.map(type => (
-          data.mediaCounts[type as keyof typeof data.mediaCounts]! > 0 && renderMediaSection(type)
-        ))}
+        {mediaTypes.map(type => {
+          const count = (data.mediaCounts as any)[type];
+          if (count > 0) return renderMediaSection(type, count);
+        })}
 
         {/* Chat Settings */}
         <View style={styles.settingsSection}>
@@ -287,8 +328,8 @@ export default function ChatInfoScreen() {
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.settingItem}>
-            <Ionicons name={data.isPinned ? "push" : "push-outline"} size={24} color="#10b981" />
+          <TouchableOpacity style={styles.settingItem} onPress={handlePinToggle}>
+            <Ionicons name={data.isPinned ? "bookmark" : "bookmark-outline"} size={24} color="#10b981" />
             <View style={styles.settingText}>
               <ThemedText style={styles.settingLabel}>Pin chat</ThemedText>
               <ThemedText style={styles.settingSubtext}>
@@ -318,16 +359,23 @@ export default function ChatInfoScreen() {
 
       {/* Profile Picture Modal */}
       <Modal visible={profileModalVisible} transparent animationType="fade">
-        <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center'}}>
-          <TouchableOpacity style={{position: 'absolute', top: 50, right: 20, zIndex: 1}} onPress={() => setProfileModalVisible(false)}>
+        <TouchableOpacity 
+          style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center'}}
+          activeOpacity={1}
+          onPress={() => setProfileModalVisible(false)}
+        >
+          <TouchableOpacity 
+            style={{position: 'absolute', top: 50, right: 20, zIndex: 1}} 
+            onPress={() => setProfileModalVisible(false)}
+          >
             <Ionicons name="close" size={32} color="white" />
           </TouchableOpacity>
           <Image
-            source={{ uri: data.otherUser.profilePicture || 'https://ui-avatars.com/api/?name=' + data.otherUser.username }}
+            source={{ uri: data.otherUser.profilePicture || `https://ui-avatars.com/api/?name=${data.otherUser.username}` }}
             style={{width: 250, height: 250, borderRadius: 125}}
             resizeMode="cover"
           />
-        </View>
+        </TouchableOpacity>
       </Modal>
     </ThemedView>
   );
@@ -401,6 +449,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
   },
+  mediaSection: {
+    backgroundColor: 'white',
+    marginHorizontal: 16,
+    marginVertical: 4,
+    borderRadius: 12,
+    padding: 16,
+  },
+  mediaHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: '#007AFF',
+  },
   settingsSection: {
     backgroundColor: 'white',
     marginHorizontal: 16,
@@ -446,4 +511,3 @@ const styles = StyleSheet.create({
     padding: 40,
   },
 });
-

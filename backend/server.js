@@ -90,6 +90,22 @@ const io = new Server(server, {
 
 app.set('io', io);
 
+// Add a middleware to authenticate the user's token
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+        return next(new Error('Authentication error'));
+    }
+    try {
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        socket.userId = decoded.id;
+        next();
+    } catch (error) {
+        next(new Error('Authentication error'));
+    }
+});
+
 // Setup Socket.io Connection Handler
 io.on('connection', (socket) => {
     const User = require('./models/User');
@@ -340,21 +356,40 @@ io.on('connection', (socket) => {
     });
 
     // ========================================================================
-    // WEBRTC SIGNALING FOR AUDIO CALLS
+    // WEBRTC SIGNALING FOR AUDIO/VIDEO CALLS
     // ========================================================================
 
     // Handle incoming WebRTC offer
     socket.on('webrtc-offer', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.callerId || !data.offer) {
+            console.warn(`[SECURITY] Malformed webrtc-offer payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.callerId) {
+            console.warn(`[SECURITY] Mismatched callerId. Socket user: ${socket.userId}, Payload callerId: ${data.callerId}`);
+            return;
+        }
         console.log('Forwarding webrtc-offer to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-offer', {
             offer: data.offer,
             callerId: data.callerId,
-            chatId: data.chatId
+            chatId: data.chatId,
+            isVideo: data.isVideo
         });
     });
 
     // Handle incoming WebRTC answer
     socket.on('webrtc-answer', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.responderId || !data.answer) {
+            console.warn(`[SECURITY] Malformed webrtc-answer payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.responderId) {
+            console.warn(`[SECURITY] Mismatched responderId. Socket user: ${socket.userId}, Payload responderId: ${data.responderId}`);
+            return;
+        }
         console.log('Forwarding webrtc-answer to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-answer', {
             answer: data.answer,
@@ -364,6 +399,15 @@ io.on('connection', (socket) => {
 
     // Handle incoming ICE Candidate for WebRTC
     socket.on('webrtc-candidate', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.senderId || !data.candidate) {
+            console.warn(`[SECURITY] Malformed webrtc-candidate payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.senderId) {
+            console.warn(`[SECURITY] Mismatched senderId. Socket user: ${socket.userId}, Payload senderId: ${data.senderId}`);
+            return;
+        }
         console.log('Forwarding webrtc-candidate to:', data.targetId);
         socket.to(data.targetId).emit('webrtc-candidate', {
             candidate: data.candidate,
@@ -373,6 +417,15 @@ io.on('connection', (socket) => {
 
     // Handle ending or declining a call
     socket.on('end-call', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.senderId) {
+            console.warn(`[SECURITY] Malformed end-call payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.senderId) {
+            console.warn(`[SECURITY] Mismatched senderId. Socket user: ${socket.userId}, Payload senderId: ${data.senderId}`);
+            return;
+        }
         socket.to(data.targetId).emit('end-call', {
             senderId: data.senderId
         });
@@ -380,6 +433,15 @@ io.on('connection', (socket) => {
 
     // Handle interactive Video Upgrade Requests
     socket.on('request-video-upgrade', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.callerId) {
+            console.warn(`[SECURITY] Malformed request-video-upgrade payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.callerId) {
+            console.warn(`[SECURITY] Mismatched callerId. Socket user: ${socket.userId}, Payload callerId: ${data.callerId}`);
+            return;
+        }
         console.log('Forwarding video upgrade request to:', data.targetId);
         socket.to(data.targetId).emit('request-video-upgrade', {
             callerId: data.callerId
@@ -387,6 +449,15 @@ io.on('connection', (socket) => {
     });
 
     socket.on('accept-video-upgrade', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.responderId) {
+            console.warn(`[SECURITY] Malformed accept-video-upgrade payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.responderId) {
+            console.warn(`[SECURITY] Mismatched responderId. Socket user: ${socket.userId}, Payload responderId: ${data.responderId}`);
+            return;
+        }
         console.log('Forwarding accepted video upgrade to:', data.targetId);
         socket.to(data.targetId).emit('accept-video-upgrade', {
             responderId: data.responderId
@@ -394,9 +465,35 @@ io.on('connection', (socket) => {
     });
 
     socket.on('decline-video-upgrade', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.responderId) {
+            console.warn(`[SECURITY] Malformed decline-video-upgrade payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.responderId) {
+            console.warn(`[SECURITY] Mismatched responderId. Socket user: ${socket.userId}, Payload responderId: ${data.responderId}`);
+            return;
+        }
         console.log('Forwarding declined video upgrade to:', data.targetId);
         socket.to(data.targetId).emit('decline-video-upgrade', {
             responderId: data.responderId
+        });
+    });
+
+    // Handle busy signal
+    socket.on('busy', (data) => {
+        // ✅ Validate payload
+        if (!data || !data.targetId || !data.senderId) {
+            console.warn(`[SECURITY] Malformed busy payload from user: ${socket.userId}`);
+            return;
+        }
+        if (socket.userId !== data.senderId) {
+            console.warn(`[SECURITY] Mismatched senderId. Socket user: ${socket.userId}, Payload senderId: ${data.senderId}`);
+            return;
+        }
+        console.log('Forwarding busy signal to:', data.targetId);
+        socket.to(data.targetId).emit('busy', {
+            senderId: data.senderId
         });
     });
 

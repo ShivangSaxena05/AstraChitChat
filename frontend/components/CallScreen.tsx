@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, Modal, SafeAreaView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, Modal, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
@@ -231,12 +231,15 @@ export default function CallScreen(props: CallScreenProps) {
             />
             <Text style={styles.nameText}>{props.otherUser?.username || 'Unknown'}</Text>
             
-            <Text style={styles.timerText}>
-              {props.status === 'incoming' ? 'Incoming Call...' : 
-               isConnecting ? 'Connecting...' : 
-               props.isVideoUpgradePending ? 'Requesting Video Upgrade...' :
-               formatDuration(props.duration)}
-            </Text>
+            <View style={styles.statusContainer}>
+              {isConnecting && <ActivityIndicator size="small" color="#4ADDAE" style={{ marginRight: 8 }} />}
+              <Text style={styles.timerText}>
+                {props.status === 'incoming' ? 'Incoming Call...' : 
+                isConnecting ? 'Connecting...' : 
+                props.isVideoUpgradePending ? 'Requesting Video Upgrade...' :
+                formatDuration(props.duration)}
+              </Text>
+            </View>
           </View>
           
           <View style={styles.controlsBottomWrapper}>
@@ -319,6 +322,11 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginTop: 40,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
   },
   headerProfileImage: {
     width: 80,

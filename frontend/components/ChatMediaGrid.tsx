@@ -57,7 +57,7 @@ const ChatMediaGrid: React.FC<ChatMediaGridProps> = React.memo(({
 
     return (
       <View style={[styles.mediaThumbnail, { backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center' }]}>
-        <Ionicons name={iconName} size={24} color="white" />
+        <Ionicons name={iconName as any} size={24} color="white" />
       </View>
     );
   };

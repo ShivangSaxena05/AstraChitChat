@@ -112,8 +112,9 @@ export default function SearchBarComponent() {
     setError(null);
 
     try {
-      console.log('Making search request for:', query);
-      const data = await api.get(`/users/search?q=${encodeURIComponent(query)}`);
+      console.log('Making search request to /search for:', query);
+      const data = await api.get(`/search?q=${encodeURIComponent(query)}`);
+      console.log('Search response data:', data);
       console.log('Search response data:', data);
 
       // Handle both formats: { users: [...] } or direct array
@@ -157,7 +158,7 @@ export default function SearchBarComponent() {
 
     if (item.type === 'user') {
       // Navigate to home tab with profile modal
-      router.push({ pathname: '/', params: { showProfile: item._id } });
+      router.push(`/profile/${item._id}`);
     } else {
       router.push({ pathname: '/chat', params: { chatId: item._id } });
     }

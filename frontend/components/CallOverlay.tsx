@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import CallScreen from './CallScreen';
 import { useCall } from '@/contexts/CallContext';
+import { get } from '@/services/api';
 
 export default function CallOverlay() {
   const { 
@@ -14,6 +15,7 @@ export default function CallOverlay() {
     isSpeaker,
     videoUpgradeRequest,
     isVideoUpgradePending,
+    activeChatId,
     acceptCall, 
     declineCall, 
     endCall, 
@@ -27,6 +29,7 @@ export default function CallOverlay() {
   } = useCall();
   
   const [callDuration, setCallDuration] = useState(0);
+  const [otherUser, setOtherUser] = useState<{ username: string; profilePicture: string } | null>(null);
 
   // Timer for active connected calls
   useEffect(() => {
@@ -43,7 +46,37 @@ export default function CallOverlay() {
     };
   }, [isCalling, isConnected, incomingCall]);
 
-  
+  // Fetch real other user data by ID
+  const fetchOtherUser = async (userId: string) => {
+    if (!userId) return;
+    try {
+      const userData = await get(`/api/users/${userId}`);
+      setOtherUser({
+        username: userData.username || 'User',
+        profilePicture: userData.profilePicture || `https://ui-avatars.com/api/?name=${userData.username}`
+      });
+    } catch (error) {
+      console.warn('Failed to fetch other user:', error);
+      setOtherUser({
+        username: 'User',
+        profilePicture: 'https://i.pravatar.cc/300'
+      });
+    }
+  };
+
+  // Determine caller/target ID and fetch user data
+  useEffect(() => {
+    let targetId = null;
+    if (incomingCall?.callerId) {
+      targetId = incomingCall.callerId;
+    } else if (activeChatId) {
+      // For outgoing calls, could decode from chatId or store targetId in context
+      // Using chatId temporarily - optimize by storing targetUserId in CallContext later if needed
+      fetchOtherUser(activeChatId.split('-')[0] || ''); // Extract userId from chatId format if compound
+    }
+    if (targetId) fetchOtherUser(targetId);
+  }, [incomingCall?.callerId, activeChatId]);
+
   // Determine Call Status
   let status: 'incoming' | 'outgoing' | 'connecting' | 'connected' = 'outgoing';
   
@@ -55,12 +88,8 @@ export default function CallOverlay() {
      status = 'connected';
   }
 
-  // Determine Other User Info (Mocked from Context if possible, or passed via Socket)
-  // Our CallContext socket might not pass the full user object, but we have callerId.
-  // In a real app we might fetch user details, for now we supply a generic object or use incomingCall details if available.
-  const callerUsername = incomingCall?.callerUsername || 'User'; 
-  const displayUser = { 
-    username: callerUsername, 
+  const displayUser = otherUser || { 
+    username: incomingCall?.callerUsername || 'Connecting...', 
     profilePicture: 'https://i.pravatar.cc/300' 
   };
 
@@ -89,7 +118,8 @@ export default function CallOverlay() {
       onAcceptVideoUpgrade={acceptVideoUpgrade}
       onDeclineVideoUpgrade={declineVideoUpgrade}
       onSwitchCamera={switchCamera}
-      isVideoCallContext={incomingCall ? incomingCall.isVideo : isVideoEnabled} // Rough tracking of if the call originated as Video
+      isVideoCallContext={incomingCall ? incomingCall.isVideo : isVideoEnabled}
     />
   );
 }
+

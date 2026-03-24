@@ -48,6 +48,7 @@ interface CallState {
   isCalling: boolean;
   isConnected: boolean; // True only when WebRTC handshake is complete
   incomingCall: any | null;
+  targetUser: { username: string; profilePicture: string } | null;
   localStream: any | null; // Using any to represent either Native MediaStream or HTML5 MediaStream
   remoteStream: any | null;
   isMuted: boolean;
@@ -88,6 +89,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isCalling: false,
     isConnected: false,
     incomingCall: null,
+    targetUser: null,
     localStream: null,
     remoteStream: null,
     isMuted: false,
@@ -383,7 +385,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return pc;
   };
 
-  const initiateCall = async (targetIds: string[], chatId: string, isVideo: boolean = false) => {
+  const initiateCall = async (targetIds: string[], chatId: string, targetUser: any = null, isVideo: boolean = false) => {
     if (!IS_CALLING_FEATURE_ENABLED) {
       Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
       return console.warn('[WebRTC] Cannot initiate call: calling feature is not available.');
@@ -397,7 +399,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         NativeInCallManager.setForceSpeakerphoneOn(false);
       }
 
-      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
+      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId, targetUser }));
       
       const pc = await setupMediaAndPC(targetId, isVideo);
       
@@ -521,6 +523,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCalling: false,
         isConnected: false,
         incomingCall: null,
+        targetUser: null,
         localStream: null,
         remoteStream: null,
         isMuted: false,

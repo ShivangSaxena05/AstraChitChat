@@ -8,6 +8,7 @@ export default function CallOverlay() {
     isCalling, 
     isConnected, 
     incomingCall, 
+    targetUser,
     localStream,
     remoteStream,
     isVideoEnabled,
@@ -88,9 +89,9 @@ export default function CallOverlay() {
      status = 'connected';
   }
 
-  const displayUser = otherUser || { 
+  const displayUser = targetUser || otherUser || { 
     username: incomingCall?.callerUsername || 'Connecting...', 
-    profilePicture: 'https://i.pravatar.cc/300' 
+    profilePicture: incomingCall?.callerProfilePicture || 'https://i.pravatar.cc/300' 
   };
 
   const isVisible = isCalling || !!incomingCall;

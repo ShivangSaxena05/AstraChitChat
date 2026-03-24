@@ -272,7 +272,7 @@ async function sendMessage(req, res) {
     const { chatId } = req.params; // Check if this is for existing chat
     let { receiverId, bodyText, attachments, msgType, quotedMsgId, participants } = req.body;
 
-
+    if (participants) {
       receiverId = participants[0]; // Take first participant as receiver
     }
 

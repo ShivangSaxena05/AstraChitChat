@@ -795,12 +795,12 @@ messageIdsRef.current.add(tempId);
 
   const triggerAnimatedCall = useCallback(() => {
     if (otherUserId && chatId) {
-      initiateCall([otherUserId], chatId);
+      initiateCall([otherUserId], chatId, { username: otherUsername, profilePicture: '' }, false);
     } else {
       setError("Cannot initiate call right now.");
       setShowError(true);
     }
-  }, [otherUserId, chatId, initiateCall]);
+  }, [otherUserId, chatId, otherUsername, initiateCall]);
 
   const pullGesture = Gesture.Pan()
     .onChange((event) => {

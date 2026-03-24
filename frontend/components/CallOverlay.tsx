@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CallScreen from './CallScreen';
 import { useCall } from '@/contexts/CallContext';
 import { get } from '@/services/api';
@@ -31,6 +33,15 @@ export default function CallOverlay() {
   
   const [callDuration, setCallDuration] = useState(0);
   const [otherUser, setOtherUser] = useState<{ username: string; profilePicture: string } | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const getUserId = async () => {
+        const userId = await AsyncStorage.getItem('userId');
+        setCurrentUserId(userId);
+    };
+    getUserId();
+  }, []);
 
   // Timer for active connected calls
   useEffect(() => {
@@ -51,32 +62,73 @@ export default function CallOverlay() {
   const fetchOtherUser = async (userId: string) => {
     if (!userId) return;
     try {
-      const userData = await get(`/api/users/${userId}`);
+      const userData = await get(`/profile/${userId}`);
       setOtherUser({
-        username: userData.username || 'User',
-        profilePicture: userData.profilePicture || `https://ui-avatars.com/api/?name=${userData.username}`
+        username: userData.username || userData.name || userData.displayName || 'User',
+        profilePicture: userData.profilePicture || userData.profilePictureUrl || `https://ui-avatars.com/api/?name=${userData.username || userData.name || 'User'}`
       });
     } catch (error) {
       console.warn('Failed to fetch other user:', error);
-      setOtherUser({
-        username: 'User',
-        profilePicture: 'https://i.pravatar.cc/300'
-      });
+      // Better fallback using incoming data if available
+      if (incomingCall?.callerUsername) {
+        setOtherUser({
+          username: incomingCall.callerUsername,
+          profilePicture: incomingCall?.callerProfilePicture || 'https://i.pravatar.cc/300'
+        });
+      } else {
+        setOtherUser({
+          username: 'User',
+          profilePicture: 'https://i.pravatar.cc/300'
+        });
+      }
     }
   };
 
-  // Determine caller/target ID and fetch user data
+  // Determine caller/target ID and fetch user data (IMPROVED: Prioritize targetUser)
   useEffect(() => {
+    // Use targetUser from context first (no network needed)
+    if (targetUser) {
+      setOtherUser(targetUser);
+      return;
+    }
+    
+            const fetchChatAndThenUser = async () => {
+    
+                if (!activeChatId || !currentUserId) return;
+    
+        
+    
+                try {
+    
+                    const chatData = await get(`/chats/${activeChatId}/info`);
+    
+                    const otherParticipant = chatData.participants.find(p => p._id !== currentUserId);
+    
+        
+    
+                    if (otherParticipant) {
+    
+                        fetchOtherUser(otherParticipant._id);
+    
+                    }
+    
+                } catch (error) {
+    
+                    console.error('Failed to fetch chat data:', error);
+    
+                }
+    
+            };
+
+
     let targetId = null;
     if (incomingCall?.callerId) {
       targetId = incomingCall.callerId;
+      if (targetId) fetchOtherUser(targetId);
     } else if (activeChatId) {
-      // For outgoing calls, could decode from chatId or store targetId in context
-      // Using chatId temporarily - optimize by storing targetUserId in CallContext later if needed
-      fetchOtherUser(activeChatId.split('-')[0] || ''); // Extract userId from chatId format if compound
+        fetchChatAndThenUser();
     }
-    if (targetId) fetchOtherUser(targetId);
-  }, [incomingCall?.callerId, activeChatId]);
+  }, [targetUser, incomingCall?.callerId, activeChatId, currentUserId]);
 
   // Determine Call Status
   let status: 'incoming' | 'outgoing' | 'connecting' | 'connected' = 'outgoing';

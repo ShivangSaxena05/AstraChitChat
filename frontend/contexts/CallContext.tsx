@@ -59,9 +59,25 @@ interface CallState {
   isVideoUpgradePending: boolean;
 }
 
+interface CallState {
+  isCalling: boolean;
+  isConnected: boolean;
+  incomingCall: any | null;
+  targetUser: { username: string; profilePicture: string } | null;
+  targetUserId: string | null;
+  localStream: any | null;
+  remoteStream: any | null;
+  isMuted: boolean;
+  isSpeaker: boolean;
+  activeChatId: string | null;
+  isVideoEnabled: boolean;
+  videoUpgradeRequest: any | null;
+  isVideoUpgradePending: boolean;
+}
+
 interface CallContextType extends CallState {
   isCallingFeatureEnabled: boolean;
-  initiateCall: (targetIds: string[], chatId: string, isVideo?: boolean) => Promise<void>;
+  initiateCall: (targetIds: string[], chatId: string, targetUserId: string, targetUser?: any, isVideo?: boolean) => Promise<void>;
   acceptCall: (isVideo?: boolean) => Promise<void>;
   declineCall: () => void;
   endCall: () => void;
@@ -90,6 +106,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isConnected: false,
     incomingCall: null,
     targetUser: null,
+    targetUserId: null,
     localStream: null,
     remoteStream: null,
     isMuted: false,
@@ -385,13 +402,19 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return pc;
   };
 
-  const initiateCall = async (targetIds: string[], chatId: string, targetUser: any = null, isVideo: boolean = false) => {
+  const initiateCall = async (targetIds: string[], chatId: string, targetUserId: string, targetUser: any = null, isVideo: boolean = false) => {
     if (!IS_CALLING_FEATURE_ENABLED) {
       Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
       return console.warn('[WebRTC] Cannot initiate call: calling feature is not available.');
     }
-    if (targetIds.length === 0 || !socket || !currentUserId) return;
+    if (targetIds.length === 0 || !socket || !currentUserId || !targetUserId) return;
     const targetId = targetIds[0];
+    // Store target user info for CallOverlay (eliminates API call)
+    const effectiveTargetUser = targetUser || {
+      username: targetUserId.slice(-6), // Fallback from ID
+      profilePicture: `https://ui-avatars.com/api/?name=${targetUserId.slice(-6)}`
+    };
+    setCallState(prev => ({ ...prev, targetUserId, targetUser: effectiveTargetUser }));
 
     try {
       if (Platform.OS !== 'web' && NativeInCallManager) {
@@ -524,6 +547,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isConnected: false,
         incomingCall: null,
         targetUser: null,
+        targetUserId: null,
         localStream: null,
         remoteStream: null,
         isMuted: false,

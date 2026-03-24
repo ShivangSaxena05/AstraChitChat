@@ -882,6 +882,8 @@ async function getChatInfo(req, res) {
     };
 
     return res.json({
+      participants: chat.participants,
+      otherUser: otherUser,
       profilePicture: otherUser.user.profilePicture,
       isMuted: chat.mutedBy?.has(userId) || false,
       mutedUntil: chat.mutedBy?.get(userId)?.mutedUntil,

@@ -7,6 +7,8 @@ const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../servi
 // Get all chats for current user
 async function getChats(req, res) {
   try {
+    console.log('getChats called for user:', req.user._id);
+
     const userId = req.user._id;
     const chats = await Chat.find({ 
       'participants.user': userId 
@@ -28,8 +30,14 @@ async function getChats(req, res) {
 
     res.json(chatsWithUnread);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get chats', error: error.message });
+    console.error('=== GET CHATS ERROR ===');
+    console.error('User ID:', req.user?._id);
+    console.error('Full error:', error);
+    console.error('Stack:', error.stack);
+    console.error('====================');
+    res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
   }
+
 }
 
 // Get messages for specific chat

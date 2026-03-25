@@ -53,6 +53,24 @@ mongoose.connect(process.env.MONGO_URI, mongoOptions)
     .then(() => console.log('MongoDB Atlas connected'))
     .catch(err => console.error('MongoDB connection error:', err));
 
+// Test DB endpoint
+app.get('/api/test/db', async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const User = require('./models/User');
+    const Chat = require('./models/Chat');
+    
+    res.json({
+      mongoConnected: mongoose.connection.readyState === 1,
+      userCount: await User.countDocuments(),
+      chatCount: await Chat.countDocuments(),
+      collections: mongoose.connection.db.listCollections().toArray()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Use auth routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/posts', require('./routes/postRoutes'));

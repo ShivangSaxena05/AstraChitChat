@@ -87,8 +87,11 @@ router.post('/read-all', protect, markAllMessagesAsRead);
 // Edit message
 router.put('/messages/:messageId', protect, editMessage);
 
-// Unsend message
-router.delete('/messages/:messageId', protect, unsendMessage);
+// Unsend message (soft delete)
+router.delete('/messages/:messageId/unsend', protect, unsendMessage);
+
+// Hard delete message + media files
+router.delete('/messages/:messageId', protect, deleteMessage);
 
 // Get message receipts
 router.get('/messages/:messageId/receipts', protect, getMessageReceipts);

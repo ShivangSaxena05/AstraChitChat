@@ -7,7 +7,7 @@ const createCloudinaryStorage = (folder) => {
         cloudinary: cloudinary,
         params: {
             folder: `Astra/${folder}`,
-            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'ogg'],
+            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'm4a', 'wav', 'ogg'],
             resource_type: 'auto',
             transformation: [{ quality: 'auto', fetch_format: 'auto' }]
         }

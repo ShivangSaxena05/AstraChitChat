@@ -103,7 +103,7 @@ const ChatItem = memo(({
                 <Text style={styles.unreadText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text>
               </View>
             )}
-            {isFromMe && item.lastMessage?.createdAt && <Text style={styles.readStatus}>✓✓</Text>}
+{isFromMe && <Text style={styles.readStatus}>✓✓</Text>}
           </View>
         </View>
       </View>
@@ -180,14 +180,16 @@ export default function ChatListScreen() {
     });
   }, [currentUserId, router]);
 
+  const handlePressChatItem = useCallback((item: Chat) => handlePressChat(item), [handlePressChat]);
+
   // Render each chat item in the list
   const renderChat = useCallback(({ item }: { item: Chat }) => (
     <ChatItem 
       item={item} 
-      onPress={() => handlePressChat(item)} 
+      onPress={() => handlePressChatItem(item)} 
       currentUserId={currentUserId} 
     />
-  ), [currentUserId, handlePressChat]);
+  ), [currentUserId, handlePressChatItem]);
 
   // Render empty state
   const renderEmptyComponent = () => {

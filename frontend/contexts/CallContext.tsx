@@ -46,21 +46,6 @@ if (Platform.OS === 'web') {
 
 interface CallState {
   isCalling: boolean;
-  isConnected: boolean; // True only when WebRTC handshake is complete
-  incomingCall: any | null;
-  targetUser: { username: string; profilePicture: string } | null;
-  localStream: any | null; // Using any to represent either Native MediaStream or HTML5 MediaStream
-  remoteStream: any | null;
-  isMuted: boolean;
-  isSpeaker: boolean;
-  activeChatId: string | null;
-  isVideoEnabled: boolean;
-  videoUpgradeRequest: any | null;
-  isVideoUpgradePending: boolean;
-}
-
-interface CallState {
-  isCalling: boolean;
   isConnected: boolean;
   incomingCall: any | null;
   targetUser: { username: string; profilePicture: string } | null;
@@ -94,9 +79,17 @@ const CallContext = createContext<CallContextType | null>(null);
 
 const configuration = {
   iceServers: [
-    { urls: ['stun:stun.l.google.com:19302'] },
-    { urls: ['stun:stun1.l.google.com:19302'] },
-  ]
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // ✅ PRODUCTION TURN - Replace with your TURN service (Twilio/Nomad/etc)
+    // {
+    //   urls: 'turn:your-turn-server.com:3478?transport=udp',
+    //   username: process.env.TURN_USERNAME,
+    //   credential: process.env.TURN_CREDENTIAL,
+    //   iceServers: 10
+    // }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -506,8 +499,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // ✅ CRITICAL REQUIREMENT: Robust Cleanup
-  const cleanupCall = useCallback((reason?: string) => {
-    console.log(`[WebRTC] Executing cleanup logic | Reason: ${reason || 'unknown'}`);
+const cleanupCall = useCallback((reason?: string) => {
+    console.log(`[WebRTC] Cleanup | Reason: ${reason || 'unknown'}`);
     
     if (Platform.OS !== 'web' && NativeInCallManager) {
       try {
@@ -518,30 +511,36 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     
     const pc = peerConnectionRef.current;
-    
     if (pc) {
-      console.log('[WebRTC] Closing RTCPeerConnection');
+      // ✅ CRITICAL: Stop ALL sender tracks to prevent leaks
+      pc.getSenders().forEach((sender: any) => {
+        if (sender.track) {
+          sender.track.stop();
+          sender.track.enabled = false;
+        }
+      });
       pc.close();
       peerConnectionRef.current = null;
     }
     
+    // ✅ Clear ICE queues
+    iceCandidateQueueRef.current = [];
+    Object.keys(pendingCandidatesRef.current).forEach(key => {
+      pendingCandidatesRef.current[key] = [];
+    });
+    
     activeCallTargetIdRef.current = null;
     
     setCallState(prev => {
-      // ✅ Stop all hardware tracks aggressively to prevent memory leaks/locked devices
       if (prev.localStream) {
-        console.log('[WebRTC] Disabling local tracks');
         prev.localStream.getTracks().forEach((t: any) => {
-           t.stop();
-           t.enabled = false;
+          t.stop();
+          t.enabled = false;
         });
       }
       if (prev.remoteStream) {
-        prev.remoteStream.getTracks().forEach((t: any) => {
-           t.stop();
-        });
+        prev.remoteStream.getTracks().forEach((t: any) => t.stop());
       }
-
       return {
         isCalling: false,
         isConnected: false,

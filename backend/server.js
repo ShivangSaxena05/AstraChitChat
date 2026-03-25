@@ -63,7 +63,7 @@ app.use('/api/follow', require('./routes/followRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/report', require('./routes/reportRoutes'));
-app.use('api/media', require('./routes/mediaRoutes1')); // Temporary route for direct S3 uploads (to be integrated into mediaRoutes later)
+// app.use('/api/media', require('./routes/mediaRoutes1')); // REMOVED: Duplicate/temporary - use main mediaRoutes
 // Basic route
 app.get('/', (req, res) => {
     res.send('Hello World');
@@ -525,4 +525,12 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server and Socket.io running on port ${PORT}`));
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('[SERVER ERROR]:', err.message);
+  res.status(err.status || 500).json({
+    message: err.message || 'Server Error'
+  });
+});
 

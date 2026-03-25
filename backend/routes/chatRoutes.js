@@ -11,6 +11,7 @@ const {
     removeReaction,
     editMessage,
     unsendMessage,
+    deleteMessage,
     getMessageReceipts,
     getMessageReactions,
     getUserStatus,

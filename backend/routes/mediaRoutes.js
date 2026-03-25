@@ -145,16 +145,8 @@ router.get('/presigned-url', protect, async (req, res) => {
 //
 // @access  Private
 // ─────────────────────────────────────────────────────────────────────────────
-const express = require('express');
-const router = express.Router();
-const upload = require('../middleware/uploadMiddleware');
-const { protect } = require('../middleware/auth');
-const { getPresignedUploadUrl, deleteS3Object, MEDIA_FOLDERS, STORAGE_TYPE, uploadToCloudinary, deleteFromCloudinary, getCloudinaryUploadUrl } = require('../services/mediaService');
 const s3 = require('../config/s3');
 const { HeadObjectCommand } = require('@aws-sdk/client-s3');
-
-const uploadCloudinary = require('../config/multerCloudinary');
-// ... (rest of the file is unchanged until the /confirm-upload route)
 router.post('/confirm-upload', protect, async (req, res) => {
     const { folder, key, cloudfrontUrl, publicId } = req.body;
 

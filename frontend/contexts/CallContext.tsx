@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { PermissionsAndroid, Platform, Alert } from 'react-native';
 import { useSocket } from './SocketContext';
 
 // Declare globals for TypeScript when on web
@@ -17,8 +17,11 @@ let NativeRTCSessionDescription: any = null;
 let NativeRTCIceCandidate: any = null;
 let NativeMediaDevices: any = null;
 let NativeInCallManager: any = null;
+let IS_CALLING_FEATURE_ENABLED = false;
 
-if (Platform.OS !== 'web') {
+if (Platform.OS === 'web') {
+  IS_CALLING_FEATURE_ENABLED = true;
+} else {
   try {
     const webrtc = require('react-native-webrtc');
     NativeRTCPeerConnection = webrtc.RTCPeerConnection;
@@ -28,8 +31,16 @@ if (Platform.OS !== 'web') {
     
     const incall = require('react-native-incall-manager');
     NativeInCallManager = incall.default || incall;
+
+    // If all modules load, enable the feature
+    if (NativeRTCPeerConnection && NativeInCallManager) {
+        IS_CALLING_FEATURE_ENABLED = true;
+    } else {
+        throw new Error("One or more native calling modules failed to load properly.");
+    }
   } catch (e) {
-    console.log('Native WebRTC modules skipped (expected on non-native environments)');
+    console.error('FATAL: Native WebRTC modules failed to load. Calling feature will be disabled.', e);
+    IS_CALLING_FEATURE_ENABLED = false;
   }
 }
 
@@ -37,6 +48,7 @@ interface CallState {
   isCalling: boolean;
   isConnected: boolean; // True only when WebRTC handshake is complete
   incomingCall: any | null;
+  targetUser: { username: string; profilePicture: string } | null;
   localStream: any | null; // Using any to represent either Native MediaStream or HTML5 MediaStream
   remoteStream: any | null;
   isMuted: boolean;
@@ -47,8 +59,25 @@ interface CallState {
   isVideoUpgradePending: boolean;
 }
 
+interface CallState {
+  isCalling: boolean;
+  isConnected: boolean;
+  incomingCall: any | null;
+  targetUser: { username: string; profilePicture: string } | null;
+  targetUserId: string | null;
+  localStream: any | null;
+  remoteStream: any | null;
+  isMuted: boolean;
+  isSpeaker: boolean;
+  activeChatId: string | null;
+  isVideoEnabled: boolean;
+  videoUpgradeRequest: any | null;
+  isVideoUpgradePending: boolean;
+}
+
 interface CallContextType extends CallState {
-  initiateCall: (targetIds: string[], chatId: string, isVideo?: boolean) => Promise<void>;
+  isCallingFeatureEnabled: boolean;
+  initiateCall: (targetIds: string[], chatId: string, targetUserId: string, targetUser?: any, isVideo?: boolean) => Promise<void>;
   acceptCall: (isVideo?: boolean) => Promise<void>;
   declineCall: () => void;
   endCall: () => void;
@@ -76,6 +105,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isCalling: false,
     isConnected: false,
     incomingCall: null,
+    targetUser: null,
+    targetUserId: null,
     localStream: null,
     remoteStream: null,
     isMuted: false,
@@ -141,6 +172,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!socket || !currentUserId) return;
 
     socket.on('webrtc-offer', async ({ offer, callerId, chatId, isVideo }) => {
+      // ✅ Guard against disabled feature
+      if (!IS_CALLING_FEATURE_ENABLED) {
+        console.warn('[Signaling] Rejecting call because calling feature is disabled on this device.');
+        socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
+        return;
+      }
+      
       // Renegotiation check: If we already have a peer connection and are talking to the same user
       if (peerConnectionRef.current && activeCallTargetIdRef.current === callerId) {
         console.log('[Signaling] Renegotiation offer received (Media Upgrade)');
@@ -168,8 +206,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (peerConnectionRef.current || callState.isCalling) {
-        console.log('[Signaling] Busy, rejecting offer from:', callerId);
-        socket.emit('end-call', { targetId: callerId, senderId: currentUserId });
+        console.log('[Signaling] Busy, rejecting incoming call with "busy" signal to:', callerId);
+        socket.emit('busy', { targetId: callerId, senderId: currentUserId });
         return;
       }
       console.log('[Signaling] Received call offer from:', callerId, '| Video:', isVideo);
@@ -215,6 +253,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     socket.on('end-call', () => {
       console.log('[Signaling] Remote requested to end call');
       cleanupCall('remote ended call');
+    });
+
+    socket.on('busy', ({ senderId }) => {
+        console.log(`[Signaling] Call target ${senderId} is busy.`);
+        cleanupCall('target was busy');
+        // Optionally, trigger a user-facing notification: "User is on another call."
     });
 
     socket.on('request-video-upgrade', ({ callerId }) => {
@@ -276,6 +320,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       socket.off('webrtc-answer');
       socket.off('webrtc-candidate');
       socket.off('end-call');
+      socket.off('busy');
       socket.off('request-video-upgrade');
       socket.off('accept-video-upgrade');
       socket.off('decline-video-upgrade');
@@ -357,9 +402,19 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return pc;
   };
 
-  const initiateCall = async (targetIds: string[], chatId: string, isVideo: boolean = false) => {
-    if (targetIds.length === 0 || !socket || !currentUserId) return;
+  const initiateCall = async (targetIds: string[], chatId: string, targetUserId: string, targetUser: any = null, isVideo: boolean = false) => {
+    if (!IS_CALLING_FEATURE_ENABLED) {
+      Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
+      return console.warn('[WebRTC] Cannot initiate call: calling feature is not available.');
+    }
+    if (targetIds.length === 0 || !socket || !currentUserId || !targetUserId) return;
     const targetId = targetIds[0];
+    // Store target user info for CallOverlay (eliminates API call)
+    const effectiveTargetUser = targetUser || {
+      username: targetUserId.slice(-6), // Fallback from ID
+      profilePicture: `https://ui-avatars.com/api/?name=${targetUserId.slice(-6)}`
+    };
+    setCallState(prev => ({ ...prev, targetUserId, targetUser: effectiveTargetUser }));
 
     try {
       if (Platform.OS !== 'web' && NativeInCallManager) {
@@ -367,7 +422,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         NativeInCallManager.setForceSpeakerphoneOn(false);
       }
 
-      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId }));
+      setCallState(prev => ({ ...prev, isCalling: true, isConnected: false, activeChatId: chatId, targetUser }));
       
       const pc = await setupMediaAndPC(targetId, isVideo);
       
@@ -390,6 +445,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const acceptCall = async (isVideo: boolean = false) => {
+    if (!IS_CALLING_FEATURE_ENABLED) {
+      Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
+      return console.warn('[WebRTC] Cannot accept call: calling feature is not available.');
+    }
     if (!callState.incomingCall || !socket || !currentUserId) return;
     
     // Auto-detect incoming call media type
@@ -487,6 +546,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCalling: false,
         isConnected: false,
         incomingCall: null,
+        targetUser: null,
+        targetUserId: null,
         localStream: null,
         remoteStream: null,
         isMuted: false,
@@ -550,6 +611,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const upgradeToVideo = async () => {
+    if (!IS_CALLING_FEATURE_ENABLED) {
+        Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
+        return console.warn('[WebRTC] Cannot upgrade to video: calling feature is not available.');
+    }
     if (!peerConnectionRef.current || !activeCallTargetIdRef.current) return;
     setCallState(prev => ({ ...prev, isVideoUpgradePending: true }));
     socket?.emit('request-video-upgrade', { 
@@ -560,6 +625,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const acceptVideoUpgrade = async () => {
+    if (!IS_CALLING_FEATURE_ENABLED) {
+        Alert.alert('Calling Not Available', 'The calling feature is not available on this device.');
+        return console.warn('[WebRTC] Cannot accept video upgrade: calling feature is not available.');
+    }
     const callerId = callState.videoUpgradeRequest?.callerId;
     if (!callerId) return;
 
@@ -609,6 +678,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <CallContext.Provider value={{
       ...callState,
+      isCallingFeatureEnabled: IS_CALLING_FEATURE_ENABLED,
       initiateCall,
       acceptCall,
       declineCall,

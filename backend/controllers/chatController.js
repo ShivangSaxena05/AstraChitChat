@@ -272,8 +272,7 @@ async function sendMessage(req, res) {
     const { chatId } = req.params; // Check if this is for existing chat
     let { receiverId, bodyText, attachments, msgType, quotedMsgId, participants } = req.body;
 
-    // Handle both old format (receiverId) and new format (participants array)
-    if (!receiverId && participants && Array.isArray(participants) && participants.length > 0) {
+    if (participants) {
       receiverId = participants[0]; // Take first participant as receiver
     }
 
@@ -307,8 +306,7 @@ async function sendMessage(req, res) {
       if (!chat.participants.some(p => p.user.toString() === senderId.toString())) {
         return res.status(403).json({ message: 'Not authorized to send message to this chat' });
       }
-    } else {
-      // Creating new chat (auto-create on first message)
+
       // Try to find existing direct chat between sender and receiver
       chat = await Chat.findOne({
         convoType: 'direct',
@@ -484,26 +482,20 @@ async function markAllMessagesAsRead(req, res) {
     });
     if (!participant) return res.status(403).json({ message: 'Not authorized' });
 
-    // Get last message in chat
-    const lastMsg = await Message.findOne({ chat: toObjectId(chatId) }).sort({ createdAt: -1 });
+    // ✅ OPTIMIZED: Get last message ID for lastReadMsgId
+    const lastMsg = await Message.findOne({ chat: toObjectId(chatId) }).sort({ createdAt: -1 }).select('_id');
     if (!lastMsg) return res.json({ message: 'No messages to mark read' });
 
-    // Add current user to readBy of all messages not already read by them
-    await Message.updateMany(
-      { chat: toObjectId(chatId), 'readBy.user': { $ne: toObjectId(userId) } },
-      { $push: { readBy: { user: toObjectId(userId), readAt: new Date() } } }
-    );
-
-    // Update participant.lastReadMsgId to last message
+    // ✅ FIXED: NO updateMany - Frontend computes read status from chat.lastReadMsgId
+    // Just update participant.lastReadMsgId and reset unreadCount (O(1))
     participant.lastReadMsgId = lastMsg._id;
     chat.markModified('participants');
-
-    // Clear unread count for this user
+    
+    // Reset unread count Map entry to 0
     if (chat.unreadCount) {
       chat.unreadCount.set(userId, 0);
     } else {
-      chat.unreadCount = new Map();
-      chat.unreadCount.set(userId, 0);
+      chat.unreadCount = new Map([[userId, 0]]);
     }
 
     await chat.save();
@@ -533,6 +525,12 @@ async function editMessage(req, res) {
 
     if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Not authorized to edit this message' });
     if (message.unsentAt) return res.status(400).json({ message: 'Cannot edit an unsent message' });
+    
+    // ✅ NEW: 15min edit time limit from createdAt
+    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
+    if (message.createdAt < fifteenMinAgo) {
+      return res.status(400).json({ message: 'Cannot edit messages older than 15 minutes' });
+    }
 
     message.bodyText = bodyText.trim();
     message.editedAt = new Date();
@@ -573,12 +571,27 @@ async function unsendMessage(req, res) {
     message.attachments = []; // clear attachments (optional)
     await message.save();
 
-    // Update chat.lastMessage if this message was the last message
-    const chat = await Chat.findById(message.chat);
-    if (chat && chat.lastMessage && chat.lastMessage.createdAt && new Date(chat.lastMessage.createdAt).getTime() === new Date(message.createdAt).getTime()) {
-      // find previous message
-      const prev = await Message.findOne({ chat: chat._id, _id: { $ne: message._id } }).sort({ createdAt: -1 }).lean();
-      chat.lastMessage = prev ? { text: prev.bodyText || (prev.attachments && prev.attachments.length ? 'Attachment' : ''), createdAt: prev.createdAt } : null;
+    // ✅ OPTIMIZED: Update chat.lastMessage if needed using aggregate (single query)
+    const [chat, prevAgg] = await Promise.all([
+      Chat.findById(message.chat),
+      Message.aggregate([
+        { $match: { 
+          chat: message.chat, 
+          _id: { $ne: toObjectId(message._id) },
+          $expr: { $lt: ['$createdAt', message.createdAt] }
+        }},
+        { $sort: { createdAt: -1 } },
+        { $limit: 1 },
+        { $project: { bodyText: 1, attachments: 1, createdAt: 1 } }
+      ])
+    ]);
+    
+    if (chat && chat.lastMessage && new Date(chat.lastMessage.createdAt).getTime() === new Date(message.createdAt).getTime()) {
+      const prev = prevAgg[0];
+      chat.lastMessage = prev ? { 
+        text: prev.bodyText || (prev.attachments && prev.attachments.length ? 'Attachment' : ''), 
+        createdAt: prev.createdAt 
+      } : null;
       await chat.save();
     }
 
@@ -869,6 +882,8 @@ async function getChatInfo(req, res) {
     };
 
     return res.json({
+      participants: chat.participants,
+      otherUser: otherUser,
       profilePicture: otherUser.user.profilePicture,
       isMuted: chat.mutedBy?.has(userId) || false,
       mutedUntil: chat.mutedBy?.get(userId)?.mutedUntil,

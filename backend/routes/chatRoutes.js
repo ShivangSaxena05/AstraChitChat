@@ -65,6 +65,12 @@ router.post('/:chatId/mute', protect, muteChat);
 router.post('/:chatId/pin', protect, pinChat);
 router.post('/:chatId/clear', protect, clearChat);
 
+// ✅ NEW: Group management routes
+const { leaveGroup, addGroupMember, removeGroupMember } = require('../controllers/groupManagement');
+router.post('/:chatId/leave', protect, leaveGroup);
+router.post('/:chatId/add-member', protect, addGroupMember);
+router.post('/:chatId/remove-member', protect, removeGroupMember);
+
 // Get messages for a specific chat
 router.get('/:chatId/messages', protect, getChatMessages);
 

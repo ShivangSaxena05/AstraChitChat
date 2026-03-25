@@ -169,8 +169,28 @@ export default function ChatDetailScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [groupedMessages, setGroupedMessages] = useState<ListItem[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [loading, setLoading] = useState(true);
+const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showError, setShowError] = useState(false);
+  const errorOpacity = useSharedValue(0);
+  const errorTranslateY = useSharedValue(100);
+
+  // Snackbar animation
+  useEffect(() => {
+    if (showError && error) {
+      errorOpacity.value = withSpring(1);
+      errorTranslateY.value = withSpring(0);
+      const timer = setTimeout(() => {
+        errorTranslateY.value = withSpring(100, {}, () => {
+          errorOpacity.value = 0;
+          setShowError(false);
+          setError(null);
+        });
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [showError, error]);
   const [hasMore, setHasMore] = useState(true);
   const [oldestMessageId, setOldestMessageId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -594,7 +614,8 @@ export default function ChatDetailScreen() {
         }
       }
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to fetch messages');
+      setError(error.response?.data?.message || 'Failed to fetch messages');
+      setShowError(true);
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -622,17 +643,17 @@ export default function ChatDetailScreen() {
   };
 
 const sanitizeMessage = (text: string): string => {
-  // Remove HTML tags, scripts, and dangerous characters
+  // ✅ FIXED: Proper HTML escaping for XSS prevention
+  // Escape all HTML-special chars to prevent <script>alert(1)</script>
   return text
     .replace(/&/g, '&amp;')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/"/g, '"')
     .replace(/'/g, '&#x27;')
     .replace(/`/g, '&#x60;')
     .trim();
-};
-
+}
 const sendMessage = async () => {
   const sanitizedText = sanitizeMessage(newMessage);
   if (!sanitizedText || !currentUserId || !socket || !socketConnected) return;
@@ -663,7 +684,19 @@ const sendMessage = async () => {
   }
 
   setMessages(prev => [...prev, optimisticMessage]);
-  messageIdsRef.current.add(tempId);
+messageIdsRef.current.add(tempId);
+        
+        // ✅ NEW: Cleanup stale optimistic messages after 30s if no server confirmation
+        setTimeout(() => {
+          if (messageIdsRef.current.has(tempId)) {
+            setMessages(prev => {
+              const newMsgs = prev.filter(m => m._id !== tempId);
+              messageIdsRef.current.delete(tempId);
+              return newMsgs;
+            });
+            console.log('Removed stale temp message:', tempId);
+          }
+        }, 30000);
 
   try {
     const socketMessageData: any = {
@@ -706,7 +739,8 @@ const sendMessage = async () => {
     socket.emit('stop typing', chatId);
   } catch (error: any) {
     console.error('Send message failed:', error);
-    Alert.alert('Error', 'Failed to send message');
+    setError('Failed to send message');
+    setShowError(true);
   }
 };
 
@@ -761,11 +795,12 @@ const sendMessage = async () => {
 
   const triggerAnimatedCall = useCallback(() => {
     if (otherUserId && chatId) {
-      initiateCall([otherUserId], chatId);
+      initiateCall([otherUserId], chatId, { username: otherUsername, profilePicture: '' }, false);
     } else {
-      Alert.alert("Error", "Cannot initiate call right now.");
+      setError("Cannot initiate call right now.");
+      setShowError(true);
     }
-  }, [otherUserId, chatId, initiateCall]);
+  }, [otherUserId, chatId, otherUsername, initiateCall]);
 
   const pullGesture = Gesture.Pan()
     .onChange((event) => {
@@ -834,7 +869,8 @@ const sendMessage = async () => {
         setHighlightedMessageId(null);
       }, 2000);
     } else {
-      Alert.alert("Notice", "Original message not found in loaded messages.");
+      setError("Original message not found in loaded messages.");
+      setShowError(true);
     }
   }, [groupedMessages]);
 
@@ -900,20 +936,36 @@ const sendMessage = async () => {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
-        <View style={styles.statusRow}>
-            {otherUserTyping ? (
-              <Text style={styles.typingText}>Typing...</Text>
-            ) : (
-              <>
-                {otherUserStatus.isOnline && <View style={styles.onlineDot} />}
-                <Text style={styles.lastSeen} numberOfLines={1}>
-                  {otherUserStatus.isOnline 
-                    ? 'Online' 
-                    : formatLastSeen(otherUserStatus.lastSeen)}
-                </Text>
-              </>
-            )}
+        <TouchableOpacity 
+          style={styles.headerTouchable}
+          onPress={() => router.push({
+            pathname: '/chat/info',
+            params: { 
+              chatId, 
+              otherUserId, 
+              otherUsername 
+            }
+          })}
+          activeOpacity={0.8}
+        >
+          <View style={styles.headerInfo}>
+            <ThemedText style={styles.partnerName}>{otherUsername}</ThemedText>
+            <View style={styles.statusRow}>
+              {otherUserTyping ? (
+                <Text style={styles.typingText}>Typing...</Text>
+              ) : (
+                <>
+                  {otherUserStatus.isOnline && <View style={styles.onlineDot} />}
+                  <Text style={styles.lastSeen} numberOfLines={1}>
+                    {otherUserStatus.isOnline 
+                      ? 'Online' 
+                      : formatLastSeen(otherUserStatus.lastSeen)}
+                  </Text>
+                </>
+              )}
+            </View>
           </View>
+        </TouchableOpacity>
 
 
       </View>
@@ -924,7 +976,7 @@ const sendMessage = async () => {
           data={[...groupedMessages].reverse()}
           inverted
           renderItem={renderItem}
-          keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}` : `msg-${item.data._id}`}
+          keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}-${index}` : `msg-${item.data._id}`}
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContainer}
           initialNumToRender={20}
@@ -1006,9 +1058,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  headerInfo: {
+  headerTouchable: {
     flex: 1,
     marginLeft: 12,
+  },
+  headerInfo: {
+    flex: 1,
   },
   partnerName: {
     color: '#fff',

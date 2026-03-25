@@ -544,11 +544,12 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server and Socket.io running on port ${PORT}`));
 
-// Global error handler
 app.use((err, req, res, next) => {
-  console.error('[SERVER ERROR]:', err.message);
-  res.status(err.status || 500).json({
-    message: err.message || 'Server Error'
+  console.error('🔥 ERROR:', {
+    url: req.originalUrl,
+    method: req.method,
+    message: err.message,
   });
+  res.status(500).json({ message: 'Server Error' });
 });
 

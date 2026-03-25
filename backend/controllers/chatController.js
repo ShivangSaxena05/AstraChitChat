@@ -16,19 +16,10 @@ async function getChats(req, res) {
     .populate('participants.user', 'name username profilePicture isOnline lastSeen')
     .populate('lastMessage.sender', 'name username profilePicture')
     .sort({ updatedAt: -1 })
-    .limit(50);
+    .limit(20)
+    .lean();
 
-    // Add unread count
-    const chatsWithUnread = await Promise.all(chats.map(async (chat) => {
-      const unread = await Message.countDocuments({
-        chat: chat._id,
-        readBy: { $ne: userId },
-        sender: { $ne: userId }
-      });
-      return { ...chat._toObject(), unreadCount: unread };
-    }));
-
-    res.json(chatsWithUnread);
+    res.json(chats);
   } catch (error) {
     console.error('=== GET CHATS ERROR ===');
     console.error('User ID:', req.user?._id);

@@ -191,15 +191,15 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       } else {
         console.log('Socket: New conversation detected, fetching list...');
         get('/chats').then(data => {
-          if (data && data.chats) {
-            const sorted = data.chats.sort((a: any, b: any) => {
+          if (data) {
+            const sorted = data.sort((a: any, b: any) => {
               const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
               const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
               return bTime - aTime;
             });
             setConversations([...sorted]);
           }
-        }).catch(err => console.error('Failed to fetch new conversation:', err));
+        })
         
         return prevConversations;
       }

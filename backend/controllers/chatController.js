@@ -59,6 +59,27 @@ async function getChatMessages(req, res) {
   }
 }
 
+// Find existing chat with a user
+async function findChat(req, res) {
+  try {
+    const { userId } = req.params;
+    const currentUser = req.user._id;
+
+    const chat = await Chat.findOne({
+      convoType: 'direct',
+      'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
+    }).populate('participants.user', 'name username profilePicture');
+
+    if (!chat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    res.json(chat);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to find chat', error: error.message });
+  }
+}
+
 // Create new chat
 async function createChat(req, res) {
   try {
@@ -70,18 +91,17 @@ async function createChat(req, res) {
     }
 
     let chat = await Chat.findOne({
-      convoType: 'private',
-      participants: { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
+      convoType: 'direct',
+      'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
     });
 
     if (!chat) {
       chat = new Chat({
-        convoType: 'private',
+        convoType: 'direct',
         participants: [
           { user: currentUser, role: 'member' },
           { user: new mongoose.Types.ObjectId(userId), role: 'member' }
-        ],
-        chatName: 'Chat'
+        ]
       });
       await chat.save();
     }
@@ -132,13 +152,13 @@ async function sendMessage(req, res) {
 
     // Auto-create chat if needed
     let chat = await Chat.findOne({
-      convoType: 'private',
-      participants: { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
+      convoType: 'direct',
+      'participants.user': { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
     });
 
     if (!chat) {
       chat = new Chat({
-        convoType: 'private',
+        convoType: 'direct',
         participants: [
           { user: senderId, role: 'member' },
           { user: new mongoose.Types.ObjectId(receiverId), role: 'member' }
@@ -471,6 +491,7 @@ async function clearChat(req, res) {
 module.exports = {
   getChats,
   getChatMessages,
+  findChat,
   createChat,
   searchChats,
   sendMessage,

@@ -2,6 +2,7 @@ const express = require('express');
 const {
     getChats,
     getChatMessages,
+    findChat,
     createChat,
     searchChats,
     sendMessage,
@@ -51,6 +52,9 @@ router.post('/', protect, sendMessage);
 
 // Search chats by participant username or name
 router.get('/search', protect, searchChats);
+
+// Find existing chat with a user
+router.get('/find/:userId', protect, findChat);
 
 // Get user online status
 router.get('/user-status/:userId', protect, getUserStatus);

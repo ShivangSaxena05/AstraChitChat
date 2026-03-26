@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSocket } from '@/contexts/SocketContext';
 
 interface ProfileMenuProps {
   visible: boolean;
@@ -14,6 +15,7 @@ interface ProfileMenuProps {
 export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const { disconnect } = useSocket();
   const iconColor = colorScheme === 'dark' ? '#fff' : '#000';
 
   const handleSettings = () => {
@@ -42,10 +44,14 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
           style: 'destructive',
           onPress: async () => {
             try {
+              // Disconnect socket first
+              disconnect();
+              // Clear stored credentials
               await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('userId');
               onClose();
-              router.replace('/(auth)/login' as any);
+              // Navigate to login screen
+              router.replace('/auth/login' as any);
             } catch (error) {
               Alert.alert('Error', 'Failed to log out');
             }

@@ -208,13 +208,35 @@ export default function ProfileScreen() {
   }, [socket, user?._id]);
 
   const handleShareProfile = async () => {
+    if (!user) return;
+
+    const profileUrl = `https://astra.app/profile/${user.username}`;
+    const shareMessage = user.name
+      ? `Check out ${user.name} (@${user.username}) on Astra!\n\n${user.bio ? `"${user.bio.substring(0, 100)}${user.bio.length > 100 ? '...' : ''}"\n\n` : ''}${profileUrl}`
+      : `Check out @${user.username} on Astra!\n\n${user.bio ? `"${user.bio.substring(0, 100)}${user.bio.length > 100 ? '...' : ''}"\n\n` : ''}${profileUrl}`;
+
     try {
-      await Share.share({
-        message: `Check out ${user?.username}'s profile!`,
-        url: `https://yourapp.com/profile/${user?.username}`,
-      });
+      const result = await Share.share(
+        {
+          message: shareMessage,
+          url: profileUrl,
+          title: `${user.name || user.username}'s Profile`,
+        },
+        {
+          dialogTitle: 'Share Profile',
+          subject: `Check out ${user.name || user.username} on Astra!`,
+        }
+      );
+
+      if (result.action === Share.sharedAction) {
+        if (result.activityType) {
+          console.log('Shared with activity type:', result.activityType);
+        }
+      }
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to share profile');
+      if (error.message !== 'User did not share') {
+        Alert.alert('Error', 'Failed to share profile. Please try again.');
+      }
     }
   };
 

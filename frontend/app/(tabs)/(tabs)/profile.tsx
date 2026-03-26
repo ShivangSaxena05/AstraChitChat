@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ProfilePictureModal from '@/components/ProfilePictureModal';
 import ExpandableBio from '@/components/ExpandableBio';
 import { useSocket } from '@/contexts/SocketContext';
+import ProfileMenu from '@/components/ProfileMenu';
 
 interface UserProfile {
   _id: string;
@@ -45,6 +46,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [isProfileModalVisible, setProfileModalVisible] = useState(false);
+  const [isMenuVisible, setMenuVisible] = useState(false);
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
@@ -325,8 +327,11 @@ export default function ProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Top Header with username switcher */}
-      <TopHeaderComponent />
+      {/* Top Header with username switcher and menu */}
+      <TopHeaderComponent
+        showMenuIcon={true}
+        onMenuPress={() => setMenuVisible(true)}
+      />
       
       <Animated.View style={[styles.coverPhotoContainer, { transform: [{ translateY: headerTranslateY }] }]}>
         {user.coverPhoto ? (
@@ -350,12 +355,17 @@ export default function ProfileScreen() {
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
       />
 
-      <ProfilePictureModal 
+      <ProfilePictureModal
         visible={isProfileModalVisible}
         uri={user.profilePicture}
         isEditable={true}
         onClose={() => setProfileModalVisible(false)}
         onUpdate={(newUri) => setUser(prev => prev ? { ...prev, profilePicture: newUri } : null)}
+      />
+
+      <ProfileMenu
+        visible={isMenuVisible}
+        onClose={() => setMenuVisible(false)}
       />
     </ThemedView>
   );

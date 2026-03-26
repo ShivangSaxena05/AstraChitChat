@@ -9,9 +9,11 @@ import { AccountSwitcherModal } from '@/hooks/useAccountSwitcher';
 interface TopHeaderComponentProps {
   showPlusIcon?: boolean;
   onPlusPress?: () => void;
+  showMenuIcon?: boolean;
+  onMenuPress?: () => void;
 }
 
-export default function TopHeaderComponent({ showPlusIcon = false, onPlusPress }: TopHeaderComponentProps) {
+export default function TopHeaderComponent({ showPlusIcon = false, onPlusPress, showMenuIcon = false, onMenuPress }: TopHeaderComponentProps) {
   const {
     currentUsername,
     isAccountModalVisible,
@@ -32,6 +34,11 @@ export default function TopHeaderComponent({ showPlusIcon = false, onPlusPress }
         {showPlusIcon && (
           <TouchableOpacity style={styles.plusButton} onPress={onPlusPress}>
             <Ionicons name="add" size={24} color="white" />
+          </TouchableOpacity>
+        )}
+        {showMenuIcon && (
+          <TouchableOpacity style={styles.plusButton} onPress={onMenuPress}>
+            <Ionicons name="menu" size={24} color="white" />
           </TouchableOpacity>
         )}
         <AccountSwitcherModal

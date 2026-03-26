@@ -53,6 +53,24 @@ mongoose.connect(process.env.MONGO_URI, mongoOptions)
     .then(() => console.log('MongoDB Atlas connected'))
     .catch(err => console.error('MongoDB connection error:', err));
 
+// Test DB endpoint
+app.get('/api/test/db', async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const User = require('./models/User');
+    const Chat = require('./models/Chat');
+    
+    res.json({
+      mongoConnected: mongoose.connection.readyState === 1,
+      userCount: await User.countDocuments(),
+      chatCount: await Chat.countDocuments(),
+      collections: mongoose.connection.db.listCollections().toArray()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Use auth routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/posts', require('./routes/postRoutes'));
@@ -63,7 +81,7 @@ app.use('/api/follow', require('./routes/followRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/report', require('./routes/reportRoutes'));
-app.use('api/media', require('./routes/mediaRoutes1')); // Temporary route for direct S3 uploads (to be integrated into mediaRoutes later)
+// app.use('/api/media', require('./routes/mediaRoutes1')); // REMOVED: Duplicate/temporary - use main mediaRoutes
 // Basic route
 app.get('/', (req, res) => {
     res.send('Hello World');
@@ -525,4 +543,13 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server and Socket.io running on port ${PORT}`));
+
+app.use((err, req, res, next) => {
+  console.error('🔥 ERROR:', {
+    url: req.originalUrl,
+    method: req.method,
+    message: err.message,
+  });
+  res.status(500).json({ message: 'Server Error' });
+});
 

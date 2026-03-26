@@ -26,6 +26,7 @@ const getUserProfile = async (req, res) => {
             location: user.location || '',
             website: user.website || '',
             pronouns: user.pronouns || '',
+            encryptionPublicKey: user.encryptionPublicKey || null,
             stats: {
                 posts: user.postsCount || 0,
                 followers: user.followersCount || 0,
@@ -49,10 +50,13 @@ const getUserProfileById = async (req, res) => {
         const { userId } = req.params;
         console.log('Fetching profile for userId:', userId);
 
-        const user = await User.findById(userId).select('-password');
+        const user = await User.findById(userId).select('-password -encryptionPublicKey');
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
+
+        // For E2EE, always include encryptionPublicKey if exists
+        const fullUser = await User.findById(userId).select('encryptionPublicKey');
 
         // Check block/mute status
         let isBlocked = false;
@@ -78,6 +82,7 @@ const getUserProfileById = async (req, res) => {
             profilePictureUrl: user.profilePicture,
             profilePicture: user.profilePicture,
             bio: user.bio || '',
+            encryptionPublicKey: fullUser.encryptionPublicKey || null,
             stats: {
                 posts: user.postsCount || 0,
                 followers: user.followersCount || 0,

@@ -34,11 +34,11 @@ const createS3Upload = (folder, getOwnerId) => {
         }),
         limits: { fileSize: 100 * 1024 * 1024 },
         fileFilter: function (req, file, cb) {
-            const allowed = /image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|quicktime|x-msvideo)/;
+            const allowed = /image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|quicktime|x-msvideo)|audio\/(mpeg|mp4|ogg|wav)/;
             if (allowed.test(file.mimetype)) {
                 cb(null, true);
             } else {
-                cb(new Error('Only image and video files are allowed'), false);
+                cb(new Error(`Only images, videos, and audio allowed. Got: ${file.mimetype}`), false);
             }
         },
     });

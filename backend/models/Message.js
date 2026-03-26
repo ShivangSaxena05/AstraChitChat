@@ -84,6 +84,11 @@ const messageSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
+    status: {
+        type: String,
+        enum: ['sending', 'sent', 'failed'],
+        default: 'sent'
+    },
     reactions: [{
         user: {
             type: mongoose.Schema.Types.ObjectId,
@@ -121,13 +126,22 @@ const messageSchema = new mongoose.Schema({
         mimeType: {
             type: String
         }
-    }]
+    }],
+    // E2EE Fields
+    encryptedBody: {
+        type: String  // base64 encrypted message
+    },
+    nonce: {
+        type: String  // base64 nonce (24 bytes)
+    }
 }, {
+
     timestamps: true
 });
 
 // ✅ PRODUCTION INDEXES - Critical for chat pagination performance
-messageSchema.index({ chat: 1, createdAt: -1 });           // Primary chat timeline
+messageSchema.index({ chat: 1, createdAt: -1 });           // Primary chat timeline (chatId)
+messageSchema.index({ chatId: 1, createdAt: -1 });           // Additional chat timeline index
 messageSchema.index({ sender: 1, createdAt: -1 });         // User message history  
 messageSchema.index({ chat: 1, 'readBy.user': 1 });        // Read receipts queries
 messageSchema.index({ chat: 1, quotedMsgId: 1 });          // Quote lookups

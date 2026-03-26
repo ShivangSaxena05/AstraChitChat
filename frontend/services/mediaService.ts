@@ -117,10 +117,11 @@ async function uriToFile(
 export const getPresignedUrl = async (
   fileName: string,
   fileType: string,
+  fileSize: number,
   folder: MediaFolder = 'post',
   ownerId?: string
 ): Promise<PresignedUrlResponse> => {
-  const params = new URLSearchParams({ fileName, fileType, folder });
+  const params = new URLSearchParams({ fileName, fileType, fileSize: fileSize.toString(), folder });
   if (ownerId) params.append('ownerId', ownerId);
 
   return get(`/media/presigned-url?${params.toString()}`);
@@ -199,10 +200,15 @@ export const uploadMediaDirect = async (
 ): Promise<UploadResult> => {
   const fileType = getMimeType(fileUri);
 
+  // Get file size for validation
+  const blob = await (await fetch(fileUri)).blob();
+  const fileSize = blob.size;
+
   // 1. Get presigned URL from backend
   const { presignedUrl, key, cloudfrontUrl } = await getPresignedUrl(
     fileName,
     fileType,
+    fileSize,
     folder,
     ownerId
   );

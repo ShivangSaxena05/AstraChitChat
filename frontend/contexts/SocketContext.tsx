@@ -20,11 +20,27 @@ interface ConversationUpdate {
   isNewMessage: boolean;
 }
 
+type MessageStatus = 'sending' | 'sent' | 'failed' | 'queued';
+
+interface MessageQueueItem {
+  tempId: string;
+  chatId: string;
+  receiverId: string;
+  bodyText: string;
+  content: string;
+  msgType: 'text';
+  quotedMsgId?: string;
+  createdAt: string;
+  retryCount: number;
+}
+
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  isOnline: boolean;
   currentUserId: string | null;
   onlineUsers: Map<string, boolean>;
+  userKeys: { publicKey: string; secretKey: string } | null;
   // Global conversation state for real-time updates
   conversations: any[];
   setConversations: React.Dispatch<React.SetStateAction<any[]>>;
@@ -33,6 +49,7 @@ interface SocketContextType {
   setActiveChatId: React.Dispatch<React.SetStateAction<string | null>>;
   connect: (force?: boolean) => Promise<void>;
   disconnect: () => void;
+  queueMessage: (queueItem: MessageQueueItem) => void;
 }
 
 
@@ -40,8 +57,10 @@ interface SocketContextType {
 const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
+  isOnline: false,
   currentUserId: null,
   onlineUsers: new Map(),
+  userKeys: null,
   conversations: [],
   setConversations: () => {},
   updateConversation: () => {},
@@ -49,6 +68,7 @@ const SocketContext = createContext<SocketContextType>({
   setActiveChatId: () => {},
   connect: async () => {},
   disconnect: () => {},
+  queueMessage: () => {},
 });
 
 
@@ -62,10 +82,12 @@ interface SocketProviderProps {
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isOnline, setIsOnline] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Map<string, boolean>>(new Map());
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [offlineQueue, setOfflineQueue] = useState<MessageQueueItem[]>([]);
   const initializedRef = useRef(false);
   const socketRef = useRef<Socket | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
@@ -169,15 +191,15 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       } else {
         console.log('Socket: New conversation detected, fetching list...');
         get('/chats').then(data => {
-          if (data && data.chats) {
-            const sorted = data.chats.sort((a: any, b: any) => {
+          if (data) {
+            const sorted = data.sort((a: any, b: any) => {
               const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
               const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
               return bTime - aTime;
             });
             setConversations([...sorted]);
           }
-        }).catch(err => console.error('Failed to fetch new conversation:', err));
+        })
         
         return prevConversations;
       }
@@ -258,6 +280,13 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         });
       });
 
+      // Message status updates (sending → sent/failed)
+      newSocket.on('message status', (data: { messageId: string; status: 'sending' | 'sent' | 'failed' }) => {
+        console.log('Socket: Message status update:', data);
+        // Emit to all chat detail screens via custom event
+        window.dispatchEvent(new CustomEvent('messageStatusUpdate', { detail: data }));
+      });
+
 
       newSocket.on('connect_error', (error) => {
         console.error('Socket: ❌ Connect error:', error.message);
@@ -310,15 +339,18 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     <SocketContext.Provider value={{ 
       socket, 
       isConnected, 
+      isOnline,
       currentUserId,
       onlineUsers,
+      userKeys: null,
       conversations,
       setConversations,
       updateConversation,
       activeChatId,
       setActiveChatId,
       connect,
-      disconnect
+      disconnect,
+      queueMessage: () => {},
     }}>
       {children}
     </SocketContext.Provider>

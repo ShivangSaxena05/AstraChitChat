@@ -103,7 +103,7 @@ const ChatItem = memo(({
                 <Text style={styles.unreadText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text>
               </View>
             )}
-            {isFromMe && item.lastMessage?.createdAt && <Text style={styles.readStatus}>✓✓</Text>}
+{isFromMe && <Text style={styles.readStatus}>✓✓</Text>}
           </View>
         </View>
       </View>
@@ -142,9 +142,9 @@ export default function ChatListScreen() {
       }
       
       const data = await get('/chats');
-      if (data && data.chats) {
+      if (data) {
         // Sort chats by most recent message (lastMessage.createdAt or updatedAt)
-        const sorted = data.chats.sort((a: Chat, b: Chat) => {
+        const sorted = data.sort((a: Chat, b: Chat) => {
           const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
           const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
           return bTime - aTime;
@@ -180,14 +180,16 @@ export default function ChatListScreen() {
     });
   }, [currentUserId, router]);
 
+  const handlePressChatItem = useCallback((item: Chat) => handlePressChat(item), [handlePressChat]);
+
   // Render each chat item in the list
   const renderChat = useCallback(({ item }: { item: Chat }) => (
     <ChatItem 
       item={item} 
-      onPress={() => handlePressChat(item)} 
+      onPress={() => handlePressChatItem(item)} 
       currentUserId={currentUserId} 
     />
-  ), [currentUserId, handlePressChat]);
+  ), [currentUserId, handlePressChatItem]);
 
   // Render empty state
   const renderEmptyComponent = () => {

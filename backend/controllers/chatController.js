@@ -1,1028 +1,470 @@
-// controllers/chatController.js
-
-const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const mongoose = require('mongoose');
+const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../services/mediaService');
 
-const toObjectId = id => new mongoose.Types.ObjectId(id);
-
-/**
- * Helper: return minimal user info for UI (mixed strategy)
- * We use profilePicture + name + username (username may be undefined).
- * @param {Object} userDoc - mongoose user doc or plain object
- */
-function minimalUser(userDoc) {
-  if (!userDoc) return null;
-  // userDoc may be populated object or ObjectId; handle both
-  if (typeof userDoc === 'object' && userDoc._id) {
-    return {
-      _id: userDoc._id,
-      name: userDoc.name || null,
-      username: userDoc.username || null,
-      profilePicture: userDoc.profilePicture || null
-    };
-  }
-  // fallback
-  return { _id: userDoc, name: null, profilePicture: null, username: null };
-}
-
-/**
- * Build chat title (username if available else name)
- * @param {Object} userDoc - populated user doc
- */
-function chatTitle(userDoc) {
-  if (!userDoc) return '';
-  return userDoc.username ? userDoc.username : (userDoc.name || '');
-}
-
-/**
- * Convert readBy (array of {user, readAt}) to simple array of userId strings
- * @param {Array} readByArr
- */
-function readByToSimple(readByArr) {
-  if (!Array.isArray(readByArr)) return [];
-  return readByArr.map(r => (r.user ? r.user.toString() : r.toString()));
-}
-
-/**
- * GET /api/chats
- * Get all chats for the current user (server calculates unreadCount).
- *
- * Response:
- * {
- *   chats: [
- *     {
- *       _id, convoType, title, participants: [userObjs],
- *       lastMessage: { text, createdAt },
- *       unreadCount: Number,
- *       lastReadMsgId: ObjectId|null,
- *       updatedAt
- *     }, ...
- *   ]
- * }
- */
+// Get all chats for current user
 async function getChats(req, res) {
   try {
-    const userId = req.user._id.toString();
+    console.log('getChats called for user:', req.user._id);
 
-    // Find chats where current user is participant
-    const chats = await Chat.find({ 'participants.user': toObjectId(userId) })
-      .populate('participants.user', 'name username profilePicture')
-      .populate('lastMessage.sender', 'name username profilePicture')
-      .lean();
+    const userId = req.user._id;
+    const chats = await Chat.find({ 
+      'participants.user': userId 
+    })
+    .populate('participants.user', 'name username profilePicture isOnline lastSeen')
+    .populate('lastMessage.sender', 'name username profilePicture')
+    .sort({ updatedAt: -1 })
+    .limit(20)
+    .lean();
 
-    // For each chat compute unreadCount using participants.lastReadMsgId
-    const results = await Promise.all(chats.map(async (chat) => {
-      // find participant entry
-      const participant = chat.participants.find(p => {
-        const uid = p.user && p.user._id ? p.user._id.toString() : (p.user ? p.user.toString() : null);
-        return uid === userId;
-      });
-
-      const lastReadMsgId = participant && participant.lastReadMsgId ? participant.lastReadMsgId : null;
-
-      // Extract unreadCount from the O(1) Map, defaulting to 0
-      const unreadCount = chat.unreadCount && chat.unreadCount[userId] !== undefined
-        ? parseInt(chat.unreadCount[userId])
-        : 0;
-
-      // prepare participants minimal array
-      const participantsMinimal = chat.participants.map(p => minimalUser(p.user));
-
-      // compute title for 1-to-1 chat (other user's username or name)
-      // since app is 1-to-1 only for now, find the other user
-      const other = participantsMinimal.find(p => p._id.toString() !== userId);
-
-      return {
-        _id: chat._id,
-        convoType: chat.convoType,
-        title: chat.title || chatTitle(other),
-        participants: participantsMinimal,
-        lastMessage: chat.lastMessage || null,
-        unreadCount,
-        lastReadMsgId: lastReadMsgId || null,
-        updatedAt: chat.updatedAt
-      };
-    }));
-
-    // sort by lastMessage.createdAt or updatedAt desc
-    results.sort((a, b) => {
-      const aTime = a.lastMessage && a.lastMessage.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
-      const bTime = b.lastMessage && b.lastMessage.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
-      return bTime - aTime;
-    });
-
-    return res.json({ chats: results });
+    res.json(chats);
   } catch (error) {
-    console.error('getChats error:', error);
-    return res.status(500).json({ message: 'Server error: could not fetch chats', error: error.message });
+    console.error('=== GET CHATS ERROR ===');
+    console.error('User ID:', req.user?._id);
+    console.error('Full error:', error);
+    console.error('Stack:', error.stack);
+    console.error('====================');
+    res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
   }
+
 }
 
-/**
- * GET /api/chats/:chatId/messages
- * Get messages for a specific chat with pagination support.
- * 
- * Query params:
- * - limit: number of messages to return (default 30)
- * - beforeMessageId: optional - get messages older than this messageId
- * 
- * If beforeMessageId is provided, returns older messages (for infinite scroll up).
- * If not provided, returns most recent messages.
- * 
- * Also updates the participant's lastReadMsgId to the last message and marks the last message's readBy for current user.
- *
- * Response:
- * { 
- *   messages: [ { ... message ... with sender minimal info and readBy as simple array } ],
- *   hasMore: boolean,
- *   oldestMessageId: string | null
- * }
- */
-// ✅ PERF: Optimized getChatMessages - Lean queries + aggregate pipeline
+// Get messages for specific chat
 async function getChatMessages(req, res) {
   try {
     const { chatId } = req.params;
-    const { limit = '30', beforeMessageId } = req.query;
-    const userId = req.user._id.toString();
+    const userId = req.user._id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 50;
+    const skip = (page - 1) * limit;
 
-    const pageSize = Math.min(parseInt(limit), 100);
+    const messages = await Message.find({ chat: chatId })
+      .populate('sender', 'name username profilePicture')
+      .populate('quotedMsgId', 'bodyText sender')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    // Fast auth check first
-    const chat = await Chat.findOne({ 
-      _id: toObjectId(chatId), 
-      'participants.user': toObjectId(userId) 
-    }).lean();
-    
-    if (!chat) return res.status(403).json({ message: 'Chat not authorized or not found' });
+    // Mark as read for current user
+    await Message.updateMany(
+      { chat: chatId, readBy: { $ne: userId }, sender: { $ne: userId } },
+      { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
+    );
 
-    // ✅ PERF: Single aggregate pipeline replaces 3x populate queries
-    const pipeline = [
-      { $match: { chat: toObjectId(chatId) } },
-      ...(beforeMessageId ? [{ $match: { createdAt: { $lt: new Date(beforeMessageId) } } }] : []),
-      { $sort: { createdAt: -1 } },
-      { $limit: pageSize + 1 },
-      { 
-        $lookup: {
-          from: 'users',
-          localField: 'sender',
-          foreignField: '_id',
-          as: 'sender',
-          pipeline: [{ $project: { name: 1, username: 1, profilePicture: 1 } }]
-        }
-      },
-      { $unwind: '$sender' },
-      {
-        $lookup: {
-          from: 'messages',
-          localField: 'quotedMsgId',
-          foreignField: '_id',
-          as: 'quotedMessage',
-          pipeline: [
-            {
-              $lookup: {
-                from: 'users',
-                localField: 'sender',
-                foreignField: '_id',
-                as: 'sender',
-                pipeline: [{ $project: { name: 1, username: 1, profilePicture: 1 } }]
-              }
-            },
-            { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
-            { $project: { _id: 1, bodyText: 1, sender: 1, msgType: 1 } }
-          ]
-        }
-      },
-      { $unwind: { path: '$quotedMessage', preserveNullAndEmptyArrays: true } },
-      { $addFields: { 
-        readBy: { 
-          $map: {
-            input: '$readBy',
-            as: 'read',
-            in: '$$read.user'
-          }
-        },
-        deliveredTo: {
-          $map: {
-            input: '$deliveredTo',
-            as: 'delivered',
-            in: '$$delivered.user'
-          }
-        }
-      } }
-    ];
-
-    const messages = await Message.aggregate(pipeline);
-
-    let hasMore = false;
-    let oldestMessageId = null;
-
-    if (messages.length > pageSize) {
-      hasMore = true;
-      messages.pop();
-    }
-
-    messages.reverse(); // Chronological order for frontend
-    if (messages.length > 0) {
-      oldestMessageId = messages[0]._id;
-    }
-
-    // Mark read on initial load (batch update)
-    if (!beforeMessageId && messages.length > 0) {
-      const lastMsgId = messages[messages.length - 1]._id;
-      
-      await Chat.updateOne(
-        { _id: toObjectId(chatId), 'participants.user': toObjectId(userId) },
-        { 
-          $set: { 'participants.$.lastReadMsgId': toObjectId(lastMsgId) },
-          $set: { [`unreadCount.${userId}`]: 0 }
-        }
-      );
-
-      await Message.updateOne(
-        { _id: toObjectId(lastMsgId), 'readBy.user': { $ne: toObjectId(userId) } },
-        { $push: { readBy: { user: toObjectId(userId), readAt: new Date() } } }
-      );
-    }
-
-    return res.json({
-      messages,
-      hasMore,
-      oldestMessageId: oldestMessageId?.toString()
-    });
+    res.json(messages.reverse());
   } catch (error) {
-    console.error('getChatMessages error:', error);
-    return res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Failed to get messages', error: error.message });
   }
 }
 
-/**
- * POST /api/chats/send  (you can also use POST /api/chats/:chatId/messages)
- * Send a message. Auto-creates chat if it doesn't exist (WhatsApp-style).
- *
- * Expected req.body:
- * { receiverId, bodyText, attachments }  // attachments optional
- *
- * Response: saved message (sender populated minimally), readBy returned as simple array of userId strings
- */
+// Create new chat
+async function createChat(req, res) {
+  try {
+    const { userId } = req.body;
+    const currentUser = req.user._id;
+
+    if (userId === currentUser.toString()) {
+      return res.status(400).json({ message: 'Cannot chat with self' });
+    }
+
+    let chat = await Chat.findOne({
+      convoType: 'private',
+      participants: { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
+    });
+
+    if (!chat) {
+      chat = new Chat({
+        convoType: 'private',
+        participants: [
+          { user: currentUser, role: 'member' },
+          { user: new mongoose.Types.ObjectId(userId), role: 'member' }
+        ],
+        chatName: 'Chat'
+      });
+      await chat.save();
+    }
+
+    chat = await chat.populate('participants.user', 'name username profilePicture');
+    res.json(chat);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to create chat', error: error.message });
+  }
+}
+
+// Search chats by participant name
+async function searchChats(req, res) {
+  try {
+    const { query } = req.query;
+    const userId = req.user._id;
+
+    const chats = await Chat.find({
+      'participants.user': userId,
+      $or: [
+        { 'chatName': { $regex: query, $options: 'i' } },
+        { 'participants.user': { 
+          $elemMatch: { 
+            user: { $ne: userId },
+            $expr: { 
+              $regexMatch: { 
+                input: { $concat: ['$user.name', ' ', '$user.username'] },
+                regex: query,
+                options: 'i'
+              }
+            }
+          }
+        } }
+      ]
+    }).populate('participants.user', 'name username profilePicture');
+
+    res.json(chats);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to search chats', error: error.message });
+  }
+}
+
+// Send message (create chat if needed)
 async function sendMessage(req, res) {
   try {
-    const senderId = req.user._id.toString();
-    const { chatId } = req.params; // Check if this is for existing chat
-    let { receiverId, bodyText, attachments, msgType, quotedMsgId, participants } = req.body;
+    const { receiverId, bodyText, msgType = 'text', attachments = [], quotedMsgId } = req.body;
+    const senderId = req.user._id;
 
-    if (participants) {
-      receiverId = participants[0]; // Take first participant as receiver
-    }
-
-    if (!receiverId) return res.status(400).json({ message: 'receiverId or participants is required' });
-    if ((!bodyText || !bodyText.trim()) && (!attachments || attachments.length === 0)) {
-      return res.status(400).json({ message: 'Message text or attachments required' });
-    }
-
-    // Ensure receiver exists
-    const receiver = await User.findById(receiverId).select('_id name username profilePicture blockedUsers');
-    if (!receiver) return res.status(404).json({ message: 'Receiver not found' });
-
-    const sender = await User.findById(senderId).select('blockedUsers');
-
-    // Check block status
-    if (sender.blockedUsers && sender.blockedUsers.includes(receiverId)) {
-      return res.status(403).json({ message: 'You have blocked this user' });
-    }
-    if (receiver.blockedUsers && receiver.blockedUsers.includes(senderId)) {
-      return res.status(403).json({ message: 'Action not allowed' }); // Generic message for privacy
-    }
-
-    let chat;
-
-    if (chatId) {
-      // Sending message to existing chat
-      chat = await Chat.findById(chatId).populate('participants.user', 'name username profilePicture');
-      if (!chat) return res.status(404).json({ message: 'Chat not found' });
-
-      // Ensure sender is participant
-      if (!chat.participants.some(p => p.user.toString() === senderId.toString())) {
-        return res.status(403).json({ message: 'Not authorized to send message to this chat' });
-      }
-
-      // Try to find existing direct chat between sender and receiver
-      chat = await Chat.findOne({
-        convoType: 'direct',
-        'participants.user': { $all: [toObjectId(senderId), toObjectId(receiverId)] }
-      }).populate('participants.user', 'name username profilePicture');
-
-      // If chat not found, create it
-      if (!chat) {
-        const participantObjects = [
-          { user: toObjectId(senderId), role: 'member', joinedAt: new Date() },
-          { user: toObjectId(receiverId), role: 'member', joinedAt: new Date() }
-        ];
-        chat = await Chat.create({
-          convoType: 'direct',
-          participants: participantObjects,
-          lastMessage: null
-        });
-        // populate for later usage
-        await chat.populate('participants.user', 'name username profilePicture');
-      }
-    }
-
-    // Build message object (using your Message model fields)
-    const msgObj = {
-      sender: toObjectId(senderId),
-      receiver: toObjectId(receiverId),
-      chat: toObjectId(chat._id),
-      msgType: msgType || (attachments && attachments.length ? 'image' : 'text'),
-      bodyText: bodyText ? bodyText.trim() : '',
-      attachments: attachments || [],
-      quotedMsgId: quotedMsgId ? toObjectId(quotedMsgId) : undefined,
-      readBy: [{ user: toObjectId(senderId), readAt: new Date() }], // sender has read their own message
-      deliveredTo: [{ user: toObjectId(senderId), deliveredAt: new Date() }] // implicitly delivered to self
-    };
-
-    // Save message
-    const createdMessage = await Message.create(msgObj);
-
-    // Update chat.lastMessage to show preview & time
-    chat.lastMessage = {
-      text: createdMessage.bodyText || (createdMessage.attachments && createdMessage.attachments.length ? 'Attachment' : ''),
-      createdAt: createdMessage.createdAt,
-      sender: createdMessage.sender
-    };
-
-    // Update chat participants' lastReadMsgId
-    // Sender's lastReadMsgId = this message id
-    const senderParticipant = chat.participants.find(p => p.user.toString() === senderId.toString());
-    if (senderParticipant) senderParticipant.lastReadMsgId = createdMessage._id;
-
-    // Increment unread count for all other receivers using Map
-    if (!chat.unreadCount) {
-      chat.unreadCount = new Map();
-    }
-
-    // For every participant except the sender, increment their unread count
-    chat.participants.forEach(p => {
-      const uid = p.user.toString();
-      if (uid !== senderId.toString()) {
-        const currentCount = chat.unreadCount.get(uid) || 0;
-        chat.unreadCount.set(uid, currentCount + 1);
-      }
+    // Auto-create chat if needed
+    let chat = await Chat.findOne({
+      convoType: 'private',
+      participants: { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
     });
 
-    // Receiver's lastReadMsgId should remain unchanged (so it counts as unread until they open)
-    await chat.save();
-
-    // populate sender minimally for response
-    await createdMessage.populate('sender', 'name username profilePicture');
-
-    if (chatId) {
-      // For existing chat, return the message
-      const response = createdMessage.toObject();
-      response.readBy = readByToSimple(createdMessage.readBy);
-      response.deliveredTo = readByToSimple(createdMessage.deliveredTo);
-      return res.status(201).json(response);
-    } else {
-      // For new chat creation, return the chat with _id
-      return res.status(201).json({ _id: chat._id });
+    if (!chat) {
+      chat = new Chat({
+        convoType: 'private',
+        participants: [
+          { user: senderId, role: 'member' },
+          { user: new mongoose.Types.ObjectId(receiverId), role: 'member' }
+        ]
+      });
+      await chat.save();
     }
+
+    const message = new Message({
+      sender: senderId,
+      receiver: new mongoose.Types.ObjectId(receiverId),
+      chat: chat._id,
+      bodyText: bodyText || '',
+      msgType,
+      attachments,
+      quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
+      readBy: [{ user: senderId, readAt: new Date() }]
+    });
+
+    await message.save();
+    await message.populate('sender', 'name username profilePicture');
+    await message.populate('quotedMsgId', 'bodyText sender');
+
+    // Update chat lastMessage
+    await Chat.findByIdAndUpdate(chat._id, {
+      lastMessage: {
+        text: bodyText || (attachments.length ? 'Media' : 'Message'),
+        createdAt: message.createdAt,
+        sender: senderId
+      },
+      updatedAt: new Date()
+    });
+
+    res.status(201).json(message);
   } catch (error) {
-    console.error('sendMessage error:', error);
-    return res.status(500).json({ message: 'Server error: could not send message', error: error.message });
+    res.status(500).json({ message: 'Failed to send message', error: error.message });
   }
 }
 
-/**
- * POST /api/messages/:messageId/read
- * Mark a single message as read by current user.
- * Also updates the chat participant's lastReadMsgId if this message is newer.
- *
- * Response: { message: 'Message marked as read' }
- */
+// Mark single message as read
 async function markMessageAsRead(req, res) {
   try {
     const { messageId } = req.params;
-    const userId = req.user._id.toString();
+    const userId = req.user._id;
 
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    // Only allow participant to mark read (verify they are participant of the chat)
-    const chat = await Chat.findById(message.chat).populate('participants.user', '_id');
-    if (!chat) return res.status(404).json({ message: 'Chat not found' });
-
-    const isParticipant = chat.participants.some(p => {
-      const uid = p.user && p.user._id ? p.user._id.toString() : (p.user ? p.user.toString() : null);
-      return uid === userId;
+    await Message.findByIdAndUpdate(messageId, {
+      $addToSet: { readBy: { user: userId, readAt: new Date() } }
     });
-    if (!isParticipant) return res.status(403).json({ message: 'Not authorized to mark this message as read' });
 
-    // Add to message.readBy if not already present
-    const alreadyRead = message.readBy && message.readBy.some(r => r.user.toString() === userId);
-    if (!alreadyRead) {
-      message.readBy.push({ user: toObjectId(userId), readAt: new Date() });
-      await message.save();
-    }
-
-    // Update participant.lastReadMsgId if this message is newer
-    const participant = chat.participants.find(p => {
-      const uid = p.user && p.user._id ? p.user._id.toString() : (p.user ? p.user.toString() : null);
-      return uid === userId;
-    });
-    let needsSave = false;
-    if (participant) {
-      if (!participant.lastReadMsgId || toObjectId(participant.lastReadMsgId).toString() !== toObjectId(messageId).toString()) {
-        participant.lastReadMsgId = toObjectId(messageId);
-        chat.markModified('participants');
-        needsSave = true;
-      }
-    }
-
-    // Decrement or clear unread count for this user when marking read
-    if (chat.unreadCount && chat.unreadCount.has(userId)) {
-      const current = chat.unreadCount.get(userId);
-      if (current > 0) {
-        chat.unreadCount.set(userId, Math.max(0, current - 1));
-        needsSave = true;
-      }
-    }
-
-    if (needsSave) {
-      await chat.save();
-    }
-
-    return res.json({ message: 'Message marked as read' });
+    res.json({ message: 'Message marked as read' });
   } catch (error) {
-    console.error('markMessageAsRead error:', error);
-    return res.status(500).json({ message: 'Server error: could not mark message as read', error: error.message });
+    res.status(500).json({ message: 'Failed to mark read', error: error.message });
   }
 }
 
-/**
- * POST /api/messages/read
- * Mark all messages in a chat as read by current user.
- * Body: { chatId }
- *
- * This endpoint is handy when user opens a chat and we want to mark all messages as read.
- */
+// Mark all messages in chat as read
 async function markAllMessagesAsRead(req, res) {
   try {
     const { chatId } = req.body;
-    if (!chatId) return res.status(400).json({ message: 'chatId is required' });
+    const userId = req.user._id;
 
-    const userId = req.user._id.toString();
+    await Message.updateMany(
+      { chat: chatId, sender: { $ne: userId } },
+      { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
+    );
 
-    const chat = await Chat.findById(chatId).populate('participants.user', '_id');
-    if (!chat) return res.status(404).json({ message: 'Chat not found' });
-
-    const participant = chat.participants.find(p => {
-      const uid = p.user && p.user._id ? p.user._id.toString() : (p.user ? p.user.toString() : null);
-      return uid === userId;
-    });
-    if (!participant) return res.status(403).json({ message: 'Not authorized' });
-
-    // ✅ OPTIMIZED: Get last message ID for lastReadMsgId
-    const lastMsg = await Message.findOne({ chat: toObjectId(chatId) }).sort({ createdAt: -1 }).select('_id');
-    if (!lastMsg) return res.json({ message: 'No messages to mark read' });
-
-    // ✅ FIXED: NO updateMany - Frontend computes read status from chat.lastReadMsgId
-    // Just update participant.lastReadMsgId and reset unreadCount (O(1))
-    participant.lastReadMsgId = lastMsg._id;
-    chat.markModified('participants');
-    
-    // Reset unread count Map entry to 0
-    if (chat.unreadCount) {
-      chat.unreadCount.set(userId, 0);
-    } else {
-      chat.unreadCount = new Map([[userId, 0]]);
-    }
-
-    await chat.save();
-
-    return res.json({ message: 'All messages marked as read' });
+    res.json({ message: 'All messages marked as read' });
   } catch (error) {
-    console.error('markAllMessagesAsRead error:', error);
-    return res.status(500).json({ message: 'Server error: could not mark messages as read', error: error.message });
+    res.status(500).json({ message: 'Failed to mark all read', error: error.message });
   }
 }
 
-/**
- * PUT /api/messages/:messageId
- * Edit a message. Only sender can edit. Message must not be unsent.
- * Body: { bodyText }
- */
-async function editMessage(req, res) {
-  try {
-    const { messageId } = req.params;
-    const { bodyText } = req.body;
-    const userId = req.user._id.toString();
-
-    if (!bodyText || !bodyText.trim()) return res.status(400).json({ message: 'Message content is required' });
-
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Not authorized to edit this message' });
-    if (message.unsentAt) return res.status(400).json({ message: 'Cannot edit an unsent message' });
-    
-    // ✅ NEW: 15min edit time limit from createdAt
-    const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
-    if (message.createdAt < fifteenMinAgo) {
-      return res.status(400).json({ message: 'Cannot edit messages older than 15 minutes' });
-    }
-
-    message.bodyText = bodyText.trim();
-    message.editedAt = new Date();
-    await message.save();
-
-    // Return message with simple readBy and deliveredTo array
-    const response = message.toObject();
-    response.readBy = readByToSimple(message.readBy);
-    response.deliveredTo = readByToSimple(message.deliveredTo);
-
-    return res.json(response);
-  } catch (error) {
-    console.error('editMessage error:', error);
-    return res.status(500).json({ message: 'Server error: could not edit message', error: error.message });
-  }
-}
-
-/**
- * DELETE /api/messages/:messageId
- * Unsend message (mark unsent). Only sender can unsend.
- * We keep the message doc but mark unsentAt + unsentBy and optionally clear bodyText/attachments.
- */
-async function unsendMessage(req, res) {
-  try {
-    const { messageId } = req.params;
-    const userId = req.user._id.toString();
-
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Not authorized to unsend this message' });
-    if (message.unsentAt) return res.status(400).json({ message: 'Message already unsent' });
-
-    // Mark as unsent (WhatsApp style: remove content but keep doc)
-    message.unsentAt = new Date();
-    message.unsentBy = toObjectId(userId);
-    message.bodyText = ''; // clear text
-    message.attachments = []; // clear attachments (optional)
-    await message.save();
-
-    // ✅ OPTIMIZED: Update chat.lastMessage if needed using aggregate (single query)
-    const [chat, prevAgg] = await Promise.all([
-      Chat.findById(message.chat),
-      Message.aggregate([
-        { $match: { 
-          chat: message.chat, 
-          _id: { $ne: toObjectId(message._id) },
-          $expr: { $lt: ['$createdAt', message.createdAt] }
-        }},
-        { $sort: { createdAt: -1 } },
-        { $limit: 1 },
-        { $project: { bodyText: 1, attachments: 1, createdAt: 1 } }
-      ])
-    ]);
-    
-    if (chat && chat.lastMessage && new Date(chat.lastMessage.createdAt).getTime() === new Date(message.createdAt).getTime()) {
-      const prev = prevAgg[0];
-      chat.lastMessage = prev ? { 
-        text: prev.bodyText || (prev.attachments && prev.attachments.length ? 'Attachment' : ''), 
-        createdAt: prev.createdAt 
-      } : null;
-      await chat.save();
-    }
-
-    return res.json({ message: 'Message unsent' });
-  } catch (error) {
-    console.error('unsendMessage error:', error);
-    return res.status(500).json({ message: 'Server error: could not unsend message', error: error.message });
-  }
-}
-
-/**
- * POST /api/messages/:messageId/react
- * Add a reaction for current user on a message.
- * Body: { emoji }
- */
+// Add reaction
 async function addReaction(req, res) {
   try {
     const { messageId } = req.params;
     const { emoji } = req.body;
-    const userId = req.user._id.toString();
-
-    if (!emoji) return res.status(400).json({ message: 'Emoji required' });
+    const userId = req.user._id;
 
     const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (!message.reactions) message.reactions = [];
+    
+    const existing = message.reactions.find(r => r.emoji === emoji && r.user.toString() === userId);
+    if (!existing) {
+      message.reactions.push({ emoji, user: userId, reactedAt: new Date() });
+      await message.save();
+    }
 
-    // Prevent duplicate same-user same-emoji
-    const exists = message.reactions && message.reactions.some(r => r.user.toString() === userId && r.emoji === emoji);
-    if (exists) return res.status(400).json({ message: 'Reaction already exists' });
-
-    message.reactions.push({ user: toObjectId(userId), emoji, reactedAt: new Date() });
-    await message.save();
-
-    // Return reaction list (you can opt to return just the new reaction)
-    return res.status(201).json({ reactions: message.reactions });
+    res.json(message.reactions);
   } catch (error) {
-    console.error('addReaction error:', error);
-    return res.status(500).json({ message: 'Server error: could not add reaction', error: error.message });
+    res.status(500).json({ message: 'Failed to add reaction', error: error.message });
   }
 }
 
-/**
- * DELETE /api/messages/:messageId/react
- * Remove a reaction. Provide { emoji } in body to remove that emoji by current user.
- * Body: { emoji }
- */
+// Remove reaction
 async function removeReaction(req, res) {
   try {
     const { messageId } = req.params;
-    const { emoji } = req.body;
-    const userId = req.user._id.toString();
+    const { emoji } = req.params;
+    const userId = req.user._id;
 
-    if (!emoji) return res.status(400).json({ message: 'Emoji required' });
+    await Message.findByIdAndUpdate(messageId, {
+      $pull: { reactions: { emoji, 'user': userId } }
+    });
 
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    const before = message.reactions.length;
-    message.reactions = message.reactions.filter(r => !(r.user.toString() === userId && r.emoji === emoji));
-    if (message.reactions.length === before) return res.status(404).json({ message: 'Reaction not found' });
-
-    await message.save();
-    return res.json({ message: 'Reaction removed' });
+    res.json({ message: 'Reaction removed' });
   } catch (error) {
-    console.error('removeReaction error:', error);
-    return res.status(500).json({ message: 'Server error: could not remove reaction', error: error.message });
+    res.status(500).json({ message: 'Failed to remove reaction', error: error.message });
   }
 }
 
-/**
- * GET /api/messages/:messageId/receipts
- * Return simple array of userId strings who have read the message.
- */
+// Edit message
+async function editMessage(req, res) {
+  try {
+    const { messageId } = req.params;
+    const { bodyText } = req.body;
+    const userId = req.user._id;
+
+    const message = await Message.findOneAndUpdate(
+      { _id: messageId, sender: userId },
+      { bodyText, editedAt: new Date() },
+      { new: true }
+    ).populate('sender', 'name username');
+
+    if (!message) return res.status(404).json({ message: 'Message not found or unauthorized' });
+
+    res.json(message);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to edit message', error: error.message });
+  }
+}
+
+// Unsend message (soft delete)
+async function unsendMessage(req, res) {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    await Message.findOneAndUpdate(
+      { _id: messageId, sender: userId },
+      { unsent: true, bodyText: '[This message was unsent]', editedAt: new Date() }
+    );
+
+    res.json({ message: 'Message unsent' });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to unsend message', error: error.message });
+  }
+}
+
+// Delete message (hard delete)
+async function deleteMessage(req, res) {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id.toString();
+
+    const message = await Message.findById(messageId).populate('chat');
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Unauthorized' });
+
+    // Delete media
+    if (message.mediaKey) {
+      try {
+        if (STORAGE_TYPE === 'cloudinary') {
+          const publicId = message.mediaUrl?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          if (publicId) await deleteFromCloudinary(publicId);
+        } else {
+          await deleteS3Object(message.mediaKey);
+        }
+      } catch (err) {
+        console.warn('Media delete failed:', err.message);
+      }
+    }
+
+    for (const att of message.attachments || []) {
+      try {
+        if (STORAGE_TYPE === 'cloudinary') {
+          const publicId = att.url?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          if (publicId) await deleteFromCloudinary(publicId);
+        } else {
+          await deleteS3Object(att.key);
+        }
+      } catch (err) {
+        console.warn('Attachment delete failed:', err.message);
+      }
+    }
+
+    await Message.deleteOne({ _id: messageId });
+
+    res.json({ message: 'Message deleted' });
+  } catch (error) {
+    console.error('deleteMessage error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+}
+
+// Get message receipts
 async function getMessageReceipts(req, res) {
   try {
     const { messageId } = req.params;
-
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-
-    const simple = readByToSimple(message.readBy);
-    return res.json({ receipts: simple });
+    const message = await Message.findById(messageId).populate('readBy.user deliveredTo.user', 'name username profilePicture');
+    res.json({
+      readBy: message.readBy || [],
+      deliveredTo: message.deliveredTo || []
+    });
   } catch (error) {
-    console.error('getMessageReceipts error:', error);
-    return res.status(500).json({ message: 'Server error: could not fetch receipts', error: error.message });
+    res.status(500).json({ message: 'Failed to get receipts', error: error.message });
   }
 }
 
-/**
- * GET /api/messages/:messageId/reactions
- * Return message reactions (full reaction objects)
- */
+// Get message reactions
 async function getMessageReactions(req, res) {
   try {
     const { messageId } = req.params;
     const message = await Message.findById(messageId).populate('reactions.user', 'name username profilePicture');
-    if (!message) return res.status(404).json({ message: 'Message not found' });
-    return res.json({ reactions: message.reactions || [] });
+    res.json(message.reactions || []);
   } catch (error) {
-    console.error('getMessageReactions error:', error);
-    return res.status(500).json({ message: 'Server error: could not fetch reactions', error: error.message });
+    res.status(500).json({ message: 'Failed to get reactions', error: error.message });
   }
 }
 
-/**
- * POST /api/chats/create
- * Create a new chat without sending a message.
- * Body: { participants: [userId1, userId2, ...] }  // For direct chats, usually 1 participant
- *
- * Response: { _id: chatId }
- */
-async function createChat(req, res) {
-  try {
-    const userId = req.user._id.toString();
-    const { participants } = req.body;
-
-    if (!participants || !Array.isArray(participants) || participants.length < 2) {
-      return res.status(400).json({ message: 'Two participants are required to create a chat.' });
-    }
-
-    // Find the other participant's ID from the array
-    const receiverId = participants.find(p => p.toString() !== userId);
-
-    if (!receiverId) {
-      return res.status(400).json({ message: 'Could not determine the receiver from participants.' });
-    }
-
-    // Ensure receiver exists
-    const receiver = await User.findById(receiverId).select('_id name username profilePicture');
-    if (!receiver) return res.status(404).json({ message: 'Receiver not found' });
-
-    // Check if chat already exists between current user and receiver
-    let chat = await Chat.findOne({
-      convoType: 'direct',
-      'participants.user': { $all: [toObjectId(userId), toObjectId(receiverId)] }
-    });
-
-    if (chat) {
-      // Chat already exists, return it
-      return res.json({ _id: chat._id });
-    }
-
-    // Create new chat
-    const participantObjects = [
-      { user: toObjectId(userId), role: 'member', joinedAt: new Date() },
-      { user: toObjectId(receiverId), role: 'member', joinedAt: new Date() }
-    ];
-
-    chat = await Chat.create({
-      convoType: 'direct',
-      participants: participantObjects,
-      lastMessage: null
-    });
-
-    return res.status(201).json({ _id: chat._id });
-  } catch (error) {
-    console.error('createChat error:', error);
-    return res.status(500).json({ message: 'Server error: could not create chat', error: error.message });
-  }
-}
-
-/**
- * POST /api/chats/group
- * Create a new group chat.
- * Body: { participants: [userId1, userId2, ...], title: "Group Name" }
- */
-async function createGroupChat(req, res) {
-  try {
-    const userId = req.user._id.toString();
-    const { participants, title } = req.body;
-
-    if (!participants || !Array.isArray(participants) || participants.length < 2) {
-      return res.status(400).json({ message: 'At least two other participants are required to create a group chat.' });
-    }
-
-    if (!title || title.trim().length === 0) {
-      return res.status(400).json({ message: 'Group title is required' });
-    }
-
-    // Ensure all participants are valid and distinct
-    const allParticipantIds = [...new Set([...participants, userId])]; // include creator
-
-    const participantObjects = allParticipantIds.map(id => ({
-      user: toObjectId(id),
-      role: id === userId ? 'admin' : 'member', // Creator is admin
-      joinedAt: new Date()
-    }));
-
-    const chat = await Chat.create({
-      convoType: 'group',
-      title: title.trim(),
-      participants: participantObjects,
-      lastMessage: null
-    });
-
-    return res.status(201).json({ _id: chat._id, chat });
-  } catch (error) {
-    console.error('createGroupChat error:', error);
-    return res.status(500).json({ message: 'Server error: could not create group chat', error: error.message });
-  }
-}
-
-/**
- * GET /api/chats/search?q=...
- * Search users by username or name (returns user-like objects for front-end)
- */
-async function searchChats(req, res) {
-  try {
-    const { q } = req.query;
-    const userId = req.user._id.toString();
-    if (!q || q.trim().length === 0) return res.status(400).json({ message: 'Query required' });
-
-    const users = await User.find({
-      _id: { $ne: toObjectId(userId) },
-      $or: [{ username: { $regex: q, $options: 'i' } }, { name: { $regex: q, $options: 'i' } }]
-    }).select('_id username name profilePicture');
-
-    const results = users.map(u => ({ _id: u._id, username: u.username, name: u.name, profilePicture: u.profilePicture }));
-    return res.json(results);
-  } catch (error) {
-    console.error('searchChats error:', error);
-    return res.status(500).json({ message: 'Server error: could not search users', error: error.message });
-  }
-}
-
-/**
- * GET /api/chats/user-status/:userId
- * Get user's online status and last seen
- */
+// Get user status
 async function getUserStatus(req, res) {
   try {
     const { userId } = req.params;
-
     const user = await User.findById(userId).select('isOnline lastSeen');
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    return res.json({
-      isOnline: user.isOnline || false,
-      lastSeen: user.lastSeen || null
-    });
+    res.json(user || { isOnline: false, lastSeen: null });
   } catch (error) {
-    console.error('getUserStatus error:', error);
-    return res.status(500).json({ message: 'Server error: could not get user status', error: error.message });
+    res.status(500).json({ message: 'Failed to get status', error: error.message });
   }
 }
 
-/**
- * GET /api/chats/:chatId/info
- * Get chat info for Chat Info screen
- */
+// Create group chat
+async function createGroupChat(req, res) {
+  try {
+    const { name, participants } = req.body;
+    const creatorId = req.user._id;
+
+    const chat = new Chat({
+      convoType: 'group',
+      chatName: name,
+      participants: [
+        { user: creatorId, role: 'admin', joinedAt: new Date() },
+        ...participants.map(id => ({ user: new mongoose.Types.ObjectId(id), role: 'member', joinedAt: new Date() }))
+      ]
+    });
+
+    await chat.save();
+    await chat.populate('participants.user', 'name username profilePicture');
+    res.status(201).json(chat);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to create group', error: error.message });
+  }
+}
+
+// Get chat info
 async function getChatInfo(req, res) {
   try {
     const { chatId } = req.params;
-    const userId = req.user._id.toString();
-
-    const chat = await Chat.findOne({ _id: toObjectId(chatId), 'participants.user': toObjectId(userId) })
-      .populate('participants.user', 'username profilePicture isOnline lastSeen')
-      .lean();
-
-    if (!chat) return res.status(404).json({ message: 'Chat not found' });
-
-    const participant = chat.participants.find(p => p.user._id.toString() === userId);
-    const otherUser = chat.participants.find(p => p.user._id.toString() !== userId);
-
-    if (!otherUser?.user) return res.status(400).json({ message: 'Invalid chat participants' });
-
-    // Media counts from Messages aggregate
-    const mediaCounts = await Message.aggregate([
-      { $match: { chat: toObjectId(chatId) } },
-      {
-        $group: {
-          _id: '$msgType',
-          photos: { $sum: { $cond: [{ $regexMatch: { input: '$msgType', regex: '^image' } }, 1, 0] } },
-          videos: { $sum: { $cond: [{ $regexMatch: { input: '$msgType', regex: '^video' } }, 1, 0] } },
-          links: { $sum: { $cond: [{ $eq: ['$msgType', 'link'] }, 1, 0] } },
-          files: { $sum: { $cond: [{ $eq: ['$msgType', 'file'] }, 1, 0] } }
-        }
-      }
-    ]);
-
-    const counts = {
-      photos: mediaCounts.find(c => c._id === 'image')?.photos || 0,
-      videos: mediaCounts.find(c => c._id === 'video')?.videos || 0,
-      links: mediaCounts.find(c => c._id === 'link')?.links || 0,
-      files: mediaCounts.find(c => c._id === 'file')?.files || 0,
-    };
-
-    return res.json({
-      participants: chat.participants,
-      otherUser: otherUser,
-      profilePicture: otherUser.user.profilePicture,
-      isMuted: chat.mutedBy?.has(userId) || false,
-      mutedUntil: chat.mutedBy?.get(userId)?.mutedUntil,
-      isPinned: chat.isPinnedBy?.includes(toObjectId(userId)) || false,
-      mediaCounts: counts
-    });
+    const chat = await Chat.findById(chatId)
+      .populate('participants.user', 'name username profilePicture')
+      .populate('creator', 'name username');
+    res.json(chat);
   } catch (error) {
-    console.error('getChatInfo error:', error);
-    return res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to get chat info', error: error.message });
   }
 }
 
-/**
- * GET /api/chats/:chatId/media
- * Get shared media/files by type with pagination
- */
+// Get chat media
 async function getChatMedia(req, res) {
   try {
     const { chatId } = req.params;
-    const { type, limit = '12', beforeId } = req.query;
-    const userId = req.user._id.toString();
+    const page = parseInt(req.query.page) || 1;
+    const limit = 30;
+    const skip = (page - 1) * limit;
 
-    const chat = await Chat.findOne({ _id: toObjectId(chatId), 'participants.user': toObjectId(userId) });
-    if (!chat) return res.status(403).json({ message: 'Chat not found' });
+    const mediaMessages = await Message.find({ 
+      chat: chatId, 
+      $or: [{ msgType: { $in: ['image', 'video'] } }, { attachments: { $exists: true, $ne: [] } }] 
+    })
+    .populate('sender', 'name username profilePicture')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
 
-    const match = { chat: toObjectId(chatId) };
-    if (type) {
-      if (type === 'photos') match.msgType = { $regex: '^image' };
-      else if (type === 'videos') match.msgType = { $regex: '^video' };
-      else if (type === 'files') match.msgType = 'file';
-      else if (type === 'links') match.msgType = 'link';
-    }
-    if (beforeId) match._id = { $lt: toObjectId(beforeId) };
-
-    const pageSize = Math.min(parseInt(limit), 50);
-
-    const pipeline = [
-      { $match: match },
-      { $sort: { createdAt: -1 } },
-      { $limit: pageSize + 1 },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'sender',
-          foreignField: '_id',
-          as: 'sender',
-          pipeline: [{ $project: { username: 1 } }]
-        }
-      },
-      { $unwind: { path: '$sender', preserveNullAndEmptyArrays: true } },
-      { $project: { _id: 1, url: { $ifNull: ['$mediaUrl', '$bodyText'] }, mimeType: 1, sizeBytes: 1, createdAt: 1, sender: 1 } }
-    ];
-
-    const media = await Message.aggregate(pipeline);
-
-    const hasMore = media.length > pageSize;
-    if (hasMore) media.pop();
-
-    return res.json({ media, hasMore });
+    res.json(mediaMessages);
   } catch (error) {
-    console.error('getChatMedia error:', error);
-    return res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to get media', error: error.message });
   }
 }
 
-/**
- * POST /api/chats/:chatId/mute
- * Mute chat for user
- */
+// Chat settings
 async function muteChat(req, res) {
   try {
     const { chatId } = req.params;
-    const { duration } = req.body; // '7d' or 'inf'
-    const userId = req.user._id.toString();
+    const userId = req.user._id;
+    const { mutedUntil } = req.body;
 
-    const mutedUntil = duration === 'inf' ? null : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    
-    await Chat.updateOne(
-      { _id: toObjectId(chatId), 'participants.user': toObjectId(userId) },
-      { $set: { [`mutedBy.${userId}`]: { mutedUntil } } }
-    );
-
-    return res.json({ message: 'Chat muted' });
+    // Logic for muting (store in User.mutedChats or similar)
+    res.json({ message: 'Chat muted' });
   } catch (error) {
-    console.error('muteChat error:', error);
-    return res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to mute chat' });
   }
 }
 
-/**
- * POST /api/chats/:chatId/pin
- * Toggle pin status
- */
 async function pinChat(req, res) {
   try {
     const { chatId } = req.params;
-    const userId = req.user._id.toString();
+    const isPinned = req.body.isPinned !== false; // default true
 
-    const chat = await Chat.findById(chatId);
-    if (!chat || !chat.participants.some(p => p.user.toString() === userId)) {
-      return res.status(403).json({ message: 'Not authorized' });
-    }
+    await User.findByIdAndUpdate(req.user._id, {
+      $addToSet: { pinnedChats: chatId }
+    });
 
-    const isPinned = chat.isPinnedBy.includes(toObjectId(userId));
-    const update = isPinned 
-      ? { $pull: { isPinnedBy: toObjectId(userId) } }
-      : { $addToSet: { isPinnedBy: toObjectId(userId) } };
-
-    await Chat.updateOne({ _id: toObjectId(chatId) }, update);
-    return res.json({ message: 'Pin status updated', isPinned: !isPinned });
+    res.json({ message: 'Chat pinned' });
   } catch (error) {
-    console.error('pinChat error:', error);
-    return res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to pin chat' });
   }
 }
 
-/**
- * POST /api/chats/:chatId/clear
- * Clear chat history for user
- */
 async function clearChat(req, res) {
   try {
     const { chatId } = req.params;
-    const userId = req.user._id.toString();
-
-    // Logic to soft-delete or mark messages as cleared for user
-    // For now, reset unreadCount and lastReadMsgId
-    await Chat.updateOne(
-      { _id: toObjectId(chatId), 'participants.user': toObjectId(userId) },
-      { 
-        $set: { [`unreadCount.${userId}`]: 0 },
-        $unset: { 'participants.$.lastReadMsgId': '' }
-      }
-    );
-
-    return res.json({ message: 'Chat cleared' });
+    await Message.deleteMany({ chat: chatId });
+    res.json({ message: 'Chat cleared' });
   } catch (error) {
-    console.error('clearChat error:', error);
-    return res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to clear chat' });
   }
 }
 
@@ -1030,16 +472,17 @@ module.exports = {
   getChats,
   getChatMessages,
   createChat,
+  searchChats,
   sendMessage,
   markMessageAsRead,
   markAllMessagesAsRead,
-  editMessage,
-  unsendMessage,
   addReaction,
   removeReaction,
+  editMessage,
+  unsendMessage,
+  deleteMessage,
   getMessageReceipts,
   getMessageReactions,
-  searchChats,
   getUserStatus,
   createGroupChat,
   getChatInfo,

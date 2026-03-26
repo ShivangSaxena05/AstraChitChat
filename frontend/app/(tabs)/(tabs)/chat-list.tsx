@@ -81,9 +81,9 @@ export default function ChatListScreen() {
   const fetchChats = async () => {
     try {
       const data = await get('/chats'); // Assuming this endpoint exists
-      if (data && data.chats) {
+      if (data) {
         // Sort chats by most recent message First so the Chat list is correct initially
-        const sorted = data.chats.sort((a: Chat, b: Chat) => {
+        const sorted = data.sort((a: Chat, b: Chat) => {
           const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
           const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
           return bTime - aTime;

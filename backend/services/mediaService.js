@@ -150,7 +150,7 @@ const getCloudinaryUploadUrl = async (options) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const getPresignedUploadUrl = async (options) => {
     // Support legacy call signature: (userId, fileName, fileType, expiresIn)
-    let folder, ownerId, fileName, fileType, expiresIn;
+    let folder, ownerId, fileName, fileType, fileSize, expiresIn;
     if (typeof options === 'string') {
         // Legacy: getPresignedUploadUrl(userId, fileName, fileType, expiresIn)
         ownerId   = options;
@@ -159,7 +159,7 @@ const getPresignedUploadUrl = async (options) => {
         expiresIn = arguments[3] || 300;
         folder    = 'posts'; // default folder for legacy calls
     } else {
-        ({ folder, ownerId, fileName, fileType, expiresIn = 300 } = options);
+        ({ folder, ownerId, fileName, fileType, fileSize, expiresIn = 300 } = options);
     }
 
     if (!MEDIA_FOLDERS[folder]) {
@@ -176,6 +176,7 @@ const getPresignedUploadUrl = async (options) => {
         Bucket: bucket,
         Key: key,
         ContentType: fileType,
+        ContentLength: fileSize,
     });
 
     const presignedUrl = await getSignedUrl(s3, command, { expiresIn });

@@ -1,6 +1,6 @@
-
-import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
-import { TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, StyleSheet, View, Text, FlatList, StatusBar } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
+import { TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, StyleSheet,Image, FlatList, View, Text, StatusBar, ActivityIndicator } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
@@ -14,8 +14,11 @@ import { useCall } from '@/contexts/CallContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SwipeableMessage from '@/components/SwipeableMessage';
 
+type MessageStatus = 'sending' | 'sent' | 'failed';
+
 interface Message {
   _id: string;
+  status?: MessageStatus;
   sender: {
     _id: string;
     username: string;
@@ -50,6 +53,12 @@ interface Message {
   readBy: string[];
   deliveredTo?: string[];
 }
+
+interface OtherUserStatus {
+  isOnline: boolean;
+  lastSeen: string | null;
+}
+
 
 // Type for items in the flatlist (messages or date separators)
 type ListItem = 
@@ -91,6 +100,7 @@ const MessageItem = memo(({
 
   const message = item.data;
   const isOwnMessage = String(message.sender._id) === String(currentUserId);
+  const messageStatus = message.status;
   const isRead = isMessageRead(message, currentUserId);
   const isDelivered = message.deliveredTo &&
                       currentUserId &&
@@ -148,7 +158,32 @@ const MessageItem = memo(({
             <Text style={[styles.timestamp, isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp]}>
               {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </Text>
-            {isOwnMessage && (
+{isOwnMessage && message.status ? (
+              <View style={styles.statusContainer}>
+                {message.status === 'sending' ? (
+                  <ActivityIndicator size="small" color="#e9edef" />
+                ) : message.status === 'sent' ? (
+                  <Text style={[styles.statusIcon, styles.sentIcon]}>✓✓</Text>
+                ) : (
+                  <TouchableOpacity 
+                    style={styles.retryButton}
+                    onPress={() => {
+                      const attempts = retryAttempts.current.get(message._id) || 0;
+                      if (attempts >= 3) {
+                        Alert.alert('Max retries reached', 'Please check your connection');
+                        return;
+                      }
+                      retryAttempts.current.set(message._id, attempts + 1);
+                      console.log('Retry message:', message._id, 'Attempt:', attempts + 1);
+                      // TODO: Implement API retry call
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.retryIcon}>↻</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : isOwnMessage && (
               <Text style={[
                 styles.readStatus, 
                 isRead ? styles.readStatusBlue : styles.readStatusGray
@@ -194,8 +229,10 @@ const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [oldestMessageId, setOldestMessageId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [otherUserStatus, setOtherUserStatus] = useState<any>({ profilePicture: '', isOnline: false, lastSeen: null });
   const [otherUserTyping, setOtherUserTyping] = useState(false);
-  const [otherUserStatus, setOtherUserStatus] = useState<{ isOnline: boolean; lastSeen: string | null }>({ isOnline: false, lastSeen: null });
+  const [otherUserProfilePicture, setOtherUserProfilePicture] = useState('');
+
   
   // Call Gesture State (Reanimated)
   const [isHoldingTop, setIsHoldingTop] = useState(false);
@@ -209,8 +246,16 @@ const [loading, setLoading] = useState(true);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flatListRef = useRef<FlatList>(null);
+  const tempTimeouts = useRef<NodeJS.Timeout[]>([]);
+  const retryAttempts = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    return () => {
+      tempTimeouts.current.forEach(id => clearTimeout(id));
+      tempTimeouts.current = [];
+    };
+  }, []);
   const inputRef = useRef<TextInput>(null);
+  const flatListRef = useRef<FlatList<any>>(null);
   const router = useRouter();
   const params = useLocalSearchParams();
   const chatId = params.chatId as string;
@@ -243,6 +288,17 @@ const [loading, setLoading] = useState(true);
 
   // Use a Set to track message IDs for O(1) deduplication
   const messageIdsRef = useRef<Set<string>>(new Set());
+  
+  // Prevent memory leak - cleanup old IDs
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (messageIdsRef.current.size > 1000) {
+        messageIdsRef.current.clear();
+        console.log('Chat: Cleared messageIdsRef (memory protection)');
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Helper to format date for separator
   const formatDateSeparator = (dateString: string): { display: string; key: string } => {
@@ -290,6 +346,7 @@ const [loading, setLoading] = useState(true);
         isOnline: data.isOnline || false,
         lastSeen: data.lastSeen || null
       });
+      setOtherUserProfilePicture(data.profilePicture);
     } catch (error) {
       console.log('Error fetching user status:', error);
     }
@@ -363,7 +420,9 @@ const [loading, setLoading] = useState(true);
         // Find and remove the oldest temporary message, assuming messages are processed in order.
         if (String(message.sender._id) === String(currentUserIdRef.current)) {
           setMessages(prev => {
-            const tempMsgIndex = prev.findIndex(m => m._id.startsWith('temp_'));
+            const tempMsgIndex = prev.findIndex(
+              m => m._id.startsWith('temp_') && m.bodyText === message.bodyText
+            );
             if (tempMsgIndex > -1) {
               return prev.filter((_, index) => index !== tempMsgIndex);
             }
@@ -371,16 +430,12 @@ const [loading, setLoading] = useState(true);
           });
         }
         
-        // Debug: log the message to see if quotedMessage is included
-        console.log('Message received:', {
-          _id: messageId,
-          quotedMsgId: message.quotedMsgId,
-          quotedMessage: message.quotedMessage
-        });
+
+
         
         // ✅ FIXED: Robust duplicate prevention + validation
         if (typeof messageId !== 'string' || messageIdsRef.current.has(messageId)) {
-          console.log('Chat detail: Duplicate/invalid message ignored:', messageId);
+          // console.log('Chat detail: Duplicate/invalid message ignored:', messageId);
           return;
         }
 
@@ -398,7 +453,7 @@ const [loading, setLoading] = useState(true);
         // Immutable update w/ explicit dedup check
         setMessages(prev => {
           if (prev.some(m => m._id === messageId)) {
-            console.log('State dedup: Message already exists:', messageId);
+            // console.log('State dedup: Message already exists:', messageId);
             return prev;
           }
 
@@ -416,7 +471,7 @@ const [loading, setLoading] = useState(true);
             }
           }
 
-          return [...prev, msgToStore];
+          return [...prev, msgToStore].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         });
 
         if (message.sender._id !== currentUserId) {
@@ -649,7 +704,7 @@ const sanitizeMessage = (text: string): string => {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '"')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;')
     .replace(/`/g, '&#x60;')
     .trim();
@@ -663,6 +718,7 @@ const sendMessage = async () => {
   const tempId = `temp_${Date.now()}`;
   const optimisticMessage: Message = {
     _id: tempId,
+    status: 'sending',
     sender: { _id: currentUserId, username: 'You', profilePicture: '' },
     receiver: { _id: otherUserId, username: otherUsername, profilePicture: '' },
     bodyText: sanitizedText,
@@ -683,20 +739,20 @@ const sendMessage = async () => {
     optimisticMessage.quotedMessage.msgType = quotedMessage.msgType;
   }
 
-  setMessages(prev => [...prev, optimisticMessage]);
+  setMessages(prev => [...prev, optimisticMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
 messageIdsRef.current.add(tempId);
         
         // ✅ NEW: Cleanup stale optimistic messages after 30s if no server confirmation
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           if (messageIdsRef.current.has(tempId)) {
             setMessages(prev => {
               const newMsgs = prev.filter(m => m._id !== tempId);
               messageIdsRef.current.delete(tempId);
               return newMsgs;
             });
-            console.log('Removed stale temp message:', tempId);
           }
-        }, 30000);
+        }, 30000) as unknown as NodeJS.Timeout;
+        tempTimeouts.current.push(timeoutId);
 
   try {
     const socketMessageData: any = {
@@ -745,11 +801,9 @@ messageIdsRef.current.add(tempId);
 };
 
   const handleTyping = (text: string) => {
-    // Sanitize on every keystroke for safety (lightweight)
-    const sanitized = sanitizeMessage(text);
-    setNewMessage(sanitized);
+    setNewMessage(text);
     
-    if (!socketConnected || !socket || sanitized.length === 0) return;
+    if (!socketConnected || !socket || text.length === 0) return;
     
     socket.emit('typing', chatId);
 
@@ -772,7 +826,7 @@ messageIdsRef.current.add(tempId);
   const loadMoreMessages = useCallback(async () => {
     if (loadingMore || !hasMore || !oldestMessageId) return;
     
-    console.log('Loading more messages, oldestMessageId:', oldestMessageId);
+    // console.log('Loading more messages, oldestMessageId:', oldestMessageId);
     await fetchMessages(true);
   }, [loadingMore, hasMore, oldestMessageId, fetchMessages]);
 
@@ -794,13 +848,16 @@ messageIdsRef.current.add(tempId);
   }, [hasMore, loadingMore, loadMoreMessages, isAtBottom]);
 
   const triggerAnimatedCall = useCallback(() => {
-    if (otherUserId && chatId) {
-      initiateCall([otherUserId], chatId, { username: otherUsername, profilePicture: '' }, false);
+    if (otherUserId && chatId && otherUserStatus) {
+      initiateCall([otherUserId], chatId, otherUserId, { 
+        username: otherUsername, 
+        profilePicture: otherUserProfilePicture || otherUserStatus.profilePicture || ''
+      }, false);
     } else {
       setError("Cannot initiate call right now.");
       setShowError(true);
     }
-  }, [otherUserId, chatId, otherUsername, initiateCall]);
+  }, [otherUserId, chatId, otherUsername, otherUserProfilePicture, otherUserStatus]);
 
   const pullGesture = Gesture.Pan()
     .onChange((event) => {
@@ -861,7 +918,7 @@ messageIdsRef.current.add(tempId);
     const index = reversedData.findIndex(item => item.type === 'message' && item.data._id === targetMessageId);
 
     if (index !== -1) {
-      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+          flatListRef.current?.scrollToIndex({ index: Number(index), animated: true, viewPosition: 0.5 });
       
       // Highlight the message
       setHighlightedMessageId(targetMessageId);
@@ -896,6 +953,7 @@ messageIdsRef.current.add(tempId);
     );
   }, [loadingMore]);
 
+  const reversedMessages = useMemo(() => [...groupedMessages].reverse(), [groupedMessages]);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
@@ -922,7 +980,7 @@ messageIdsRef.current.add(tempId);
                 transform="rotate(-90 40 40)"
               />
             </Svg>
-            <Ionicons name="call" size={32} color={callProgress >= 1 ? "#4ADDAE" : "#fff"} />
+            <Ionicons name="call" size="32" color={callProgress >= 1 ? "#4ADDAE" : "#fff"} />
           </View>
           <Text style={styles.callHoverText}>
             {callProgress >= 1 ? "Calling..." : "Pull to Call"}
@@ -933,7 +991,7 @@ messageIdsRef.current.add(tempId);
       {/* Chat Header */}
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size="24" color="#fff" />
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -948,24 +1006,33 @@ messageIdsRef.current.add(tempId);
           })}
           activeOpacity={0.8}
         >
-          <View style={styles.headerInfo}>
-            <ThemedText style={styles.partnerName}>{otherUsername}</ThemedText>
-            <View style={styles.statusRow}>
-              {otherUserTyping ? (
-                <Text style={styles.typingText}>Typing...</Text>
-              ) : (
-                <>
-                  {otherUserStatus.isOnline && <View style={styles.onlineDot} />}
-                  <Text style={styles.lastSeen} numberOfLines={1}>
-                    {otherUserStatus.isOnline 
-                      ? 'Online' 
-                      : formatLastSeen(otherUserStatus.lastSeen)}
-                  </Text>
-                </>
-              )}
-            </View>
-          </View>
-        </TouchableOpacity>
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <Image
+          source={{
+            uri: otherUserProfilePicture || otherUserStatus.profilePicture || 'https://via.placeholder.com/40'
+          }}
+          style={styles.profileImage}
+        />
+
+      <View style={styles.headerInfo}>
+        <ThemedText style={styles.partnerName}>{otherUsername}</ThemedText>
+        <View style={styles.statusRow}>
+          {otherUserTyping ? (
+            <Text style={styles.typingText}>Typing...</Text>
+          ) : (
+            <>
+              {otherUserStatus.isOnline && <View style={styles.onlineDot} />}
+              <Text style={styles.lastSeen} numberOfLines={1}>
+                {otherUserStatus.isOnline 
+                  ? 'Online' 
+                  : formatLastSeen(otherUserStatus.lastSeen)}
+              </Text>
+            </>
+          )}
+        </View>
+      </View>
+    </View>
+  </TouchableOpacity>
 
 
       </View>
@@ -973,10 +1040,10 @@ messageIdsRef.current.add(tempId);
       <GestureDetector gesture={pullGesture}>
         <FlatList
           ref={flatListRef}
-          data={[...groupedMessages].reverse()}
+          data={reversedMessages}
           inverted
           renderItem={renderItem}
-          keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}-${index}` : `msg-${item.data._id}`}
+          keyExtractor={(item, index) => item.type === 'dateSeparator' ? `sep-${item.dateKey}-${Number(index)}` : `msg-${item.data._id}`}
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContainer}
           initialNumToRender={20}
@@ -990,6 +1057,29 @@ messageIdsRef.current.add(tempId);
           ListHeaderComponent={renderHeader}
         />
       </GestureDetector>
+
+      {/* Message status listener */}
+      {(() => {
+        useEffect(() => {
+          const handleStatusUpdate = (event: CustomEvent<{ messageId: string; status: MessageStatus }>) => {
+            console.log('ChatDetail: Status update:', event.detail);
+            
+            setMessages(prev => prev.map(msg => {
+              if (String(msg._id) === event.detail.messageId) {
+                return { ...msg, status: event.detail.status };
+              }
+              return msg;
+            }));
+          };
+
+          window.addEventListener('messageStatusUpdate', handleStatusUpdate as EventListener);
+          
+          return () => {
+            window.removeEventListener('messageStatusUpdate', handleStatusUpdate as EventListener);
+          };
+        }, []);
+        return null;
+      })()}
 
       {/* Input Area - Using column layout to properly stack reply preview and input */}
       <View style={[styles.inputContainer, quotedMessage && styles.inputContainerWithReply]}>
@@ -1006,7 +1096,7 @@ messageIdsRef.current.add(tempId);
               </Text>
             </View>
             <TouchableOpacity onPress={() => setQuotedMessage(null)} style={styles.cancelReplyButton}>
-              <Ionicons name="close-circle" size={24} color="#666" />
+              <Ionicons name="close-circle" size="24" color="#666" />
             </TouchableOpacity>
           </View>
         )}
@@ -1053,6 +1143,12 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2a2a2a',
     backgroundColor: '#1a1a1a',
   },
+  profileImage: {
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  marginRight: 10,
+},
   backButton: {
     padding: 8,
     borderRadius: 20,
@@ -1146,7 +1242,49 @@ const styles = StyleSheet.create({
   timestamp: { fontSize: 12, marginTop: 4 },
   ownTimestamp: { color: '#e0e0e0', textAlign: 'right' },
   otherTimestamp: { color: '#aaa' },
-  timestampContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  timestampContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 4 },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIcon: {
+    fontSize: 12,
+    color: '#e0e0e0',
+  },
+  sentIcon: {
+    color: '#34B7F1',
+  },
+  retryButton: {
+    padding: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,0,0,0.2)',
+  },
+  retryIcon: {
+    fontSize: 14,
+    color: '#ff4444',
+    fontWeight: 'bold',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIcon: {
+    fontSize: 12,
+    color: '#e0e0e0',
+  },
+  sentIcon: {
+    color: '#34B7F1',
+  },
+  retryButton: {
+    padding: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,0,0,0.2)',
+  },
+  retryIcon: {
+    fontSize: 14,
+    color: '#ff4444',
+    fontWeight: 'bold',
+  },
   readStatus: { fontSize: 12, marginLeft: 8 },
   readStatusBlue: { color: '#34B7F1' },
   readStatusGray: { color: '#e0e0e0' },

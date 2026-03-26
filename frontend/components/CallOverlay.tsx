@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import CallScreen from './CallScreen';
 import { useCall } from '@/contexts/CallContext';
-import { get } from '@/services/api';
+import { useSocket } from '@/contexts/SocketContext';
+
 
 export default function CallOverlay() {
   const { 
@@ -18,7 +18,6 @@ export default function CallOverlay() {
     isSpeaker,
     videoUpgradeRequest,
     isVideoUpgradePending,
-    activeChatId,
     acceptCall, 
     declineCall, 
     endCall, 
@@ -31,17 +30,16 @@ export default function CallOverlay() {
     switchCamera
   } = useCall();
   
+  const { socket } = useSocket();
+  const currentUserId = socket?.currentUserId;  // ✅ From SocketContext - no AsyncStorage
+  
   const [callDuration, setCallDuration] = useState(0);
-  const [otherUser, setOtherUser] = useState<{ username: string; profilePicture: string } | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const getUserId = async () => {
-        const userId = await AsyncStorage.getItem('userId');
-        setCurrentUserId(userId);
-    };
-    getUserId();
-  }, []);
+  
+  // ✅ Single source: targetUser first, then incomingCall fallback
+  const displayUser = targetUser || (incomingCall && {
+    username: incomingCall.callerUsername || 'Unknown',
+    profilePicture: incomingCall.callerProfilePicture || 'https://i.pravatar.cc/300'
+  }) || null;
 
   // Timer for active connected calls
   useEffect(() => {
@@ -58,77 +56,16 @@ export default function CallOverlay() {
     };
   }, [isCalling, isConnected, incomingCall]);
 
-  // Fetch real other user data by ID
-  const fetchOtherUser = async (userId: string) => {
-    if (!userId) return;
-    try {
-      const userData = await get(`/profile/${userId}`);
-      setOtherUser({
-        username: userData.username || userData.name || userData.displayName || 'User',
-        profilePicture: userData.profilePicture || userData.profilePictureUrl || `https://ui-avatars.com/api/?name=${userData.username || userData.name || 'User'}`
-      });
-    } catch (error) {
-      console.warn('Failed to fetch other user:', error);
-      // Better fallback using incoming data if available
-      if (incomingCall?.callerUsername) {
-        setOtherUser({
-          username: incomingCall.callerUsername,
-          profilePicture: incomingCall?.callerProfilePicture || 'https://i.pravatar.cc/300'
-        });
-      } else {
-        setOtherUser({
-          username: 'User',
-          profilePicture: 'https://i.pravatar.cc/300'
-        });
-      }
-    }
-  };
 
-  // Determine caller/target ID and fetch user data (IMPROVED: Prioritize targetUser)
+
+  // Simplified: Use targetUser only, let displayUser fallback handle rest
   useEffect(() => {
-    // Use targetUser from context first (no network needed)
     if (targetUser) {
       setOtherUser(targetUser);
-      return;
     }
-    
-            const fetchChatAndThenUser = async () => {
-    
-                if (!activeChatId || !currentUserId) return;
-    
-        
-    
-                try {
-    
-                    const chatData = await get(`/chats/${activeChatId}/info`);
-    
-                    const otherParticipant = chatData.participants.find(p => p._id !== currentUserId);
-    
-        
-    
-                    if (otherParticipant) {
-    
-                        fetchOtherUser(otherParticipant._id);
-    
-                    }
-    
-                } catch (error) {
-    
-                    console.error('Failed to fetch chat data:', error);
-    
-                }
-    
-            };
 
-
-    let targetId = null;
-    if (incomingCall?.callerId) {
-      targetId = incomingCall.callerId;
-      if (targetId) fetchOtherUser(targetId);
-    } else if (activeChatId) {
-        fetchChatAndThenUser();
-    }
-  }, [targetUser, incomingCall?.callerId, activeChatId, currentUserId]);
+    
+  }, [targetUser]);
 
   // Determine Call Status
   let status: 'incoming' | 'outgoing' | 'connecting' | 'connected' = 'outgoing';
@@ -141,10 +78,7 @@ export default function CallOverlay() {
      status = 'connected';
   }
 
-  const displayUser = targetUser || otherUser || { 
-    username: incomingCall?.callerUsername || 'Connecting...', 
-    profilePicture: incomingCall?.callerProfilePicture || 'https://i.pravatar.cc/300' 
-  };
+  // Fixed duplicate declaration - use the single source displayUser defined above
 
   const isVisible = isCalling || !!incomingCall;
 

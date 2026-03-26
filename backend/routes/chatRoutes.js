@@ -35,14 +35,14 @@ const {
 
 
 const { protect } = require('../middleware/auth');
-const {
-    getChats, getChatMessages, createChat, searchChats,
-    sendMessage, markMessageAsRead, markAllMessagesAsRead,
-    addReaction, removeReaction, editMessage, unsendMessage,
-    deleteMessage, getMessageReceipts, getMessageReactions,
-    getUserStatus, createGroupChat, getChatInfo, getChatMedia,
-    muteChat, pinChat, clearChat
-} = require('../controllers/chatController');
+// const {
+//     getChats, getChatMessages, createChat, searchChats,
+//     sendMessage, markMessageAsRead, markAllMessagesAsRead,
+//     addReaction, removeReaction, editMessage, unsendMessage,
+//     deleteMessage, getMessageReceipts, getMessageReactions,
+//     getUserStatus, createGroupChat, getChatInfo, getChatMedia,
+//     muteChat, pinChat, clearChat
+// } = require('../controllers/chatController');
 const { leaveGroup, addGroupMember, removeGroupMember } = require('../controllers/groupManagement');
 
 const router = express.Router();

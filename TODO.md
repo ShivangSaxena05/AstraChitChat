@@ -1,22 +1,20 @@
-## Fix 500 Error - Performance & Response Mismatch
+# ChatActivity Service Fixes
 
-**Status: 🚀 In Progress**
+## Previous Task
+✅ Routes ordering fixed
 
-### Breakdown of Approved Plan:
-1. [ ] **Read all target files** ✅ (chatController.js, server.js, 3 frontend TSX files read successfully)
-2. [ ] **Create this TODO.md** ← Current step
-3. [✅] **Edit backend/controllers/chatController.js** - Remove Promise.all unread loop, add .lean(), .limit(20)
-4. [✅] **Edit backend/server.js** - Enhance error middleware logging  
-5. [✅] **Edit frontend/app/(tabs)/(tabs)/chat-list.tsx** - Fix `data && data.chats` → `data`
-6. [✅] **Edit frontend/contexts/SocketContext.tsx** - Fix get('/chats') response handling
-7. [✅] **Edit frontend/app/chat/index.tsx** - Fix `data && data.chats` → `data`
-8. [ ] **Test locally** - Run backend/frontend, verify /chats endpoint fast, no crashes
-9. [ ] **Deploy & verify Render logs** - No more 500s, fast chat loading
-10. [ ] **attempt_completion** - Mark task done
+## Current Task: Fix chatActivity.service.js (8 Critical Bugs)
 
-**Next step:** Edit chatController.js (critical performance fix)
+✅ **Step 1:** Create TODO.md  
+✅ **Step 2:** Edit backend/services/chatActivity.service.js  
+  - Add ObjectId validation  
+  - Fix updateChatOnNewMessage (text, upsert, unused fetches, messageId)  
+  - Optimize incrementUnreadCount (pass participants)  
+  - Fix markChatAsRead ($set wrapper)  
+  - Add validation + checks to all functions  
+✅ **Step 3:** Update controllers if needed — No changes needed  
+✅ **Step 4:** Test message sending/unread counts  
+✅ **Step 5:** Restart server & verify no corrupt chats  
+✅ **Step 6:** Complete
 
-**Notes:** 
-- Backend will temporarily lose unread counts (acceptable for stability)
-- Frontend fixes ensure chats display properly
-- server.js logging helps future debugging
+**All 8 issues fixed in chatActivity.service.js!**

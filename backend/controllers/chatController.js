@@ -7,28 +7,19 @@ const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../servi
 // Get all chats for current user
 async function getChats(req, res) {
   try {
-    console.log('getChats called for user:', req.user._id);
-
     const userId = req.user._id;
-    const chats = await Chat.find({ 
-      'participants.user': userId 
-    })
-    .populate('participants.user', 'name username profilePicture isOnline lastSeen')
-    .populate('lastMessage.sender', 'name username profilePicture')
-    .sort({ updatedAt: -1 })
-    .limit(20)
-    .lean();
+    const chats = await Chat.find({ 'participants.user': userId })
+      .populate('participants.user', 'name username profilePicture isOnline lastSeen')
+      .populate('lastMessage.sender', 'name username profilePicture')
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
 
     res.json(chats);
   } catch (error) {
-    console.error('=== GET CHATS ERROR ===');
-    console.error('User ID:', req.user?._id);
-    console.error('Full error:', error);
-    console.error('Stack:', error.stack);
-    console.error('====================');
+    console.error('getChats error:', error);
     res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
   }
-
 }
 
 // Get messages for specific chat
@@ -47,9 +38,14 @@ async function getChatMessages(req, res) {
       .skip(skip)
       .limit(limit);
 
-    // Mark as read for current user
+    // FIX: only add to readBy if user hasn't already read the message,
+    // avoiding duplicate object entries that $addToSet can't deduplicate
     await Message.updateMany(
-      { chat: chatId, readBy: { $ne: userId }, sender: { $ne: userId } },
+      {
+        chat: chatId,
+        sender: { $ne: userId },
+        'readBy.user': { $ne: userId },
+      },
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
@@ -113,29 +109,23 @@ async function createChat(req, res) {
   }
 }
 
-// Search chats by participant name
+// Search chats by name (participant name search requires aggregation — simplified here)
+// FIX: removed broken $expr/$regexMatch query that silently returned no results.
+// Now searches by chatName only for group chats; for private chats the client
+// should filter populated participant names on the frontend, or upgrade this
+// to an aggregation pipeline if server-side participant search is needed.
 async function searchChats(req, res) {
   try {
     const { query } = req.query;
     const userId = req.user._id;
 
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
+
     const chats = await Chat.find({
       'participants.user': userId,
-      $or: [
-        { 'chatName': { $regex: query, $options: 'i' } },
-        { 'participants.user': { 
-          $elemMatch: { 
-            user: { $ne: userId },
-            $expr: { 
-              $regexMatch: { 
-                input: { $concat: ['$user.name', ' ', '$user.username'] },
-                regex: query,
-                options: 'i'
-              }
-            }
-          }
-        } }
-      ]
+      chatName: { $regex: query, $options: 'i' },
     }).populate('participants.user', 'name username profilePicture');
 
     res.json(chats);
@@ -144,13 +134,12 @@ async function searchChats(req, res) {
   }
 }
 
-// Send message (create chat if needed)
+// Send message (creates chat if needed)
 async function sendMessage(req, res) {
   try {
     const { receiverId, bodyText, msgType = 'text', attachments = [], quotedMsgId } = req.body;
     const senderId = req.user._id;
 
-    // Auto-create chat if needed
     let chat = await Chat.findOne({
       convoType: 'direct',
       'participants.user': { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
@@ -161,8 +150,8 @@ async function sendMessage(req, res) {
         convoType: 'direct',
         participants: [
           { user: senderId, role: 'member' },
-          { user: new mongoose.Types.ObjectId(receiverId), role: 'member' }
-        ]
+          { user: new mongoose.Types.ObjectId(receiverId), role: 'member' },
+        ],
       });
       await chat.save();
     }
@@ -175,21 +164,20 @@ async function sendMessage(req, res) {
       msgType,
       attachments,
       quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
-      readBy: [{ user: senderId, readAt: new Date() }]
+      readBy: [{ user: senderId, readAt: new Date() }],
     });
 
     await message.save();
     await message.populate('sender', 'name username profilePicture');
     await message.populate('quotedMsgId', 'bodyText sender');
 
-    // Update chat lastMessage
     await Chat.findByIdAndUpdate(chat._id, {
       lastMessage: {
         text: bodyText || (attachments.length ? 'Media' : 'Message'),
         createdAt: message.createdAt,
-        sender: senderId
+        sender: senderId,
       },
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     res.status(201).json(message);
@@ -205,7 +193,7 @@ async function markMessageAsRead(req, res) {
     const userId = req.user._id;
 
     await Message.findByIdAndUpdate(messageId, {
-      $addToSet: { readBy: { user: userId, readAt: new Date() } }
+      $addToSet: { readBy: { user: userId, readAt: new Date() } },
     });
 
     res.json({ message: 'Message marked as read' });
@@ -221,7 +209,7 @@ async function markAllMessagesAsRead(req, res) {
     const userId = req.user._id;
 
     await Message.updateMany(
-      { chat: chatId, sender: { $ne: userId } },
+      { chat: chatId, sender: { $ne: userId }, 'readBy.user': { $ne: userId } },
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
@@ -239,9 +227,13 @@ async function addReaction(req, res) {
     const userId = req.user._id;
 
     const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+
     if (!message.reactions) message.reactions = [];
-    
-    const existing = message.reactions.find(r => r.emoji === emoji && r.user.toString() === userId);
+
+    const existing = message.reactions.find(
+      r => r.emoji === emoji && r.user.toString() === userId.toString()
+    );
     if (!existing) {
       message.reactions.push({ emoji, user: userId, reactedAt: new Date() });
       await message.save();
@@ -256,12 +248,11 @@ async function addReaction(req, res) {
 // Remove reaction
 async function removeReaction(req, res) {
   try {
-    const { messageId } = req.params;
-    const { emoji } = req.params;
+    const { messageId, emoji } = req.params;
     const userId = req.user._id;
 
     await Message.findByIdAndUpdate(messageId, {
-      $pull: { reactions: { emoji, 'user': userId } }
+      $pull: { reactions: { emoji, user: userId } },
     });
 
     res.json({ message: 'Reaction removed' });
@@ -297,10 +288,12 @@ async function unsendMessage(req, res) {
     const { messageId } = req.params;
     const userId = req.user._id;
 
-    await Message.findOneAndUpdate(
+    const result = await Message.findOneAndUpdate(
       { _id: messageId, sender: userId },
       { unsent: true, bodyText: '[This message was unsent]', editedAt: new Date() }
     );
+
+    if (!result) return res.status(404).json({ message: 'Message not found or unauthorized' });
 
     res.json({ message: 'Message unsent' });
   } catch (error) {
@@ -318,7 +311,6 @@ async function deleteMessage(req, res) {
     if (!message) return res.status(404).json({ message: 'Message not found' });
     if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Unauthorized' });
 
-    // Delete media
     if (message.mediaKey) {
       try {
         if (STORAGE_TYPE === 'cloudinary') {
@@ -346,7 +338,6 @@ async function deleteMessage(req, res) {
     }
 
     await Message.deleteOne({ _id: messageId });
-
     res.json({ message: 'Message deleted' });
   } catch (error) {
     console.error('deleteMessage error:', error);
@@ -358,10 +349,14 @@ async function deleteMessage(req, res) {
 async function getMessageReceipts(req, res) {
   try {
     const { messageId } = req.params;
-    const message = await Message.findById(messageId).populate('readBy.user deliveredTo.user', 'name username profilePicture');
+    const message = await Message.findById(messageId)
+      .populate('readBy.user deliveredTo.user', 'name username profilePicture');
+
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+
     res.json({
       readBy: message.readBy || [],
-      deliveredTo: message.deliveredTo || []
+      deliveredTo: message.deliveredTo || [],
     });
   } catch (error) {
     res.status(500).json({ message: 'Failed to get receipts', error: error.message });
@@ -372,14 +367,18 @@ async function getMessageReceipts(req, res) {
 async function getMessageReactions(req, res) {
   try {
     const { messageId } = req.params;
-    const message = await Message.findById(messageId).populate('reactions.user', 'name username profilePicture');
+    const message = await Message.findById(messageId)
+      .populate('reactions.user', 'name username profilePicture');
+
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+
     res.json(message.reactions || []);
   } catch (error) {
     res.status(500).json({ message: 'Failed to get reactions', error: error.message });
   }
 }
 
-// Get user status
+// Get user online status
 async function getUserStatus(req, res) {
   try {
     const { userId } = req.params;
@@ -396,13 +395,21 @@ async function createGroupChat(req, res) {
     const { name, participants } = req.body;
     const creatorId = req.user._id;
 
+    if (!name || !participants || participants.length === 0) {
+      return res.status(400).json({ message: 'Group name and at least one participant are required' });
+    }
+
     const chat = new Chat({
       convoType: 'group',
       chatName: name,
       participants: [
         { user: creatorId, role: 'admin', joinedAt: new Date() },
-        ...participants.map(id => ({ user: new mongoose.Types.ObjectId(id), role: 'member', joinedAt: new Date() }))
-      ]
+        ...participants.map(id => ({
+          user: new mongoose.Types.ObjectId(id),
+          role: 'member',
+          joinedAt: new Date(),
+        })),
+      ],
     });
 
     await chat.save();
@@ -414,12 +421,18 @@ async function createGroupChat(req, res) {
 }
 
 // Get chat info
+// FIX: added participant membership check to prevent unauthorized access
 async function getChatInfo(req, res) {
   try {
     const { chatId } = req.params;
-    const chat = await Chat.findById(chatId)
+    const userId = req.user._id;
+
+    const chat = await Chat.findOne({ _id: chatId, 'participants.user': userId })
       .populate('participants.user', 'name username profilePicture')
       .populate('creator', 'name username');
+
+    if (!chat) return res.status(403).json({ message: 'Chat not found or access denied' });
+
     res.json(chat);
   } catch (error) {
     res.status(500).json({ message: 'Failed to get chat info', error: error.message });
@@ -427,21 +440,29 @@ async function getChatInfo(req, res) {
 }
 
 // Get chat media
+// FIX: added participant membership check to prevent unauthorized access
 async function getChatMedia(req, res) {
   try {
     const { chatId } = req.params;
+    const userId = req.user._id;
     const page = parseInt(req.query.page) || 1;
     const limit = 30;
     const skip = (page - 1) * limit;
 
-    const mediaMessages = await Message.find({ 
-      chat: chatId, 
-      $or: [{ msgType: { $in: ['image', 'video'] } }, { attachments: { $exists: true, $ne: [] } }] 
+    const isMember = await Chat.findOne({ _id: chatId, 'participants.user': userId });
+    if (!isMember) return res.status(403).json({ message: 'Access denied' });
+
+    const mediaMessages = await Message.find({
+      chat: chatId,
+      $or: [
+        { msgType: { $in: ['image', 'video'] } },
+        { attachments: { $exists: true, $ne: [] } },
+      ],
     })
-    .populate('sender', 'name username profilePicture')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+      .populate('sender', 'name username profilePicture')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     res.json(mediaMessages);
   } catch (error) {
@@ -449,42 +470,62 @@ async function getChatMedia(req, res) {
   }
 }
 
-// Chat settings
+// Mute chat
+// FIX: actually persists the mute to the DB instead of being a no-op
 async function muteChat(req, res) {
   try {
     const { chatId } = req.params;
     const userId = req.user._id;
     const { mutedUntil } = req.body;
 
-    // Logic for muting (store in User.mutedChats or similar)
+    await User.findByIdAndUpdate(userId, {
+      $addToSet: {
+        mutedChats: {
+          chat: chatId,
+          mutedUntil: mutedUntil ? new Date(mutedUntil) : null,
+        },
+      },
+    });
+
     res.json({ message: 'Chat muted' });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to mute chat' });
+    res.status(500).json({ message: 'Failed to mute chat', error: error.message });
   }
 }
 
+// Pin / unpin chat
+// FIX: correctly toggles pin state using $addToSet / $pull based on isPinned param
 async function pinChat(req, res) {
   try {
     const { chatId } = req.params;
-    const isPinned = req.body.isPinned !== false; // default true
+    const userId = req.user._id;
+    const isPinned = req.body.isPinned !== false;
 
-    await User.findByIdAndUpdate(req.user._id, {
-      $addToSet: { pinnedChats: chatId }
-    });
+    const update = isPinned
+      ? { $addToSet: { pinnedChats: chatId } }
+      : { $pull: { pinnedChats: chatId } };
 
-    res.json({ message: 'Chat pinned' });
+    await User.findByIdAndUpdate(userId, update);
+    res.json({ message: isPinned ? 'Chat pinned' : 'Chat unpinned' });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to pin chat' });
+    res.status(500).json({ message: 'Failed to pin chat', error: error.message });
   }
 }
 
+// Clear chat history
+// FIX: added membership check so only participants can clear a chat
 async function clearChat(req, res) {
   try {
     const { chatId } = req.params;
+    const userId = req.user._id;
+
+    const isMember = await Chat.findOne({ _id: chatId, 'participants.user': userId });
+    if (!isMember) return res.status(403).json({ message: 'Access denied' });
+
     await Message.deleteMany({ chat: chatId });
     res.json({ message: 'Chat cleared' });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to clear chat' });
+    res.status(500).json({ message: 'Failed to clear chat', error: error.message });
   }
 }
 
@@ -510,6 +551,5 @@ module.exports = {
   getChatMedia,
   muteChat,
   pinChat,
-  clearChat
+  clearChat,
 };
-

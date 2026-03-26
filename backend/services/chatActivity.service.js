@@ -11,25 +11,40 @@ const Chat = require('../models/Chat');
 const mongoose = require('mongoose');
 
 /**
+ * Validate ObjectId and throw meaningful error
+ */
+function validateId(id, name = 'ID') {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error(`Invalid ${name}: ${id}`);
+    }
+}
+
+/**
  * Update chat activity when a new message is sent
  * @param {string} chatId - The chat ID
  * @param {string} messageId - The message ID
  * @param {string} senderId - The sender's user ID
  * @returns {Promise<Date>} The timestamp of the activity
  */
-async function updateChatOnNewMessage(chatId, messageId, senderId) {
+async function updateChatOnNewMessage(chatId, messageId, senderId, messageText = '') {
+    validateId(chatId, 'chatId');
+    validateId(messageId, 'messageId');
+    validateId(senderId, 'senderId');
+
     const now = new Date();
-    const User = require('../models/User');
-    const sender = await User.findById(senderId).select('username profilePicture');
-    await Chat.findByIdAndUpdate(chatId, {
+    const updated = await Chat.findByIdAndUpdate(chatId, {
         lastMessage: {
-            text: '', // Will be populated from message bodyText
+            messageId,
+            text: messageText,
             createdAt: now,
             sender: senderId
         },
-        lastActivityTimestamp: now,
-        $inc: { [`unreadCount.${senderId}`]: 0 } // Initialize if not exists
-    }, { upsert: true });
+        lastActivityTimestamp: now
+    });
+
+    if (!updated) {
+        throw new Error(`Chat not found: ${chatId}`);
+    }
 
     return now;
 }
@@ -40,20 +55,17 @@ async function updateChatOnNewMessage(chatId, messageId, senderId) {
  * @param {string} senderId - The sender's user ID (excluded from unread)
  * @returns {Promise<void>}
  */
-async function incrementUnreadCount(chatId, senderId) {
-    const chat = await Chat.findById(chatId).lean();
-    if (!chat) return;
+async function incrementUnreadCount(chatId, senderId, participantIds) {
+    validateId(chatId, 'chatId');
+    validateId(senderId, 'senderId');
+    participantIds.forEach(id => validateId(id, 'participantId'));
 
-    // Get all participant IDs except sender
-    const participantIds = chat.participants
-        .map(p => p.user ? p.user.toString() : p.toString())
-        .filter(id => id !== senderId);
-
-    // Build update object to increment unread for each participant
     const updateObj = {};
-    participantIds.forEach(id => {
-        updateObj[`unreadCount.${id}`] = 1;
-    });
+    participantIds
+        .filter(id => id !== senderId)
+        .forEach(id => {
+            updateObj[`unreadCount.${id}`] = 1;
+        });
 
     if (Object.keys(updateObj).length > 0) {
         await Chat.findByIdAndUpdate(chatId, { $inc: updateObj });
@@ -66,10 +78,16 @@ async function incrementUnreadCount(chatId, senderId) {
  * @returns {Promise<Date>} The new timestamp
  */
 async function updateChatTimestamp(chatId) {
+    validateId(chatId, 'chatId');
+
     const now = new Date();
-    await Chat.findByIdAndUpdate(chatId, {
+    const updated = await Chat.findByIdAndUpdate(chatId, {
         lastActivityTimestamp: now
     });
+
+    if (!updated) {
+        throw new Error(`Chat not found: ${chatId}`);
+    }
     return now;
 }
 
@@ -80,9 +98,12 @@ async function updateChatTimestamp(chatId) {
  * @returns {Promise<void>}
  */
 async function markChatAsRead(chatId, userId) {
+    validateId(chatId, 'chatId');
+    validateId(userId, 'userId');
+
     // Set the user's unread count to 0
     await Chat.findByIdAndUpdate(chatId, {
-        [`unreadCount.${userId}`]: 0
+        $set: { [`unreadCount.${userId}`]: 0 }
     });
 }
 
@@ -93,6 +114,8 @@ async function markChatAsRead(chatId, userId) {
  * @returns {Promise<Object>} The chat with computed activity time
  */
 async function getChatWithActivity(chatId) {
+    validateId(chatId, 'chatId');
+
     const chat = await Chat.findById(chatId)
         .populate('lastMessage.sender', 'name username profilePicture')
         .populate('participants.user', 'name username profilePicture')
@@ -114,11 +137,17 @@ async function getChatWithActivity(chatId) {
  * @returns {Promise<void>}
  */
 async function togglePinChat(chatId, userId, isPinned) {
+    validateId(chatId, 'chatId');
+    validateId(userId, 'userId');
+
     const update = isPinned
         ? { $addToSet: { isPinnedBy: userId } }
         : { $pull: { isPinnedBy: userId } };
     
-    await Chat.findByIdAndUpdate(chatId, update);
+    const updated = await Chat.findByIdAndUpdate(chatId, update);
+    if (!updated) {
+        throw new Error(`Chat not found: ${chatId}`);
+    }
 }
 
 module.exports = {

@@ -31,12 +31,29 @@ async function getChatMessages(req, res) {
     const limit = 50;
     const skip = (page - 1) * limit;
 
+    // Validate chatId is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: 'Invalid chat ID' });
+    }
+
+    // Verify user is a member of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      'participants.user': userId
+    });
+    
+    if (!chat) {
+      return res.status(403).json({ message: 'Chat not found or access denied' });
+    }
+
+    // Fetch messages in ascending order for proper chronological display
     const messages = await Message.find({ chat: chatId })
       .populate('sender', 'name username profilePicture')
       .populate('quotedMsgId', 'bodyText sender')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
     // FIX: only add to readBy if user hasn't already read the message,
     // avoiding duplicate object entries that $addToSet can't deduplicate
@@ -49,9 +66,10 @@ async function getChatMessages(req, res) {
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
-    res.json(messages.reverse());
+    res.json(messages);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get messages', error: error.message });
+    console.error('getChatMessages error:', error);
+    res.status(500).json({ message: 'Failed to get messages', error: process.env.NODE_ENV === 'production' ? {} : error.message });
   }
 }
 
@@ -125,7 +143,7 @@ async function searchChats(req, res) {
 
     const chats = await Chat.find({
       'participants.user': userId,
-      chatName: { $regex: query, $options: 'i' },
+      title: { $regex: query, $options: 'i' },
     }).populate('participants.user', 'name username profilePicture');
 
     res.json(chats);
@@ -401,7 +419,7 @@ async function createGroupChat(req, res) {
 
     const chat = new Chat({
       convoType: 'group',
-      chatName: name,
+      title: name,
       participants: [
         { user: creatorId, role: 'admin', joinedAt: new Date() },
         ...participants.map(id => ({

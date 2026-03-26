@@ -1,4 +1,39 @@
 const express = require('express');
+const {
+    getChats,
+    getChatMessages,
+    findChat,
+    createChat,
+    searchChats,
+    sendMessage,
+    markMessageAsRead,
+    markAllMessagesAsRead,
+    addReaction,
+    removeReaction,
+    editMessage,
+    unsendMessage,
+    deleteMessage,
+    getMessageReceipts,
+    getMessageReactions,
+    getUserStatus,
+    createGroupChat,
+    getChatInfo,
+    getChatMedia,
+    muteChat,
+    pinChat,
+    clearChat
+} = require('../controllers/chatController');
+
+// const {
+//   getChats, getMessages, sendMessage,
+//   markMessageAsRead, markAllMessagesAsRead,
+//   editMessage, unsendMessage,
+//   addReaction, removeReaction,
+//   getMessageReceipts, getMessageReactions,
+//   searchChats
+// } = require('../controllers/chatController');
+
+
 const { protect } = require('../middleware/auth');
 const {
     getChats, getChatMessages, createChat, searchChats,
@@ -14,6 +49,11 @@ const router = express.Router();
 
 // ── Static routes first ──────────────────────────────────────
 router.get('/search', protect, searchChats);
+
+// Find existing chat with a user
+router.get('/find/:userId', protect, findChat);
+
+// Get user online status
 router.get('/user-status/:userId', protect, getUserStatus);
 router.post('/create', protect, createChat);
 router.post('/group', protect, createGroupChat);

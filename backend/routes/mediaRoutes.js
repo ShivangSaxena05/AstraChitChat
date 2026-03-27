@@ -18,29 +18,57 @@ const uploadCloudinary = require('../config/multerCloudinary');
 // @desc    Direct multer upload (S3 or Cloudinary, depending on STORAGE_TYPE)
 // @access  Private
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/upload', protect, upload.single('media'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ message: 'Please upload a file.' });
-    }
+router.post('/upload', protect, (req, res, next) => {
+    upload.single('media')(req, res, (err) => {
+        if (err) {
+            console.error('[mediaRoutes] Upload error:', err);
+            
+            // Handle multer errors
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({ message: 'File size exceeds limit (100MB max)' });
+            }
+            if (err.message && err.message.includes('Only images, videos, and audio allowed')) {
+                return res.status(400).json({ message: err.message });
+            }
+            
+            // Check for Cloudinary configuration issues
+            if (err.message && err.message.includes('must have a cloud_name')) {
+                return res.status(500).json({ 
+                    message: 'Server configuration error: Cloudinary is not properly configured',
+                    error: 'CLOUDINARY_NOT_CONFIGURED'
+                });
+            }
+            
+            return res.status(500).json({ 
+                message: 'Error uploading file', 
+                error: err.message 
+            });
+        }
 
-    if (STORAGE_TYPE === 's3') {
-        const cloudfrontUrl = process.env.CLOUDFRONT_URL.replace(/\/$/, '');
-        const fileUrl = `${cloudfrontUrl}/${req.file.key}`;
+        // Proceed to actual upload handling
+        if (!req.file) {
+            return res.status(400).json({ message: 'Please upload a file.' });
+        }
+
+        if (STORAGE_TYPE === 's3') {
+            const cloudfrontUrl = process.env.CLOUDFRONT_URL.replace(/\/$/, '');
+            const fileUrl = `${cloudfrontUrl}/${req.file.key}`;
+            return res.status(200).json({
+                url: fileUrl,
+                key: req.file.key,
+                size: req.file.size,
+                contentType: req.file.contentType,
+            });
+        }
+
+        // Cloudinary (default)
         return res.status(200).json({
-            url: fileUrl,
-            key: req.file.key,
+            url: req.file.path,
+            publicId: req.file.filename,
+            secureUrl: req.file.path,
             size: req.file.size,
-            contentType: req.file.contentType,
+            contentType: req.file.mimetype,
         });
-    }
-
-    // Cloudinary (default)
-    return res.status(200).json({
-        url: req.file.path,
-        publicId: req.file.filename,
-        secureUrl: req.file.path,
-        size: req.file.size,
-        contentType: req.file.mimetype,
     });
 });
 
@@ -49,16 +77,37 @@ router.post('/upload', protect, upload.single('media'), (req, res) => {
 // @desc    Direct multer upload specifically to Cloudinary
 // @access  Private
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/upload/cloudinary', protect, uploadCloudinary.uploadPost.single('media'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ message: 'Please upload a file.' });
-    }
+router.post('/upload/cloudinary', protect, (req, res, next) => {
+    uploadCloudinary.uploadPost.single('media')(req, res, (err) => {
+        if (err) {
+            console.error('[mediaRoutes] Cloudinary upload error:', err);
+            
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({ message: 'File size exceeds limit (100MB max)' });
+            }
+            if (err.message && err.message.includes('must have a cloud_name')) {
+                return res.status(500).json({ 
+                    message: 'Server configuration error: Cloudinary is not properly configured',
+                    error: 'CLOUDINARY_NOT_CONFIGURED'
+                });
+            }
+            
+            return res.status(500).json({ 
+                message: 'Error uploading file to Cloudinary', 
+                error: err.message 
+            });
+        }
 
-    return res.status(200).json({
-        url: req.file.path,
-        publicId: req.file.filename,
-        secureUrl: req.file.path,
-        format: req.file.format,
+        if (!req.file) {
+            return res.status(400).json({ message: 'Please upload a file.' });
+        }
+
+        return res.status(200).json({
+            url: req.file.path,
+            publicId: req.file.filename,
+            secureUrl: req.file.path,
+            format: req.file.format,
+        });
     });
 });
 

@@ -6,4 +6,14 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+// Validate Cloudinary configuration
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    console.warn('[⚠️ cloudinary.js] Warning: Cloudinary environment variables are not fully configured. Media uploads may fail.');
+    console.warn('Missing:', {
+        cloud_name: !process.env.CLOUDINARY_CLOUD_NAME ? '❌' : '✓',
+        api_key: !process.env.CLOUDINARY_API_KEY ? '❌' : '✓',
+        api_secret: !process.env.CLOUDINARY_API_SECRET ? '❌' : '✓',
+    });
+}
+
 module.exports = cloudinary;

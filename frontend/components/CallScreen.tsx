@@ -340,16 +340,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 24,
     fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowRadius: 4,
   },
   timerText: {
     color: '#4ADDAE',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 8,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowRadius: 4,
   },
   controlsBottomWrapper: {
     paddingBottom: 40,

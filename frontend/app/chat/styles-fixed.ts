@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native';
 
-export const chatDetailStyles = StyleSheet.create({
+const chatDetailStyles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#151718' 
@@ -237,3 +237,7 @@ export const chatDetailStyles = StyleSheet.create({
   ownQuotedText: { color: '#a8c7bb' },
   otherQuotedText: { color: '#aaa' },
 });
+
+export default chatDetailStyles;
+
+export { chatDetailStyles };

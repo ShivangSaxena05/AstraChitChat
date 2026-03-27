@@ -71,7 +71,7 @@ export default function RootLayout() {
                 name="auth/login"
               />
             )}
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
             <Stack.Screen name="auth/login" />
             <Stack.Screen name="auth/signup" />
             <Stack.Screen name="chat/detail" />

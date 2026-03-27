@@ -257,6 +257,9 @@ io.on('connection', (socket) => {
             const message = await Message.create(messageData);
             await message.populate('sender', 'name username profilePicture');
             await message.populate('receiver', 'name username profilePicture');
+            
+            // ✅ FIX: Populate chat with convoType so frontend can determine chat type
+            await message.populate('chat', '_id convoType');
 
             // Populate quoted message if present
             let quotedMessageData = null;
@@ -269,6 +272,7 @@ io.on('connection', (socket) => {
                     quotedMessageData = {
                         _id: message.quotedMsgId._id,
                         bodyText: message.quotedMsgId.bodyText,
+                        msgType: message.quotedMsgId.msgType,
                         sender: {
                             _id: message.quotedMsgId.sender._id,
                             username: message.quotedMsgId.sender.username,
@@ -310,7 +314,10 @@ io.on('connection', (socket) => {
                 _id: message._id,
                 sender: message.sender,
                 receiver: message.receiver,
-                chat: message.chat,
+                chat: {  // ✅ FIX: Emit structured chat object instead of just ID
+                    _id: message.chat._id,
+                    convoType: message.chat.convoType,
+                },
                 msgType: message.msgType,
                 bodyText: message.bodyText,
                 attachments: message.attachments,

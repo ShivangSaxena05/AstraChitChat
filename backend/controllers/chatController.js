@@ -178,6 +178,18 @@ async function sendMessage(req, res) {
     const { receiverId, bodyText, msgType = 'text', attachments = [], quotedMsgId } = req.body;
     const senderId = req.user._id;
 
+    // ✅ FIX: Validate attachments structure before storing
+    const validatedAttachments = (attachments || []).filter(att => {
+      return (
+        att &&
+        typeof att === 'object' &&
+        att.type &&
+        ['image', 'video', 'audio', 'file'].includes(att.type) &&
+        typeof att.url === 'string' &&
+        (!att.size || att.size <= 50 * 1024 * 1024)  // 50MB limit
+      );
+    });
+
     let chat = await Chat.findOne({
       convoType: 'direct',
       'participants.user': { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
@@ -200,7 +212,7 @@ async function sendMessage(req, res) {
       chat: chat._id,
       bodyText: bodyText || '',
       msgType,
-      attachments,
+      attachments: validatedAttachments,
       quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
       readBy: [{ user: senderId, readAt: new Date() }],
     });
@@ -211,7 +223,7 @@ async function sendMessage(req, res) {
 
     await Chat.findByIdAndUpdate(chat._id, {
       lastMessage: {
-        text: bodyText || (attachments.length ? 'Media' : 'Message'),
+        text: bodyText || (validatedAttachments.length ? 'Media' : 'Message'),
         createdAt: message.createdAt,
         sender: senderId,
       },
@@ -326,14 +338,21 @@ async function unsendMessage(req, res) {
     const { messageId } = req.params;
     const userId = req.user._id;
 
+    // ✅ FIX: Use correct schema fields (unsentAt, unsentBy) instead of non-existent 'unsent' field
     const result = await Message.findOneAndUpdate(
       { _id: messageId, sender: userId },
-      { unsent: true, bodyText: '[This message was unsent]', editedAt: new Date() }
-    );
+      { 
+        unsentAt: new Date(),
+        unsentBy: userId,
+        bodyText: '[This message was unsent]',
+        editedAt: new Date()
+      },
+      { new: true }
+    ).populate('sender', 'name username profilePicture');
 
     if (!result) return res.status(404).json({ message: 'Message not found or unauthorized' });
 
-    res.json({ message: 'Message unsent' });
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: 'Failed to unsend message', error: error.message });
   }

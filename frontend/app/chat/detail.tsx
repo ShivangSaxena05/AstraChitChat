@@ -101,6 +101,7 @@ const MessageItem = memo(
     onSwipeReply,
     onReplyPress,
     highlightedMessageId,
+    retryAttempts,
   }: {
     item: ListItem;
     currentUserId: string | null;
@@ -109,6 +110,7 @@ const MessageItem = memo(
     onSwipeReply?: (message: Message) => void;
     onReplyPress?: (messageId: string) => void;
     highlightedMessageId?: string | null;
+    retryAttempts: React.MutableRefObject<Map<string, number>>;
   }) => {
     // Handle swipe to reply - must be called unconditionally
     const handleSwipe = useCallback(() => {
@@ -1041,9 +1043,16 @@ export default function ChatDetailScreen() {
     [hasMore, loadingMore, loadMoreMessages, isAtBottom],
   );
 
-  const triggerAnimatedCall = useCallback(() => {
-    if (otherUserId && chatId && otherUserStatus) {
-      initiateCall(
+  const triggerAnimatedCall = useCallback(async () => {
+    if (!otherUserId || !chatId || !otherUserStatus) {
+      setError("Cannot initiate call right now.");
+      setShowError(true);
+      return;
+    }
+
+    try {
+      // Audio-only calls (no video option via UI)
+      await initiateCall(
         [otherUserId],
         chatId,
         otherUserId,
@@ -1052,10 +1061,14 @@ export default function ChatDetailScreen() {
           profilePicture:
             otherUserProfilePicture || otherUserStatus.profilePicture || "",
         },
-        false,
+        false, // Always audio-only
       );
-    } else {
-      setError("Cannot initiate call right now.");
+    } catch (err: any) {
+      console.error("[Call] Failed to initiate:", err);
+      setError(
+        err.message ||
+          "Failed to initiate call. Check permissions and connection."
+      );
       setShowError(true);
     }
   }, [
@@ -1064,6 +1077,8 @@ export default function ChatDetailScreen() {
     otherUsername,
     otherUserProfilePicture,
     otherUserStatus,
+    setError,
+    setShowError,
   ]);
 
   const pullGesture = Gesture.Pan()
@@ -1081,7 +1096,9 @@ export default function ChatDetailScreen() {
     })
     .onEnd(() => {
       if (pullDistance.value > 150) {
-        runOnJS(triggerAnimatedCall)();
+        triggerAnimatedCall().catch((err) => {
+          console.error("[Gesture] Call initiation failed:", err);
+        });
       }
       pullDistance.value = withSpring(0);
       runOnJS(setIsHoldingTop)(false);
@@ -1157,6 +1174,7 @@ export default function ChatDetailScreen() {
         onSwipeReply={handleSwipeReply}
         onReplyPress={handleReplyPress}
         highlightedMessageId={highlightedMessageId}
+        retryAttempts={retryAttempts}
       />
     ),
     [
@@ -1262,7 +1280,7 @@ export default function ChatDetailScreen() {
                   uri:
                     otherUserProfilePicture ||
                     otherUserStatus.profilePicture ||
-                    "https://via.placeholder.com/40?text=User",
+                    'https://i.pravatar.cc/150?img=1',
                 }}
                 style={styles.profileImage}
               />
@@ -1500,6 +1518,26 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "rgba(255,255,255,0.1)",
   },
+  // ✅ BUG #3: Call mode button styles
+  callButtonsContainer: {
+    flexDirection: "row",
+    gap: 8,
+    marginHorizontal: 12,
+  },
+  callModeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  callModeButtonActive: {
+    backgroundColor: "rgba(74, 221, 174, 0.2)",
+    borderColor: "#4ADDAE",
+  },
   messagesList: { flex: 1 },
   messagesContainer: { padding: 16, paddingTop: 8 },
   dateSeparator: { alignItems: "center", marginVertical: 12 },
@@ -1519,7 +1557,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 20,
     elevation: 1,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 1,

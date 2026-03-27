@@ -38,7 +38,10 @@ const searchUsers = async (req, res) => {
     res.json({ users });
   } catch (error) {
     console.error('Search error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -75,7 +78,10 @@ const toggleBlockUser = async (req, res) => {
     }
   } catch (error) {
     console.error('Toggle block error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -112,7 +118,10 @@ const toggleMuteUser = async (req, res) => {
     }
   } catch (error) {
     console.error('Toggle mute error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -126,7 +135,10 @@ const getBlockedUsers = async (req, res) => {
     res.json(currentUser.blockedUsers || []);
   } catch (error) {
     console.error('Get blocked users error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -140,7 +152,10 @@ const getMutedUsers = async (req, res) => {
     res.json(currentUser.mutedUsers || []);
   } catch (error) {
     console.error('Get muted users error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -175,7 +190,10 @@ const exportData = async (req, res) => {
     res.status(200).send(JSON.stringify(exportPayload, null, 2));
   } catch (error) {
     console.error('Export data error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 
@@ -253,7 +271,10 @@ const deleteAccount = async (req, res) => {
     res.json({ message: 'Account and all associated data deleted successfully' });
   } catch (error) {
     console.error('Delete account error:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server Error', 
+      error: process.env.NODE_ENV === 'production' ? {} : error.message 
+    });
   }
 };
 

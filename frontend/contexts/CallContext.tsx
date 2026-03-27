@@ -135,6 +135,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  // ✅ MEDIUM: Incoming call timeout (auto-reject after 45 seconds)
+  const incomingCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // ✅ FIX #2: Setup connection timeout handler
   const setupConnectionTimeout = () => {
@@ -185,6 +189,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  // ✅ MEDIUM: Clear incoming call timeout
+  const clearIncomingCallTimeout = () => {
+    if (incomingCallTimeoutRef.current) {
+      clearTimeout(incomingCallTimeoutRef.current);
+      incomingCallTimeoutRef.current = null;
+    }
+  };
+
   const processIceQueue = async () => {
     if (!peerConnectionRef.current) return;
     const IceCandidate =
@@ -211,8 +223,21 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
           "[WebRTC][Web] Web hardware permissions explicitly granted",
         );
         return true;
-      } catch (err) {
+      } catch (err: any) {
         console.warn("[WebRTC][Web] Hardware permission denied:", err);
+        // ✅ MEDIUM: Better error messages for permission denied
+        const errorName = err.name || "PermissionError";
+        if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+          Alert.alert(
+            "Permission Denied",
+            `Please allow access to your ${video ? "camera and " : ""}microphone in browser settings to use calling features.`,
+          );
+        } else if (errorName === "NotFoundError") {
+          Alert.alert(
+            "Device Not Found",
+            "No microphone or camera device found. Please connect a device.",
+          );
+        }
         return false;
       }
     } else if (Platform.OS === "android") {
@@ -232,9 +257,25 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log(
           `[WebRTC][Android] Permissions - Audio: ${audioGranted}, Video: ${videoGranted}`,
         );
+        
+        // ✅ MEDIUM: Show helpful alert if permissions denied
+        if (!audioGranted || !videoGranted) {
+          const missing = [];
+          if (!audioGranted) missing.push("Microphone");
+          if (!videoGranted) missing.push("Camera");
+          Alert.alert(
+            "Permissions Required",
+            `${missing.join(" and ")} permission${missing.length > 1 ? "s are" : " is"} required for calling. Please enable ${missing.length > 1 ? "them" : "it"} in app settings.`,
+          );
+        }
+        
         return audioGranted && videoGranted;
       } catch (err) {
         console.warn("[WebRTC][Android] Permission fetch error:", err);
+        Alert.alert(
+          "Permission Error",
+          "Failed to request permissions. Please try again.",
+        );
         return false;
       }
     }
@@ -311,6 +352,26 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         ...prev,
         incomingCall: { offer, callerId, chatId, isVideo },
       }));
+
+      // ✅ MEDIUM: Set incoming call timeout (auto-reject after 45 seconds if not answered)
+      clearIncomingCallTimeout(); // Clear any previous timeout
+      incomingCallTimeoutRef.current = setTimeout(() => {
+        console.warn(
+          "[Signaling] Incoming call timeout - auto-rejecting call from:",
+          callerId,
+        );
+        socket.emit("end-call", {
+          targetId: callerId,
+          senderId: currentUserId,
+        });
+        setCallState((prev) => ({
+          ...prev,
+          incomingCall: null,
+        }));
+        if (Platform.OS !== "web") {
+          Alert.alert("Missed Call", "Call ended due to no response.");
+        }
+      }, 45000); // 45 second timeout
     });
 
     socket.on("webrtc-answer", async ({ answer, responderId }) => {
@@ -403,19 +464,41 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
         const videoTrack = videoStream.getVideoTracks()[0];
 
+        // ✅ FIX #6: Immutable state update - create new MediaStream with all tracks
+        let newLocalStream: any = null;
         setCallState((prev) => {
           if (prev.localStream) {
-            prev.localStream.addTrack(videoTrack);
+            // Get all existing audio tracks
+            const audioTracks = prev.localStream.getAudioTracks();
+            // Create new MediaStream with all existing tracks + new video track
+            const allTracks = [...audioTracks, videoTrack];
+            
+            // Create new MediaStream reference (immutable)
+            if (Platform.OS === "web") {
+              newLocalStream = new MediaStream(allTracks);
+            } else {
+              // On native, create new instance
+              newLocalStream = new (require("react-native-webrtc")).MediaStream(allTracks);
+            }
+            
             return {
               ...prev,
               isVideoEnabled: true,
-              localStream: prev.localStream,
+              localStream: newLocalStream,
             };
           }
           return prev;
         });
 
-        peerConnectionRef.current.addTrack(videoTrack, callState.localStream);
+        // Add video track to peer connection with new stream
+        if (peerConnectionRef.current && videoTrack && newLocalStream) {
+          try {
+            peerConnectionRef.current.addTrack(videoTrack, newLocalStream);
+            console.log("[WebRTC] Video track added to peer connection in upgrade handler");
+          } catch (e) {
+            console.warn("[WebRTC] Failed to add video track in upgrade handler:", e);
+          }
+        }
 
         const offer = await peerConnectionRef.current.createOffer(
           Platform.OS === "web" ? { offerToReceiveVideo: true } : {},
@@ -490,25 +573,61 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
     peerConnectionRef.current = pc;
     activeCallTargetIdRef.current = targetId;
+    
+    // ✅ FIX #5: ICE disconnection recovery with timeout
+    let disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    
     pc.oniceconnectionstatechange = () => {
       console.log("ICE State:", pc.iceConnectionState);
 
-      // ✅ FIX #3: Complete ICE state handler
+      // ✅ FIX #3: Complete ICE state handler with recovery
       switch (pc.iceConnectionState) {
         case "connected":
         case "completed":
           console.log("[WebRTC] ICE connection established");
+          // ✅ Clear any pending reconnection attempts
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
+          clearConnectionTimeout();
+          setCallState((prev) => ({ ...prev, isConnected: true }));
           break;
+          
         case "disconnected":
           console.warn(
-            "[WebRTC] ICE disconnected - peer connection may be recovering",
+            "[WebRTC] ICE disconnected - attempting to recover...",
           );
+          // ✅ FIX #5: Wait 5 seconds, then check if recovered
+          disconnectTimeoutRef.current = setTimeout(() => {
+            if (pc.iceConnectionState === "disconnected") {
+              console.error(
+                "[WebRTC] ICE still disconnected after 5s - call will fail",
+              );
+              Alert.alert(
+                "Connection Lost",
+                "Your network connection was interrupted. The call will end.",
+                [
+                  {
+                    text: "OK",
+                    onPress: () =>
+                      cleanupCall("ICE disconnected timeout"),
+                  },
+                ],
+              );
+            }
+          }, 5000);
           break;
+          
         case "failed":
           console.error(
             "[WebRTC] ICE connection failed - no candidates succeeded",
           );
           clearConnectionTimeout();
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
           Alert.alert(
             "Connection Failed",
             "Could not establish peer connection. Check your network and try again.",
@@ -520,9 +639,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
             ],
           );
           break;
+          
         case "closed":
           console.log("[WebRTC] ICE connection closed");
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
           break;
+          
         default:
           console.log("[WebRTC] ICE state:", pc.iceConnectionState);
       }
@@ -667,6 +792,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     if (!callState.incomingCall || !socket || !currentUserId) return;
 
+    clearIncomingCallTimeout(); // ✅ MEDIUM: Clear timeout when accepting
+
     // Auto-detect incoming call media type
     const incomingIsVideo = callState.incomingCall.isVideo ?? isVideo;
     const { offer, callerId, chatId } = callState.incomingCall;
@@ -728,6 +855,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const declineCall = () => {
+    clearIncomingCallTimeout(); // ✅ MEDIUM: Clear timeout on decline
     if (callState.incomingCall && socket && currentUserId) {
       socket.emit("end-call", {
         targetId: callState.incomingCall.callerId,
@@ -752,25 +880,33 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     console.log(`[WebRTC] Cleanup | Reason: ${reason || "unknown"}`);
 
     clearConnectionTimeout(); // ✅ FIX #2: Clear timeout on cleanup
+    clearIncomingCallTimeout(); // ✅ MEDIUM: Clear incoming call timeout on cleanup
 
     if (Platform.OS !== "web" && NativeInCallManager) {
       try {
         NativeInCallManager.stop();
       } catch (e) {
-        console.warn("InCallManager stop error:", e);
+        console.warn("[WebRTC] InCallManager stop error:", e);
       }
     }
 
     const pc = peerConnectionRef.current;
     if (pc) {
-      // ✅ CRITICAL: Stop ALL sender tracks to prevent leaks
-      pc.getSenders().forEach((sender: any) => {
-        if (sender.track) {
-          sender.track.stop();
-          sender.track.enabled = false;
-        }
-      });
-      pc.close();
+      try {
+        // ✅ CRITICAL: Stop ALL sender tracks to prevent leaks with error handling
+        pc.getSenders().forEach((sender: any) => {
+          if (sender.track) {
+            try {
+              sender.track.stop();
+            } catch (e) {
+              console.warn("[WebRTC] Error stopping sender track:", e);
+            }
+          }
+        });
+        pc.close();
+      } catch (e) {
+        console.warn("[WebRTC] Error closing peer connection:", e);
+      }
       peerConnectionRef.current = null;
     }
 
@@ -783,15 +919,27 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     activeCallTargetIdRef.current = null;
 
     setCallState((prev) => {
+      // ✅ FIX #4: Safely stop all tracks with error handling
       if (prev.localStream) {
         prev.localStream.getTracks().forEach((t: any) => {
-          t.stop();
-          t.enabled = false;
+          try {
+            t.stop();
+          } catch (e) {
+            console.warn("[WebRTC] Error stopping local track:", e);
+          }
         });
       }
+      
       if (prev.remoteStream) {
-        prev.remoteStream.getTracks().forEach((t: any) => t.stop());
+        prev.remoteStream.getTracks().forEach((t: any) => {
+          try {
+            t.stop();
+          } catch (e) {
+            console.warn("[WebRTC] Error stopping remote track:", e);
+          }
+        });
       }
+
       return {
         isCalling: false,
         isConnected: false,
@@ -910,21 +1058,48 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         const videoTrack = videoStream.getVideoTracks()[0];
 
+        // ✅ FIX #6: Immutable state update - create new MediaStream with all tracks
         setCallState((prev) => {
           if (prev.localStream) {
-            prev.localStream.addTrack(videoTrack);
+            // Get all existing audio tracks
+            const audioTracks = prev.localStream.getAudioTracks();
+            // Create new MediaStream with all existing tracks + new video track
+            const allTracks = [...audioTracks, videoTrack];
+            
+            // Create new MediaStream reference (immutable)
+            let newStream;
+            if (Platform.OS === "web") {
+              newStream = new MediaStream(allTracks);
+            } else {
+              // On native, use the existing stream reference but it's a new instance
+              newStream = new (require("react-native-webrtc")).MediaStream(allTracks);
+            }
+            
+            // Add video track to peer connection with the new stream reference
+            if (peerConnectionRef.current && videoTrack) {
+              try {
+                peerConnectionRef.current.addTrack(videoTrack, newStream);
+                console.log("[WebRTC] Video track added to peer connection");
+              } catch (e) {
+                console.warn("[WebRTC] Failed to add video track to PC:", e);
+              }
+            }
+            
             return {
               ...prev,
               isVideoEnabled: true,
-              localStream: prev.localStream,
+              localStream: newStream, // Use new stream reference
             };
           }
           return prev;
         });
-        peerConnectionRef.current?.addTrack(videoTrack, callState.localStream);
       }
     } catch (e) {
       console.warn("Failed to get local camera for video upgrade", e);
+      Alert.alert(
+        "Camera Error",
+        "Could not access camera. Please check permissions and try again.",
+      );
     }
 
     socket?.emit("accept-video-upgrade", {

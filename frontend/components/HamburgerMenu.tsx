@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useSocket } from '@/contexts/SocketContext';
+import { post } from '@/services/api';
 
 export default function HamburgerMenu() {
   const router = useRouter();
@@ -33,12 +34,51 @@ export default function HamburgerMenu() {
   const handleLogout = async () => {
     setModalVisible(false);
     
-    // Remove current user from saved_accounts if needed, or keep it but just log out. 
-    // Typically log out just clears active token.
-    await AsyncStorage.removeItem('token');
-    await AsyncStorage.removeItem('userId');
-    if (disconnect) disconnect();
-    router.replace('/auth/login');
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Step 1: Call backend logout endpoint to invalidate session
+              const token = await AsyncStorage.getItem('token');
+              if (token) {
+                try {
+                  await post('/auth/logout', {});
+                  console.log('✅ Backend logout successful');
+                } catch (error) {
+                  console.warn('⚠️ Backend logout call failed, proceeding with local logout:', error);
+                  // Don't throw - we still want to logout locally even if backend call fails
+                }
+              }
+              
+              // Step 2: Disconnect socket
+              if (disconnect) {
+                disconnect();
+              }
+              
+              // Step 3: Clear local credentials
+              await AsyncStorage.removeItem('token');
+              await AsyncStorage.removeItem('userId');
+              await AsyncStorage.removeItem('userName');
+              console.log('✅ Local storage cleared');
+              
+              // Step 4: Navigate to login screen
+              setTimeout(() => {
+                router.replace('/(auth)/login' as any);
+              }, 300);
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to log out');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleAddAccount = () => {
@@ -48,14 +88,43 @@ export default function HamburgerMenu() {
 
   const handleSwitchAccount = async (acc: any) => {
     setModalVisible(false);
-    await AsyncStorage.setItem('token', acc.token);
-    await AsyncStorage.setItem('userId', acc.userId);
     
-    if (disconnect) disconnect();
-    if (connect) await connect();
-    
-    // Trigger deep navigation refresh
-    router.replace('/(tabs)' as any);
+    try {
+      // Validate account data before switching
+      if (!acc.token || !acc.userId) {
+        Alert.alert('Error', 'Invalid account data');
+        return;
+      }
+
+      // CRITICAL FIX: Disconnect first, then switch credentials, then reconnect
+      if (disconnect) {
+        disconnect();
+      }
+
+      // Update credentials
+      await AsyncStorage.setItem('token', acc.token);
+      await AsyncStorage.setItem('userId', acc.userId);
+      
+      // CRITICAL FIX: Wait for socket connection and validate it succeeded
+      try {
+        if (connect) {
+          await connect(true);
+        }
+      } catch (socketError) {
+        console.error('Socket connection failed after account switch:', socketError);
+        throw new Error('Failed to reconnect socket for new account');
+      }
+      
+      // Navigation after successful socket connection
+      router.replace('/(tabs)' as any);
+      
+    } catch (error: any) {
+      console.error('Account switch error:', error);
+      Alert.alert('Error', error.message || 'Failed to switch account');
+      // Rollback on error
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('userId');
+    }
   };
 
   const iconColor = colorScheme === 'dark' ? '#fff' : '#000';

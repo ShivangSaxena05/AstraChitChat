@@ -24,6 +24,12 @@ export default function TopHeaderComponent({ showPlusIcon = false, onPlusPress, 
     closeAccountModal,
   } = useAccountSwitcher();
 
+  // MEDIUM FIX: Ensure modal is properly controlled - close on account switch completion
+  const handleAccountSwitch = async (account: any) => {
+    await switchAccount(account);
+    // Modal will auto-close via useAccountSwitcher after switch
+  };
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.header}>
@@ -45,7 +51,7 @@ export default function TopHeaderComponent({ showPlusIcon = false, onPlusPress, 
           visible={isAccountModalVisible}
           accounts={savedAccounts}
           currentUsername={currentUsername}
-          onSwitch={switchAccount}
+          onSwitch={handleAccountSwitch}
           onAddAccount={addAccount}
           onClose={closeAccountModal}
         />

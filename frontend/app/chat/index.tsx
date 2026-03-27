@@ -130,9 +130,27 @@ export default function ChatListScreen() {
       fetchChats(true);
     }
   }, []);
-  // SocketContext already handles listening for 'conversationUpdated'
-  // and updating the 'conversations' global state. We don't need a local
-  // listener here that fetches from the API on every single message.
+
+  // MEDIUM FIX: Handle unread message updates from socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleUnreadUpdate = (data: { chatId: string; unreadCount: number }) => {
+      // Sync unread count with API state
+      setConversations((prev) =>
+        prev.map((c) =>
+          String(c._id) === String(data.chatId)
+            ? { ...c, unreadCount: data.unreadCount }
+            : c
+        )
+      );
+    };
+
+    socket.on('unread count updated', handleUnreadUpdate);
+    return () => {
+      socket.off('unread count updated', handleUnreadUpdate);
+    };
+  }, [socket, setConversations]);
 
   // Fetch all chats from server
   const fetchChats = async (showLoading = true) => {

@@ -62,20 +62,35 @@ export function useAccountSwitcher() {
         return;
       }
 
+      // CRITICAL FIX: Validate token before switching
+      if (!account.token || !account.userId) {
+        throw new Error('Invalid account data: missing token or userId');
+      }
+
       await AsyncStorage.setItem('token', account.token);
       await AsyncStorage.setItem('userId', account.userId);
       setCurrentUsername(account.username);
       setIsAccountModalVisible(false);
       
-      await connect(true);
+      // CRITICAL FIX: Validate socket connection result
+      try {
+        await connect(true);
+      } catch (socketError) {
+        console.error('Socket connection failed after account switch:', socketError);
+        throw new Error('Failed to establish socket connection for new account');
+      }
       
       Alert.alert(
         "Account Switched",
         `Switched to ${account.username}`,
         [{ text: "OK", onPress: () => router.replace('/(tabs)' as any) }]
       );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to switch accounts');
+    } catch (error: any) {
+      console.error('Account switch error:', error);
+      Alert.alert('Error', error.message || 'Failed to switch accounts');
+      // Rollback on error
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('userId');
     }
   };
 

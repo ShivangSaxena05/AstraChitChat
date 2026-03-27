@@ -91,6 +91,20 @@ type ListItem =
   | { type: "message"; data: Message }
   | { type: "dateSeparator"; date: string; dateKey: string };
 
+// Helper function to sanitize messages for XSS prevention
+const sanitizeMessage = (text: string): string => {
+  // ✅ FIXED: Proper HTML escaping for XSS prevention
+  // Escape all HTML-special chars to prevent <script>alert(1)</script>
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;")
+    .replace(/`/g, "&#x60;")
+    .trim();
+};
+
 // Memoized message item to prevent re-rendering all messages when user types
 const MessageItem = memo(
   ({
@@ -215,7 +229,7 @@ const MessageItem = memo(
             >
               {message.unsentAt
                 ? "[Message unsent]"
-                : message.bodyText || message.content}
+                : sanitizeMessage(message.bodyText || message.content || "")}
             </Text>
             {message.editedAt && !message.unsentAt && (
               <Text
@@ -342,10 +356,17 @@ export default function ChatDetailScreen() {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tempTimeouts = useRef<NodeJS.Timeout[]>([]);
   const retryAttempts = useRef<Map<string, number>>(new Map());
+  // CRITICAL FIX: Debounce for message sending to prevent duplicates
+  const sendMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSentMessageRef = useRef<string | null>(null);
   useEffect(() => {
     return () => {
       tempTimeouts.current.forEach((id) => clearTimeout(id));
       tempTimeouts.current = [];
+      // CRITICAL FIX: Cleanup debounce timeout on unmount
+      if (sendMessageTimeoutRef.current) {
+        clearTimeout(sendMessageTimeoutRef.current);
+      }
     };
   }, []);
   const inputRef = useRef<TextInput>(null);
@@ -851,21 +872,20 @@ export default function ChatDetailScreen() {
       if (socket && socketConnected) {
         socket.emit("read messages", chatId);
       }
-      // Mark messages we received as read
+      // Mark messages we received as read (add to readBy array instead)
       setMessages((prev) =>
         prev.map((m) => {
-          if (
-            String(m.sender._id) !== String(currentUserId) &&
-            currentUserId &&
-            !m.readBy?.includes(currentUserId)
-          ) {
-            return { ...m, readBy: [...(m.readBy || []), currentUserId] };
+          if (String(m.sender._id) !== String(currentUserId)) {
+            return { 
+              ...m, 
+              readBy: [...(m.readBy || []), String(currentUserId)] 
+            };
           }
           return m;
-        }),
+        })
       );
-    } catch (error) {
-      // Silently handle error
+    } catch (error: any) {
+      console.error("Error marking messages as read:", error);
     }
   };
 
@@ -881,9 +901,24 @@ export default function ChatDetailScreen() {
       .replace(/`/g, "&#x60;")
       .trim();
   };
+
   const sendMessage = async () => {
     const sanitizedText = sanitizeMessage(newMessage);
     if (!sanitizedText || !currentUserId || !socket || !socketConnected) return;
+
+    // CRITICAL FIX: Prevent duplicate messages with debounce
+    // If same message was just sent, ignore rapid duplicates
+    if (lastSentMessageRef.current === sanitizedText) {
+      console.warn('Duplicate message send attempt detected, ignoring');
+      return;
+    }
+
+    // Clear any pending send attempt
+    if (sendMessageTimeoutRef.current) {
+      clearTimeout(sendMessageTimeoutRef.current);
+    }
+
+    lastSentMessageRef.current = sanitizedText;
 
     // Optimistic UI Update: Immediately add the message to the list.
     // It will be replaced by the real message from the server later.

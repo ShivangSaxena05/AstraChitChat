@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { StyleSheet, Text, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedText } from './themed-text';
@@ -15,22 +15,38 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
 
   if (!text) return null;
 
+  // HIGH FIX: Properly reset truncation state when text changes
+  useEffect(() => {
+    setIsTruncated(false);
+    setIsExpanded(false);
+  }, [text]);
+
   const handleURLPress = (url: string) => {
     Linking.openURL(url).catch(err => console.error("Couldn't open URL", err));
   };
 
   const handleMentionPress = (username: string) => {
-    router.push({
-      pathname: '/(tabs)/(tabs)/explore' as any,
-      params: { q: username } 
-    });
+    // HIGH FIX: Add error handling for navigation
+    try {
+      router.push({
+        pathname: '/(tabs)/(tabs)/explore' as any,
+        params: { q: username } 
+      });
+    } catch (error) {
+      console.error('Navigation error:', error);
+    }
   };
 
   const handleHashtagPress = (tag: string) => {
-    router.push({
-      pathname: '/(tabs)/(tabs)/explore' as any,
-      params: { q: tag }
-    });
+    // HIGH FIX: Add error handling for navigation
+    try {
+      router.push({
+        pathname: '/(tabs)/(tabs)/explore' as any,
+        params: { q: tag }
+      });
+    } catch (error) {
+      console.error('Navigation error:', error);
+    }
   };
 
   const parseText = (content: string) => {

@@ -21,16 +21,22 @@ interface BottomTabBarComponentProps {
 export default function BottomTabBarComponent({ navigation, state }: BottomTabBarComponentProps) {
   const router = useRouter();
   
-  // Map state index to tab name
-  const getIndexFromState = () => {
+  // HIGH FIX: Sync current index with state more reliably
+  const getCurrentIndex = () => {
+    if (!state || !state.routes || state.index === undefined) {
+      return 0;
+    }
+
     const routeName = state.routes[state.index]?.name;
+    
+    // Map route names to tab indices more explicitly
     if (routeName === 'chat-list') return 1;
     if (routeName === 'notifications') return 2;
     if (routeName === 'profile') return 3;
-    return 0; // Home
+    return 0; // Home/index is default
   };
 
-  const currentIndex = getIndexFromState();
+  const currentIndex = getCurrentIndex();
 
   const handleTabPress = (tabName: string) => {
     navigation.navigate(tabName);

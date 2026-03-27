@@ -89,6 +89,19 @@ export default function HomeScreen() {
     fetchFlicks();
   }, []);
 
+  // CRITICAL FIX: Cleanup video refs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Stop all videos and clear refs
+      Object.values(videoRefs.current).forEach(ref => {
+        if (ref) {
+          ref.pauseAsync().catch(() => {});
+        }
+      });
+      videoRefs.current = {};
+    };
+  }, []);
+
   // Fetch flicks
   const fetchFlicks = async (isRefresh = false) => {
     try {
@@ -222,6 +235,22 @@ export default function HomeScreen() {
     const isVisible = index === currentVisibleIndex;
     const isLiked = likedFlicks.has(item._id);
 
+    // CRITICAL FIX: Validate media URL before rendering
+    if (!item.mediaUrl || !item.user?.username) {
+      return (
+        <View style={styles.flickContainer}>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Invalid media data</Text>
+          </View>
+        </View>
+      );
+    }
+
+    const handleVideoError = (error: any) => {
+      console.error('Video playback error for flick:', item._id, error);
+      Alert.alert('Video Error', 'Failed to play video. Please try again.');
+    };
+
     return (
       <View style={styles.flickContainer}>
         <Video
@@ -236,6 +265,7 @@ export default function HomeScreen() {
           isLooping
           shouldPlay={isVisible}
           isMuted={true}
+          onError={handleVideoError}
         />
         <View style={styles.overlay}>
           <View style={styles.overlayContent}>
@@ -549,6 +579,17 @@ const styles = StyleSheet.create({
   },
   video: {
     flex: 1,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 16,
+    fontWeight: '600',
   },
   overlay: {
     position: 'absolute',

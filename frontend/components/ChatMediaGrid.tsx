@@ -34,13 +34,27 @@ const ChatMediaGrid: React.FC<ChatMediaGridProps> = React.memo(({
   loading = false
 }) => {
   const renderItem = ({ item }: { item: MediaItem }) => {
+    // HIGH FIX: Validate media item properties
+    if (!item || !item._id) {
+      return null;
+    }
+
     let iconName = 'document';
     let bgColor = '#e5e5e5';
 
     if (mediaType === 'photos' || (item.mimeType?.startsWith('image/'))) {
+      // HIGH FIX: Validate URL before rendering image
+      const imageUrl = item.thumbnail || item.url;
+      if (!imageUrl) {
+        return (
+          <View style={[styles.mediaThumbnail, { backgroundColor: '#e0e0e0' }]}>
+            <Ionicons name="image-outline" size={20} color="#999" />
+          </View>
+        );
+      }
       return (
         <Image
-          source={{ uri: item.thumbnail || item.url }}
+          source={{ uri: imageUrl }}
           style={styles.mediaThumbnail}
         />
       );

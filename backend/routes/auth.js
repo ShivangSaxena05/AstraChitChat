@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 console.log('✅ Auth routes loaded');
-const { registerUser, loginUser, setup2FA, verify2FASetup, disable2FA, verifyLogin2FA } = require('../controllers/authController');
+const { registerUser, loginUser, setup2FA, verify2FASetup, disable2FA, verifyLogin2FA, logoutUser } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 
 // @route   POST /api/auth/register
@@ -12,6 +12,10 @@ router.post('/register', registerUser);
 // @route   POST /api/auth/login
 // @desc    Authenticate user & get token
 router.post('/login', loginUser);
+
+// @route   POST /api/auth/logout
+// @desc    Logout user
+router.post('/logout', protect, logoutUser);
 
 // 2FA Routes
 router.post('/2fa/setup', protect, setup2FA);

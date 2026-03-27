@@ -18,21 +18,42 @@ const generateToken = (id) => {
 exports.registerUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
+  // FIX: Better validation with specific error messages
   if (!name || !email || !password) {
     res.status(400);
     throw new Error('Name, email and password are required');
   }
 
-  const userExists = await User.findOne({ email });
+  // Validate name length
+  if (name.trim().length < 2) {
+    res.status(400);
+    throw new Error('Name must be at least 2 characters');
+  }
+
+  // Validate email format (basic check)
+  if (!email.includes('@') || !email.includes('.')) {
+    res.status(400);
+    throw new Error('Please provide a valid email address');
+  }
+
+  // Validate password length
+  if (password.length < 8) {
+    res.status(400);
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  // Check if user exists
+  const userExists = await User.findOne({ email: email.toLowerCase() });
   if (userExists) {
     res.status(400);
-    throw new Error('User already exists');
+    throw new Error('User with this email already exists');
   }
 
   // Generate a base username then make it unique with a random suffix
   // to avoid collisions on same-millisecond registrations
   const baseUsername = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const username = baseUsername + Math.random().toString(36).slice(2, 7);
+  const randomSuffix = Math.random().toString(36).slice(2, 7);
+  const username = baseUsername + randomSuffix;
 
   // Guard against duplicate username (extremely rare but possible)
   const usernameExists = await User.findOne({ username });
@@ -41,9 +62,16 @@ exports.registerUser = asyncHandler(async (req, res) => {
     throw new Error('Could not generate unique username, please try again');
   }
 
-  const user = await User.create({ name, email, password, username });
+  // Create user
+  const user = await User.create({
+    name: name.trim(),
+    email: email.toLowerCase(),
+    password,
+    username,
+  });
 
   if (user) {
+    // Return user data with token
     res.status(201).json({
       _id: user._id,
       name: user.name,
@@ -191,4 +219,24 @@ exports.verifyLogin2FA = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error('Invalid 2FA token');
   }
+});
+
+// @desc    Logout user
+// @route   POST /api/auth/logout
+// @access  Private
+exports.logoutUser = asyncHandler(async (req, res) => {
+  // For JWT-based authentication, logout is primarily a client-side operation
+  // The token is removed from the client's AsyncStorage
+  // This endpoint serves as a confirmation point and can be used for:
+  // - Future token blacklisting implementation
+  // - Server-side session tracking
+  // - Audit logging of logout events
+  
+  const userId = req.user._id;
+  console.log(`✅ User ${userId} logged out`);
+  
+  res.json({ 
+    message: 'Logged out successfully',
+    userId: userId
+  });
 });

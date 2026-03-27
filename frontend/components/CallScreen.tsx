@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, Modal, SafeAreaView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useMemo, useCallback } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, Modal, SafeAreaView, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
@@ -13,29 +13,31 @@ if (Platform.OS !== 'web') {
   }
 }
 
-const WebVideo = ({ stream, isLocal, style }: { stream: any, isLocal: boolean, style: any }) => {
-  const videoRef = useRef<any>(null);
-  
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream]);
+const WebVideo = React.memo(
+  ({ stream, isLocal, style }: { stream: any; isLocal: boolean; style: any }) => {
+    const videoRef = useRef<any>(null);
+    
+    useEffect(() => {
+      if (videoRef.current && stream) {
+        videoRef.current.srcObject = stream;
+      }
+    }, [stream]);
 
-  return React.createElement('video', {
-    ref: videoRef,
-    autoPlay: true,
-    playsInline: true,
-    muted: isLocal,
-    style: {
-      width: '100%',
-      height: '100%',
-      objectFit: 'cover',
-      transform: isLocal ? 'scaleX(-1)' : 'none',
-      ...style
-    }
-  });
-};
+    return React.createElement('video', {
+      ref: videoRef,
+      autoPlay: true,
+      playsInline: true,
+      muted: isLocal,
+      style: {
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        transform: isLocal ? 'scaleX(-1)' : 'none',
+        ...style
+      }
+    });
+  }
+);
 
 const { width, height } = Dimensions.get('window');
 
@@ -51,17 +53,18 @@ interface CallScreenProps {
   duration: number;
   videoUpgradeRequest: any | null;
   isVideoUpgradePending: boolean;
+  callError?: string | null;
   onAccept: (video: boolean) => void;
   onDecline: () => void;
   onEnd: () => void;
   onMute: () => void;
   onSpeaker: () => void;
-  onSwitchVideo: () => void; // Normal toggle
-  onUpgradeToVideo: () => void; // Mid-call renegotiation from Audio to Video
+  onSwitchVideo: () => void;
+  onUpgradeToVideo: () => void;
   onAcceptVideoUpgrade: () => void;
   onDeclineVideoUpgrade: () => void;
   onSwitchCamera: () => void;
-  isVideoCallContext: boolean; // Was the call physically initiated as a Video call or upgraded?
+  isVideoCallContext: boolean;
 }
 
 const formatDuration = (seconds: number) => {
@@ -70,54 +73,73 @@ const formatDuration = (seconds: number) => {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 };
 
-// Reanimated Draggable Picture-in-Picture
-const DraggablePIP = ({ children, isVisible }: { children: React.ReactNode, isVisible: boolean }) => {
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
+// ✅ FIX 4.2: Memoized Draggable Picture-in-Picture
+const DraggablePIP = React.memo(
+  ({ children, isVisible }: { children: React.ReactNode; isVisible: boolean }) => {
+    const translateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
 
-  const panGesture = Gesture.Pan()
-    .onChange((event) => {
-      translateX.value += event.changeX;
-      translateY.value += event.changeY;
-    })
-    .onEnd(() => {
-      // Optional: Snap to edges. For now, we just leave it where dragged gently.
+    const panGesture = Gesture.Pan()
+      .onChange((event) => {
+        translateX.value += event.changeX;
+        translateY.value += event.changeY;
+      })
+      .onEnd(() => {
+        // Optional: Snap to edges. For now, we just leave it where dragged gently.
+      });
+
+    const animatedStyle = useAnimatedStyle(() => {
+      return {
+        opacity: withTiming(isVisible ? 1 : 0),
+        transform: [
+          { translateX: translateX.value },
+          { translateY: translateY.value },
+        ],
+        zIndex: isVisible ? 10 : -1,
+      };
     });
 
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: withTiming(isVisible ? 1 : 0),
-      transform: [
-        { translateX: translateX.value },
-        { translateY: translateY.value },
-      ],
-      zIndex: isVisible ? 10 : -1,
-    };
-  });
-
-  return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={[styles.localVideoContainer, animatedStyle]}>
-        {children}
-      </Animated.View>
-    </GestureDetector>
-  );
-};
+    return (
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[styles.localVideoContainer, animatedStyle]}>
+          {children}
+        </Animated.View>
+      </GestureDetector>
+    );
+  }
+);
 
 export default function CallScreen(props: CallScreenProps) {
-  if (!props.visible) return null;
+  // ✅ FIX 4.3: Early return optimization
+  if (!props.visible) {
+    return null;
+  }
 
   const isConnecting = props.status === 'connecting' || props.status === 'outgoing';
 
-  const renderButtons = () => {
+  // ✅ Show error alert if present
+  useEffect(() => {
+    if (props.callError && props.visible) {
+      Alert.alert('Call Error', props.callError);
+    }
+  }, [props.callError, props.visible]);
+
+  // ✅ FIX: Memoized button renderer to prevent unnecessary re-renders
+  const renderButtons = useMemo(() => {
     if (props.status === 'incoming') {
       return (
         <View style={styles.incomingControls}>
-          <TouchableOpacity style={[styles.controlButton, styles.declineButton]} onPress={props.onDecline}>
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.declineButton]} 
+            onPress={props.onDecline}
+          >
             <Ionicons name="close" size={32} color="#fff" />
             <Text style={styles.controlText}>Decline</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.controlButton, styles.acceptButton]} onPress={() => props.onAccept(props.isVideoCallContext)}>
+          <TouchableOpacity 
+            style={[styles.controlButton, styles.acceptButton]} 
+            onPress={() => props.onAccept(props.isVideoCallContext)}
+          >
             <Ionicons name="call" size={32} color="#fff" />
             <Text style={styles.controlText}>Accept</Text>
           </TouchableOpacity>
@@ -128,50 +150,77 @@ export default function CallScreen(props: CallScreenProps) {
     return (
       <View style={styles.activeControls}>
         <TouchableOpacity 
-           style={[styles.iconButton, props.isMuted && styles.activeIcon]} 
-           onPress={props.onMute}
-           disabled={isConnecting}
-           activeOpacity={isConnecting ? 1 : 0.7}
+          style={[styles.iconButton, props.isMuted && styles.activeIcon]} 
+          onPress={props.onMute}
+          disabled={isConnecting}
+          activeOpacity={isConnecting ? 1 : 0.7}
         >
-          <Ionicons name={props.isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
+          <Ionicons 
+            name={props.isMuted ? "mic-off" : "mic"} 
+            size={24} 
+            color="#fff" 
+          />
         </TouchableOpacity>
         
         {!props.isVideoCallContext && !props.isVideoEnabled && (
           <TouchableOpacity 
-             style={[styles.iconButton, props.isSpeaker && styles.activeIcon]} 
-             onPress={props.onSpeaker}
-             disabled={isConnecting}
+            style={[styles.iconButton, props.isSpeaker && styles.activeIcon]} 
+            onPress={props.onSpeaker}
+            disabled={isConnecting}
+            activeOpacity={isConnecting ? 1 : 0.7}
           >
-            <Ionicons name={props.isSpeaker ? "volume-high" : "volume-medium"} size={24} color="#fff" />
+            <Ionicons 
+              name={props.isSpeaker ? "volume-high" : "volume-medium"} 
+              size={24} 
+              color="#fff" 
+            />
           </TouchableOpacity>
         )}
 
         <TouchableOpacity 
-           style={[styles.iconButton, props.isVideoEnabled && styles.activeIcon]} 
-           onPress={() => {
-              if (props.isVideoCallContext || props.isVideoEnabled) {
-                 props.onSwitchVideo?.(); // Simply toggle track enabled
-              } else if (!props.isVideoEnabled) {
-                 props.onUpgradeToVideo?.(); // Request RTCPeerConnection Renegotiation
-              }
-           }}
-           disabled={isConnecting}
+          style={[styles.iconButton, props.isVideoEnabled && styles.activeIcon]} 
+          onPress={() => {
+            if (props.isVideoCallContext || props.isVideoEnabled) {
+              props.onSwitchVideo?.();
+            } else if (!props.isVideoEnabled) {
+              props.onUpgradeToVideo?.();
+            }
+          }}
+          disabled={isConnecting}
+          activeOpacity={isConnecting ? 1 : 0.7}
         >
-          <Ionicons name={props.isVideoEnabled ? "videocam" : "videocam-off"} size={24} color="#fff" />
+          <Ionicons 
+            name={props.isVideoEnabled ? "videocam" : "videocam-off"} 
+            size={24} 
+            color="#fff" 
+          />
         </TouchableOpacity>
 
         {props.isVideoEnabled && (
-           <TouchableOpacity style={styles.iconButton} onPress={props.onSwitchCamera} disabled={isConnecting}>
-             <Ionicons name="camera-reverse" size={24} color="#fff" />
-           </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.iconButton} 
+            onPress={props.onSwitchCamera} 
+            disabled={isConnecting}
+            activeOpacity={isConnecting ? 1 : 0.7}
+          >
+            <Ionicons name="camera-reverse" size={24} color="#fff" />
+          </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={[styles.iconButton, styles.endButton]} onPress={props.onEnd}>
-          <Ionicons name="call" size={24} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+        <TouchableOpacity 
+          style={[styles.iconButton, styles.endButton]} 
+          onPress={props.onEnd}
+        >
+          <Ionicons 
+            name="call" 
+            size={24} 
+            color="#fff" 
+            style={{ transform: [{ rotate: '135deg' }] }} 
+          />
         </TouchableOpacity>
       </View>
     );
-  };
+  }, [props.status, props.isMuted, props.isSpeaker, props.isVideoEnabled, props.isVideoCallContext, isConnecting, props.onMute, props.onSpeaker, props.onSwitchVideo, props.onUpgradeToVideo, props.onSwitchCamera, props.onEnd]);
 
   return (
     <Modal visible={props.visible} animationType="fade" transparent={false}>
@@ -257,7 +306,7 @@ export default function CallScreen(props: CallScreenProps) {
                     </TouchableOpacity>
                  </View>
               </View>
-            ) : renderButtons()}
+            ) : renderButtons}
           </View>
         </SafeAreaView>
 

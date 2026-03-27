@@ -38,11 +38,15 @@ app.use(limiter);
 
 // ── Security: Stricter rate limiting for auth routes ─────────────────────────
 const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: { message: 'Too many login attempts, please try again later.' },
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // FIX: Increased from 10 to 20 to allow for signup attempts + retries
+    message: { message: 'Too many auth attempts, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => {
+        // FIX: Don't rate limit signup (only rate limit login for security)
+        return req.path === '/register';
+    }
 });
 
 // ── CORS ──────────────────────────────────────────────────────────────────────

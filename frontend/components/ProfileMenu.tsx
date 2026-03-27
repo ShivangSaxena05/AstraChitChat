@@ -6,6 +6,7 @@ import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSocket } from '@/contexts/SocketContext';
+import { post } from '@/services/api';
 
 interface ProfileMenuProps {
   visible: boolean;
@@ -13,6 +14,7 @@ interface ProfileMenuProps {
 }
 
 export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const { disconnect } = useSocket();
@@ -20,17 +22,17 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
 
   const handleSettings = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handlePrivacySecurity = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handleBlockedContacts = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handleLogout = () => {
@@ -43,27 +45,52 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
           text: 'Log Out',
           style: 'destructive',
           onPress: async () => {
+            setIsLoggingOut(true);
             try {
-              // Disconnect socket first
+              // Step 1: Call backend logout endpoint
+              const token = await AsyncStorage.getItem('token');
+              if (token) {
+                try {
+                  await post('/auth/logout', {});
+                } catch (error) {
+                  console.warn('[Logout] Backend logout failed, proceeding with local logout:', error);
+                }
+              }
+
+              // Step 2: Disconnect socket
               disconnect();
-              // Clear stored credentials
+
+              // Step 3: Clear stored credentials
               await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('userId');
+              await AsyncStorage.removeItem('userName');
+
+              // Step 4: Close menu
               onClose();
-              // Navigate to login screen
-              router.replace('/auth/login' as any);
+
+              // ✅ FIX 4.4: Correct navigation path and handle errors
+              setTimeout(() => {
+                try {
+                  router.replace('/auth/login' as any);
+                } catch (navError) {
+                  console.error('[Logout] Navigation error:', navError);
+                  // Fallback: try push if replace fails
+                  router.push('/auth/login' as any);
+                }
+              }, 300);
             } catch (error) {
-              Alert.alert('Error', 'Failed to log out');
+              console.error('[Logout] Logout error:', error);
+              Alert.alert('Error', 'Failed to log out. Please try again.');
+              setIsLoggingOut(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
   const handleOption = (title: string) => {
     onClose();
-    // Placeholder - extend with real nav/data
     console.log(`${title} tapped`);
   };
 

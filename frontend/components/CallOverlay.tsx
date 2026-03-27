@@ -32,15 +32,22 @@ export default function CallOverlay() {
 
   const [callDuration, setCallDuration] = useState(0);
 
-  // ✅ Single source: targetUser first, then incomingCall fallback
+  // ✅ SINGLE SOURCE: targetUser first, then incomingCall fallback
+  // HIGH FIX: Add defensive null checks and fallback values
   const displayUser =
     targetUser ||
     (incomingCall && {
-      username: incomingCall.callerUsername || "Unknown",
+      username: incomingCall.callerUsername || incomingCall.caller?.username || "Unknown",
       profilePicture:
-        incomingCall.callerProfilePicture || "https://i.pravatar.cc/300",
+        incomingCall.callerProfilePicture || incomingCall.caller?.profilePicture || "https://i.pravatar.cc/300",
     }) ||
     null;
+
+  // HIGH FIX: Ensure displayUser has required properties
+  const safeDisplayUser = displayUser ? {
+    username: displayUser.username || "Unknown",
+    profilePicture: displayUser.profilePicture || "https://i.pravatar.cc/300",
+  } : undefined;
 
   // Timer for active connected calls
   useEffect(() => {
@@ -71,15 +78,13 @@ export default function CallOverlay() {
     status = "connected";
   }
 
-  // Fixed duplicate declaration - use the single source displayUser defined above
-
   const isVisible = isCalling || !!incomingCall;
 
   return (
     <CallScreen
       visible={isVisible}
       status={status}
-      otherUser={displayUser}
+      otherUser={safeDisplayUser}
       localStream={localStream}
       remoteStream={remoteStream}
       isVideoEnabled={isVideoEnabled}

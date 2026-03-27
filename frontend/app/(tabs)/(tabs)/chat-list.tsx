@@ -1,32 +1,49 @@
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, Modal, StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+    Alert,
+    FlatList,
+    Image,
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
 
 // --- IMPORTS ---
 // Assuming these paths are correct for your project structure
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { get } from '@/services/api';
-import { useSocket } from '@/contexts/SocketContext';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { useSocket } from "@/contexts/SocketContext";
+import { get } from "@/services/api";
 
 // Import all required UI components for the header structure
-import SearchBarComponent from '@/components/SearchBarComponent';
-import StoriesReelsComponent from '@/components/StoriesReelsComponent';
-import TopHeaderComponent from '@/components/TopHeaderComponent';
-import OtherProfileScreen from './other-profile';
-
+import SearchBarComponent from "@/components/SearchBarComponent";
+import StoriesReelsComponent from "@/components/StoriesReelsComponent";
+import TopHeaderComponent from "@/components/TopHeaderComponent";
+import OtherProfileScreen from "./other-profile";
 
 // --- INTERFACE ---
 interface Chat {
   _id: string;
-  convoType?: 'direct' | 'group';
+  convoType?: "direct" | "group";
   title?: string;
   participants: {
     _id: string;
-    username: string;
-    profilePicture: string;
+    user: {
+      _id: string;
+      name: string;
+      username: string;
+      profilePicture: string;
+      isOnline?: boolean;
+      lastSeen?: string;
+    };
+    role: string;
+    joinedAt: string;
+    lastReadMsgId?: string;
   }[];
   lastMessage: {
     text: string;
@@ -34,9 +51,11 @@ interface Chat {
     sender?: {
       _id: string;
       username: string;
+      name: string;
+      profilePicture: string;
     };
   };
-  unreadCount: number;
+  unreadCount: number | { [userId: string]: number };
 }
 
 interface UserProfile {
@@ -53,23 +72,47 @@ interface UserProfile {
 
 // --- CHAT LIST SCREEN COMPONENT ---
 export default function ChatListScreen() {
-  const { conversations, setConversations, currentUserId: socketUserId } = useSocket();
+  // Helper function to get unread count based on type
+  const getUnreadCount = (
+    unreadCount: number | { [userId: string]: number } | undefined,
+    userId: string | null,
+  ): number => {
+    if (!unreadCount) return 0;
+    if (typeof unreadCount === "number") return unreadCount;
+    if (userId && typeof unreadCount === "object" && unreadCount[userId]) {
+      return unreadCount[userId];
+    }
+    return 0;
+  };
+
+  const {
+    conversations,
+    setConversations,
+    currentUserId: socketUserId,
+    isConnected,
+  } = useSocket();
   const chats = conversations as Chat[];
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const { showProfile } = useLocalSearchParams<{ showProfile: string }>();
 
   useEffect(() => {
     const initialize = async () => {
-      const userId = await AsyncStorage.getItem('userId');
+      const userId = await AsyncStorage.getItem("userId");
       setCurrentUserId(userId);
-      fetchChats();
+      // Only fetch if not already connected (SocketContext will fetch on connect)
+      if (!isConnected) {
+        fetchChats();
+      } else {
+        setLoading(false);
+      }
     };
     initialize();
-  }, []);
+  }, [isConnected]);
 
   useEffect(() => {
     if (showProfile) {
@@ -80,69 +123,112 @@ export default function ChatListScreen() {
 
   const fetchChats = async () => {
     try {
-      const data = await get('/chats'); // Assuming this endpoint exists
-      if (data) {
-        // Sort chats by most recent message First so the Chat list is correct initially
+      setError(null);
+      const data = await get("/chats");
+
+      if (data && Array.isArray(data)) {
+        // Sort chats by most recent message
         const sorted = data.sort((a: Chat, b: Chat) => {
-          const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
-          const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+          const aTime = a.lastMessage?.createdAt
+            ? new Date(a.lastMessage.createdAt).getTime()
+            : 0;
+          const bTime = b.lastMessage?.createdAt
+            ? new Date(b.lastMessage.createdAt).getTime()
+            : 0;
           return bTime - aTime;
         });
         setConversations(sorted);
+      } else {
+        setError("Invalid data format received from server");
       }
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to fetch chats');
+      let errorMsg = "Failed to fetch chats";
+
+      if (
+        error.code === "ERR_NETWORK" ||
+        error.message?.includes("ERR_NAME_NOT_RESOLVED")
+      ) {
+        errorMsg =
+          "Network error - Cannot reach server. Check your internet connection and API configuration.";
+      } else if (error.response?.status === 401) {
+        errorMsg = "Unauthorized - Please login again";
+      } else if (error.response?.status === 404) {
+        errorMsg = "API endpoint not found";
+      } else if (error.response?.data?.message) {
+        errorMsg = error.response.data.message;
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+
+      setError(errorMsg);
+      Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }
   };
 
   const renderChat = ({ item }: { item: Chat }) => {
-    const otherParticipant = item.participants.find(p => p._id !== currentUserId);
+    const otherParticipant = item.participants.find(
+      (p) => p._id !== currentUserId,
+    );
 
-    const isFromMe = String(item.lastMessage?.sender?._id) === String(currentUserId);
-    const isGroup = item.convoType === 'group';
-    
+    const isFromMe =
+      String(item.lastMessage?.sender?._id) === String(currentUserId);
+    const isGroup = item.convoType === "group";
+
     const formatLastMessage = () => {
-      if (!item.lastMessage?.text) return 'No messages yet';
+      if (!item.lastMessage?.text) return "No messages yet";
       if (!isFromMe && item.lastMessage?.sender && isGroup) {
         // Prefix with sender's username in group chats
-        return `${item.lastMessage.sender.username}: ${item.lastMessage.text}`; 
+        return `${item.lastMessage.sender.username}: ${item.lastMessage.text}`;
       }
       return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
     };
-    
-    // Determine Chat Title
-    const chatTitle = isGroup && item.title ? item.title : (otherParticipant?.username || 'Unknown');
-    const avatarUri = isGroup 
-      ? 'https://cdn-icons-png.flaticon.com/512/681/681494.png' // Reliable PNG group placeholder
-      : (otherParticipant?.profilePicture || 'https://i.pravatar.cc/150');
+
+    // Determine Chat Title - Access user data from nested structure
+    const chatTitle =
+      isGroup && item.title
+        ? item.title
+        : otherParticipant?.user?.username || "Unknown";
+    const avatarUri = isGroup
+      ? "https://cdn-icons-png.flaticon.com/512/681/681494.png" // Reliable PNG group placeholder
+      : otherParticipant?.user?.profilePicture || "https://i.pravatar.cc/150";
 
     return (
       <TouchableOpacity
         style={styles.chatItem}
-        onPress={() => router.push({
-          pathname: '/chat/detail',
-          params: {
-            chatId: item._id,
-            otherUserId: otherParticipant?._id || '',
-            otherUsername: otherParticipant?.username || ''
-          }
-        })}
+        onPress={() =>
+          router.push({
+            pathname: "/chat/detail",
+            params: {
+              chatId: item._id,
+              otherUserId: otherParticipant?.user?._id || "",
+              otherUsername: otherParticipant?.user?.username || "",
+            },
+          })
+        }
       >
-        <Image 
-          source={{ uri: avatarUri }} 
-          style={styles.avatar} 
-        />
+        <Image source={{ uri: avatarUri }} style={styles.avatar} />
         <View style={styles.chatContent}>
           <ThemedText type="subtitle">{chatTitle}</ThemedText>
-          <Text style={[styles.lastMessage, item.unreadCount > 0 && { color: '#fff', fontWeight: 'bold' }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.lastMessage,
+              getUnreadCount(item.unreadCount, currentUserId) > 0 && {
+                color: "#fff",
+                fontWeight: "bold",
+              },
+            ]}
+            numberOfLines={1}
+          >
             {formatLastMessage()}
           </Text>
         </View>
-        {item.unreadCount > 0 && (
+        {getUnreadCount(item.unreadCount, currentUserId) > 0 && (
           <View style={styles.unreadBadge}>
-            <Text style={styles.unreadText}>{item.unreadCount}</Text>
+            <Text style={styles.unreadText}>
+              {getUnreadCount(item.unreadCount, currentUserId)}
+            </Text>
           </View>
         )}
       </TouchableOpacity>
@@ -157,21 +243,42 @@ export default function ChatListScreen() {
         <StoriesReelsComponent />
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading chats...</Text>
+          <Text style={styles.connectionStatus}>
+            {isConnected ? "🟢 Connected" : "🔴 Connecting..."}
+          </Text>
+        </View>
+      </ThemedView>
+    );
+  }
+
+  if (error && chats.length === 0) {
+    return (
+      <ThemedView style={styles.container}>
+        <TopHeaderComponent />
+        <SearchBarComponent />
+        <StoriesReelsComponent />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>⚠️ Error: {error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setLoading(true);
+              fetchChats();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </ThemedView>
     );
   }
 
   const handlePlusPress = () => {
-    Alert.alert(
-      "New Chat",
-      "Choose chat type",
-      [
-        { text: "Direct Message", onPress: () => router.push('/chat/add') },
-        { text: "New Group", onPress: () => router.push('/create-group') },
-        { text: "Cancel", style: "cancel" }
-      ]
-    );
+    Alert.alert("New Chat", "Choose chat type", [
+      { text: "Direct Message", onPress: () => router.push("/chat/add") },
+      { text: "New Group", onPress: () => router.push("/create-group") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   const handleUserSelect = (userId: string) => {
@@ -179,20 +286,22 @@ export default function ChatListScreen() {
     setProfileModalVisible(true);
   };
 
-  const handleMessageFromProfile = (chatId: string, otherUserId: string, otherUsername: string) => {
+  const handleMessageFromProfile = (
+    chatId: string,
+    otherUserId: string,
+    otherUsername: string,
+  ) => {
     // setProfileModalVisible(false);
     // Navigate to the chat detail screen
     router.push({
-      pathname: '/chat/detail',
+      pathname: "/chat/detail",
       params: {
         chatId,
         otherUserId,
-        otherUsername
-      }
+        otherUsername,
+      },
     });
   };
-
-
 
   // --- MAIN RENDER ---
   return (
@@ -204,8 +313,13 @@ export default function ChatListScreen() {
 
       {chats.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No chats yet. Start your first chat!</Text>
-          <TouchableOpacity style={styles.plusButtonCenter} onPress={handlePlusPress}>
+          <Text style={styles.emptyText}>
+            No chats yet. Start your first chat!
+          </Text>
+          <TouchableOpacity
+            style={styles.plusButtonCenter}
+            onPress={handlePlusPress}
+          >
             <Ionicons name="add" size={48} color="#4ADDAE" />
           </TouchableOpacity>
         </View>
@@ -217,7 +331,10 @@ export default function ChatListScreen() {
             keyExtractor={(item) => item._id}
             showsVerticalScrollIndicator={false}
           />
-          <TouchableOpacity style={styles.plusButtonBottom} onPress={handlePlusPress}>
+          <TouchableOpacity
+            style={styles.plusButtonBottom}
+            onPress={handlePlusPress}
+          >
             <Ionicons name="add" size={24} color="white" />
           </TouchableOpacity>
         </View>
@@ -237,7 +354,10 @@ export default function ChatListScreen() {
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
           {selectedUserId && (
-            <OtherProfileScreen userId={selectedUserId} onMessage={handleMessageFromProfile} />
+            <OtherProfileScreen
+              userId={selectedUserId}
+              onMessage={handleMessageFromProfile}
+            />
           )}
         </View>
       </Modal>
@@ -249,98 +369,126 @@ export default function ChatListScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000', // Assuming a dark background
+    backgroundColor: "#000", // Assuming a dark background
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
-    color: 'white',
+    color: "white",
     fontSize: 16,
   },
+  connectionStatus: {
+    color: "#4ADDAE",
+    fontSize: 14,
+    marginTop: 8,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
+    color: "#FF6B6B",
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: "#4ADDAE",
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: "#000",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
   chatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: "#333",
   },
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
     marginRight: 12,
-    backgroundColor: '#333', // placeholder color
+    backgroundColor: "#333", // placeholder color
   },
   chatContent: {
     flex: 1,
   },
   lastMessage: {
-    color: '#666',
+    color: "#666",
     marginTop: 4,
   },
   unreadBadge: {
-    backgroundColor: '#4ADDAE',
+    backgroundColor: "#4ADDAE",
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   unreadText: {
-    color: '#000',
+    color: "#000",
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
+    color: "#666",
+    textAlign: "center",
     marginBottom: 20,
   },
   plusButtonCenter: {
-    alignSelf: 'center',
-    backgroundColor: '#000',
+    alignSelf: "center",
+    backgroundColor: "#000",
     borderRadius: 50,
     padding: 20,
     borderWidth: 2,
-    borderColor: '#4ADDAE',
+    borderColor: "#4ADDAE",
   },
   chatsContainer: {
     flex: 1,
   },
   plusButtonBottom: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 20,
     right: 20,
-    backgroundColor: '#4ADDAE',
+    backgroundColor: "#4ADDAE",
     borderRadius: 50,
     width: 56,
     height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     elevation: 5,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: "#000",
   },
   closeButton: {
-    position: 'absolute',
+    position: "absolute",
     top: 50,
     right: 20,
     zIndex: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 20,
     padding: 10,
   },

@@ -27,16 +27,50 @@ async function getChatMessages(req, res) {
   try {
     const { chatId } = req.params;
     const userId = req.user._id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = 50;
-    const skip = (page - 1) * limit;
+    const limit = parseInt(req.query.limit) || 50;
+    const beforeMessageId = req.query.beforeMessageId;
 
-    const messages = await Message.find({ chat: chatId })
+    // Validate chatId is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: 'Invalid chat ID' });
+    }
+
+    // Verify user is a member of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      'participants.user': userId
+    });
+    
+    if (!chat) {
+      return res.status(403).json({ message: 'Chat not found or access denied' });
+    }
+
+    // Build query based on cursor pagination
+    let query = { chat: chatId };
+    
+    if (beforeMessageId) {
+      // If loading more (scrolling up), get messages created BEFORE the oldest message
+      if (!mongoose.Types.ObjectId.isValid(beforeMessageId)) {
+        return res.status(400).json({ message: 'Invalid beforeMessageId' });
+      }
+      
+      const beforeMessage = await Message.findById(beforeMessageId);
+      if (beforeMessage) {
+        query.createdAt = { $lt: beforeMessage.createdAt };
+      }
+    }
+
+    // Fetch messages in descending order (newest first) so that newest messages appear at the bottom
+    // When loading more (scrolling up), this gives us older messages in reverse chronological order
+    const messages = await Message.find(query)
       .populate('sender', 'name username profilePicture')
       .populate('quotedMsgId', 'bodyText sender')
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    // Reverse to get chronological order for display
+    messages.reverse();
 
     // FIX: only add to readBy if user hasn't already read the message,
     // avoiding duplicate object entries that $addToSet can't deduplicate
@@ -49,9 +83,13 @@ async function getChatMessages(req, res) {
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
-    res.json(messages.reverse());
+    res.json({
+      messages: messages,
+      hasMore: messages.length === limit
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get messages', error: error.message });
+    console.error('getChatMessages error:', error);
+    res.status(500).json({ message: 'Failed to get messages', error: process.env.NODE_ENV === 'production' ? {} : error.message });
   }
 }
 
@@ -125,7 +163,7 @@ async function searchChats(req, res) {
 
     const chats = await Chat.find({
       'participants.user': userId,
-      chatName: { $regex: query, $options: 'i' },
+      title: { $regex: query, $options: 'i' },
     }).populate('participants.user', 'name username profilePicture');
 
     res.json(chats);
@@ -401,7 +439,7 @@ async function createGroupChat(req, res) {
 
     const chat = new Chat({
       convoType: 'group',
-      chatName: name,
+      title: name,
       participants: [
         { user: creatorId, role: 'admin', joinedAt: new Date() },
         ...participants.map(id => ({

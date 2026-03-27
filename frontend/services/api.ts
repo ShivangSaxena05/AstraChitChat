@@ -1,6 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-import { API_URL as BASE_API_URL } from './config';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios, { AxiosError } from "axios";
+import { API_URL as BASE_API_URL } from "./config";
 
 // Use centralized API_URL from config
 const API_URL = BASE_API_URL;
@@ -8,6 +8,7 @@ const API_URL = BASE_API_URL;
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 15000, // 15 second timeout
   // Do NOT hardcode Content-Type here.
   // Axios will auto-set 'multipart/form-data' for FormData
   // and 'application/json' for plain JS objects.
@@ -16,26 +17,22 @@ const api = axios.create({
 // Add request interceptor to include JWT token
 api.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('token');
-    console.log('Token from storage:', token);
+    const token = await AsyncStorage.getItem("token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      console.log('Authorization header set');
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
 // Add response interceptor for better error handling
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    console.error('API Error:', error);
-    console.error('Error response:', error.response);
-    console.error('Error config:', error.config);
+  (error: AxiosError) => {
+    // Error handling without verbose logging in production
     return Promise.reject(error);
-  }
+  },
 );
 
 // Generic functions for authenticated requests

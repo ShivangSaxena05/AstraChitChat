@@ -1,52 +1,53 @@
-import React, { useState, useEffect } from 'react';
-import { Platform } from 'react-native';
-import CallScreen from './CallScreen';
-import { useCall } from '@/contexts/CallContext';
-import { useSocket } from '@/contexts/SocketContext';
-
+import { useCall } from "@/contexts/CallContext";
+import { useSocket } from "@/contexts/SocketContext";
+import React, { useEffect, useState } from "react";
+import CallScreen from "./CallScreen";
 
 export default function CallOverlay() {
-  const { 
-    isCalling, 
-    isConnected, 
-    incomingCall, 
+  const {
+    isCalling,
+    isConnected,
+    incomingCall,
     targetUser,
     localStream,
     remoteStream,
     isVideoEnabled,
-    isMuted, 
+    isMuted,
     isSpeaker,
     videoUpgradeRequest,
     isVideoUpgradePending,
-    acceptCall, 
-    declineCall, 
-    endCall, 
-    toggleMute, 
+    acceptCall,
+    declineCall,
+    endCall,
+    toggleMute,
     toggleSpeaker,
     toggleVideo,
     upgradeToVideo,
     acceptVideoUpgrade,
     declineVideoUpgrade,
-    switchCamera
+    switchCamera,
   } = useCall();
-  
-  const { socket } = useSocket();
-  const currentUserId = socket?.currentUserId;  // ✅ From SocketContext - no AsyncStorage
-  
+
+  const { socket, currentUserId } = useSocket();
+
   const [callDuration, setCallDuration] = useState(0);
-  
+
   // ✅ Single source: targetUser first, then incomingCall fallback
-  const displayUser = targetUser || (incomingCall && {
-    username: incomingCall.callerUsername || 'Unknown',
-    profilePicture: incomingCall.callerProfilePicture || 'https://i.pravatar.cc/300'
-  }) || null;
+  const displayUser =
+    targetUser ||
+    (incomingCall && {
+      username: incomingCall.callerUsername || "Unknown",
+      profilePicture:
+        incomingCall.callerProfilePicture || "https://i.pravatar.cc/300",
+    }) ||
+    null;
 
   // Timer for active connected calls
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (isCalling && isConnected && !incomingCall) {
       interval = setInterval(() => {
-        setCallDuration(prev => prev + 1);
+        setCallDuration((prev) => prev + 1);
       }, 1000);
     } else {
       setCallDuration(0);
@@ -56,26 +57,18 @@ export default function CallOverlay() {
     };
   }, [isCalling, isConnected, incomingCall]);
 
-
-
-  // Simplified: Use targetUser only, let displayUser fallback handle rest
-  useEffect(() => {
-    if (targetUser) {
-      setOtherUser(targetUser);
-    }
-
-    
-  }, [targetUser]);
+  // ✅ REMOVED: Redundant useEffect that called undefined setOtherUser()
+  // displayUser variable above correctly handles all fallback logic
 
   // Determine Call Status
-  let status: 'incoming' | 'outgoing' | 'connecting' | 'connected' = 'outgoing';
-  
+  let status: "incoming" | "outgoing" | "connecting" | "connected" = "outgoing";
+
   if (incomingCall) {
-     status = 'incoming';
+    status = "incoming";
   } else if (isCalling && !isConnected) {
-     status = 'connecting';
+    status = "connecting";
   } else if (isCalling && isConnected) {
-     status = 'connected';
+    status = "connected";
   }
 
   // Fixed duplicate declaration - use the single source displayUser defined above
@@ -109,4 +102,3 @@ export default function CallOverlay() {
     />
   );
 }
-

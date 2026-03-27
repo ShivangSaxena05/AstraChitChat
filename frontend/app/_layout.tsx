@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -18,6 +18,8 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [isLoading, setIsLoading] = useState(true);
+  const [initialRoute, setInitialRoute] = useState<'(tabs)' | 'auth/login'>('(tabs)');
+  const router = useRouter();
 
   useEffect(() => {
     checkAuthStatus();
@@ -25,17 +27,28 @@ export default function RootLayout() {
 
   const checkAuthStatus = async () => {
     try {
-      // Small delay just to ensure the layout has time to mount correctly 
-      // without white flashing. Auth routing is handled by (tabs)/_layout.tsx 
-      // and explicit redirects in auth pages.
-      setIsLoading(false);
+      // Check if user has a valid token stored
+      const token = await AsyncStorage.getItem('token');
+      
+      if (token) {
+        // User is logged in
+        setInitialRoute('(tabs)');
+      } else {
+        // User is not logged in
+        setInitialRoute('auth/login');
+      }
     } catch (error) {
-      console.error('Error in layout init:', error);
-      setIsLoading(false);
+      console.error('Error checking auth status:', error);
+      setInitialRoute('auth/login');
+    } finally {
+      // Add a small delay to show splash screen nicely
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 500);
     }
   };
 
-  // Show loading screen while checking auth status
+  // Show splash screen while checking auth status
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -49,7 +62,15 @@ export default function RootLayout() {
       <SocketProvider>
         <CallProvider>
           <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
+            {initialRoute === '(tabs)' ? (
+              <Stack.Screen 
+                name="(tabs)"
+              />
+            ) : (
+              <Stack.Screen 
+                name="auth/login"
+              />
+            )}
             <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
             <Stack.Screen name="auth/login" />
             <Stack.Screen name="auth/signup" />

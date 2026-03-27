@@ -1,21 +1,53 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
+import { Stack, useRouter, useFocusEffect } from 'expo-router';
+import React, { useEffect, useRef } from 'react';
+import { StyleSheet, AppState, AppStateStatus } from 'react-native';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
+  const appState = useRef(AppState.currentState);
 
+  // Check auth status on component mount
   useEffect(() => {
-    checkAuthStatus();
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
-  const checkAuthStatus = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) {
+  // Also check auth status when screen is focused (when returning from other screens)
+  useFocusEffect(
+    React.useCallback(() => {
+      verifyAuthStatus();
+    }, [])
+  );
+
+  const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+    // If the app is coming to foreground from background/inactive state
+    if (
+      appState.current.match(/inactive|background/) &&
+      nextAppState === 'active'
+    ) {
+      // Verify auth status when app resumes
+      await verifyAuthStatus();
+    }
+
+    appState.current = nextAppState;
+  };
+
+  const verifyAuthStatus = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        // If token is missing, redirect to login
+        router.replace('/auth/login');
+      }
+    } catch (error) {
+      console.error('Error verifying auth status:', error);
       router.replace('/auth/login');
     }
   };

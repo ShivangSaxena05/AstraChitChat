@@ -27,9 +27,8 @@ async function getChatMessages(req, res) {
   try {
     const { chatId } = req.params;
     const userId = req.user._id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = 50;
-    const skip = (page - 1) * limit;
+    const limit = parseInt(req.query.limit) || 50;
+    const beforeMessageId = req.query.beforeMessageId;
 
     // Validate chatId is a valid MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(chatId)) {
@@ -46,14 +45,32 @@ async function getChatMessages(req, res) {
       return res.status(403).json({ message: 'Chat not found or access denied' });
     }
 
-    // Fetch messages in ascending order for proper chronological display
-    const messages = await Message.find({ chat: chatId })
+    // Build query based on cursor pagination
+    let query = { chat: chatId };
+    
+    if (beforeMessageId) {
+      // If loading more (scrolling up), get messages created BEFORE the oldest message
+      if (!mongoose.Types.ObjectId.isValid(beforeMessageId)) {
+        return res.status(400).json({ message: 'Invalid beforeMessageId' });
+      }
+      
+      const beforeMessage = await Message.findById(beforeMessageId);
+      if (beforeMessage) {
+        query.createdAt = { $lt: beforeMessage.createdAt };
+      }
+    }
+
+    // Fetch messages in descending order (newest first) so that newest messages appear at the bottom
+    // When loading more (scrolling up), this gives us older messages in reverse chronological order
+    const messages = await Message.find(query)
       .populate('sender', 'name username profilePicture')
       .populate('quotedMsgId', 'bodyText sender')
-      .sort({ createdAt: 1 })
-      .skip(skip)
+      .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
+
+    // Reverse to get chronological order for display
+    messages.reverse();
 
     // FIX: only add to readBy if user hasn't already read the message,
     // avoiding duplicate object entries that $addToSet can't deduplicate
@@ -66,7 +83,10 @@ async function getChatMessages(req, res) {
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
-    res.json(messages);
+    res.json({
+      messages: messages,
+      hasMore: messages.length === limit
+    });
   } catch (error) {
     console.error('getChatMessages error:', error);
     res.status(500).json({ message: 'Failed to get messages', error: process.env.NODE_ENV === 'production' ? {} : error.message });

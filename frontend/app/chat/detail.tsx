@@ -806,11 +806,11 @@ export default function ChatDetailScreen() {
         data.hasMore !== false && (data.messages?.length || 0) >= 30;
       setHasMore(newHasMore);
 
+      // oldestMessageId should be the first message in the array (chronologically oldest)
       const newOldestId =
-        data.oldestMessageId ||
-        (processedMessages.length > 0
-          ? processedMessages[processedMessages.length - 1]._id
-          : null);
+        processedMessages.length > 0
+          ? processedMessages[0]._id  // First message is oldest in chronological order
+          : oldestMessageId;  // Keep previous if no messages returned
       setOldestMessageId(newOldestId);
 
       if (!isLoadMore && chatId && currentUserId) {

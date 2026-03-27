@@ -4,7 +4,7 @@ import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfilePictureModal from '@/components/ProfilePictureModal';
 import ExpandableBio from '@/components/ExpandableBio';
@@ -216,21 +216,34 @@ export default function ProfileScreen() {
       : `Check out @${user.username} on Astra!\n\n${user.bio ? `"${user.bio.substring(0, 100)}${user.bio.length > 100 ? '...' : ''}"\n\n` : ''}${profileUrl}`;
 
     try {
-      const result = await Share.share({
-        message: shareMessage,
-        url: profileUrl,
-        title: `${user.name || user.username}'s Profile`,
-      });
+      // Check if we're on web and Web Share API is available
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({
+          title: `${user.name || user.username}'s Profile`,
+          text: shareMessage,
+          url: profileUrl,
+        });
+      } else if (Platform.OS === 'web') {
+        // Fallback for web browsers without Share API - copy to clipboard
+        await navigator.clipboard.writeText(`${shareMessage}`);
+        Alert.alert('Success', 'Profile link copied to clipboard!');
+      } else {
+        // Native Share API
+        const result = await Share.share({
+          message: shareMessage,
+          url: profileUrl,
+          title: `${user.name || user.username}'s Profile`,
+        });
 
-      if (result.action === Share.sharedAction) {
-        if (result.activityType) {
-          console.log('Shared with activity type:', result.activityType);
+        if (result.action === Share.sharedAction) {
+          if (result.activityType) {
+            console.log('Shared with activity type:', result.activityType);
+          }
         }
       }
     } catch (error: any) {
-      if (error.message !== 'User did not share') {
+      if (error.message !== 'User did not share' && error.name !== 'AbortError') {
         console.error('Share error:', error);
-        Alert.alert('Error', 'Failed to share profile. Please try again.');
       }
     }
   };

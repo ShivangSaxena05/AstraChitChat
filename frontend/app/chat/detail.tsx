@@ -339,6 +339,8 @@ export default function ChatDetailScreen() {
   });
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [otherUserProfilePicture, setOtherUserProfilePicture] = useState("");
+  const [isFollowing, setIsFollowing] = useState(true); // ✅ FIX: Follow check
+  const [followCheckLoading, setFollowCheckLoading] = useState(false); // ✅ FIX: Loading state
 
   // Call Gesture State (Reanimated)
   const [isHoldingTop, setIsHoldingTop] = useState(false);
@@ -476,6 +478,8 @@ export default function ChatDetailScreen() {
       setOtherUserProfilePicture(
         data.profilePicture || data.profile?.profilePicture || "",
       );
+      // ✅ FIX: Check if current user follows this user
+      setIsFollowing(data.isFollowing || false);
     } catch (error) {
       // Fallback: try the old endpoint
       try {
@@ -1446,39 +1450,57 @@ export default function ChatDetailScreen() {
             </View>
           )}
 
+          {/* ✅ FIX: Show "Follow to start conversation" message if not following */}
+          {!isFollowing && (
+            <View style={styles.followPromptContainer}>
+              <Ionicons name="information-circle" size={20} color="#4ADDAE" />
+              <Text style={styles.followPromptText}>
+                Follow {otherUsername} to start a conversation
+              </Text>
+            </View>
+          )}
+
           {/* Input row with TextInput and Send button */}
           <View style={styles.inputRow}>
             <TextInput
               ref={inputRef}
-              style={styles.input}
+              style={[
+                styles.input,
+                !isFollowing && styles.inputDisabled  // ✅ FIX: Gray out input if not following
+              ]}
               value={newMessage}
-              onChangeText={handleTyping}
+              onChangeText={isFollowing ? handleTyping : undefined}  // ✅ FIX: Disable input if not following
               placeholder={
-                quotedMessage ? "Write your reply..." : "Type a message..."
+                !isFollowing
+                  ? "Follow to start chatting..."
+                  : quotedMessage
+                    ? "Write your reply..."
+                    : "Type a message..."
               }
               placeholderTextColor="#999"
               multiline={false}
               blurOnSubmit={false}
-              onSubmitEditing={sendMessage}
+              onSubmitEditing={isFollowing ? sendMessage : undefined}  // ✅ FIX: Disable sending if not following
               returnKeyType="send"
+              editable={isFollowing}  // ✅ FIX: Disable editing if not following
             />
             <TouchableOpacity
               style={[
                 styles.sendButton,
-                (!socketConnected || !newMessage.trim()) &&
+                (!socketConnected || !newMessage.trim() || !isFollowing) &&
                   styles.sendButtonDisabled,
               ]}
               onPress={sendMessage}
-              disabled={!socketConnected || !newMessage.trim()}
+              disabled={!socketConnected || !newMessage.trim() || !isFollowing}
             >
               <Text
                 style={[
                   styles.sendButtonText,
-                  (!socketConnected || !newMessage.trim()) &&
+                  (!socketConnected || !newMessage.trim() || !isFollowing) &&
                     styles.sendButtonTextDisabled,
                 ]}
               >
-                {socketConnected ? "Send" : "Connecting..."}
+                {!isFollowing ? "Follow" : socketConnected ? "Send" : "Connecting..."}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1758,6 +1780,30 @@ const styles = StyleSheet.create({
   },
   replyPreviewText: { color: "#aaa", fontSize: 14 },
   cancelReplyButton: { padding: 4 },
+  // ✅ FIX: Follow prompt styles
+  followPromptContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(74, 221, 174, 0.1)",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#4ADDAE",
+  },
+  followPromptText: {
+    color: "#4ADDAE",
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 8,
+    flex: 1,
+  },
+  // ✅ FIX: Disabled input style
+  inputDisabled: {
+    opacity: 0.5,
+    backgroundColor: "#1a2332",
+  },
   quotedMessageContainer: {
     padding: 8,
     borderLeftWidth: 3,

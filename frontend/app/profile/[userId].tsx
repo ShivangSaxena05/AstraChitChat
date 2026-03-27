@@ -5,7 +5,7 @@ import ProfileSkeleton from '@/components/ProfileSkeleton';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { get } from '@/services/api';
+import { get, post, del } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import PostCard from '@/components/PostCard';
 import ProfileMenu from '@/components/ProfileMenu';
@@ -36,6 +36,7 @@ interface Post {
   mediaType: string;
   caption: string;
   user: {
+    _id: string;
     username: string;
     profilePicture: string;
   };
@@ -56,6 +57,8 @@ export default function UserProfileScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isSkeleton, setIsSkeleton] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
 
   const toggleMenu = () => setMenuVisible(!menuVisible);
 
@@ -69,6 +72,7 @@ export default function UserProfileScreen() {
       setLoading(true);
       const data = await get(`/profile/${userId}`);
       setProfile(data);
+      setIsFollowing(data.isFollowing || false);
       setOnlineStatus(data.isOnline || onlineUsers.has(userId));
 
       // Fetch user's posts
@@ -87,7 +91,32 @@ export default function UserProfileScreen() {
     fetchProfile().finally(() => setRefreshing(false));
   }, [fetchProfile]);
 
-  // Listen for online status changes (assumes SocketContext emits updates)
+  // Handle follow/unfollow
+  const handleFollowToggle = async () => {
+    if (!userId) return;
+    try {
+      setFollowLoading(true);
+      if (isFollowing) {
+        // Unfollow
+        await del(`/follow/${userId}`);
+        setIsFollowing(false);
+        Alert.alert('Unfollowed', `You unfollowed ${profile?.username}`);
+      } else {
+        // Follow
+        await post(`/follow/${userId}`, {});
+        setIsFollowing(true);
+        Alert.alert('Following', `You are now following ${profile?.username}`);
+      }
+      // Refresh profile to update stats
+      fetchProfile();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to update follow status');
+    } finally {
+      setFollowLoading(false);
+    }
+  };
+
+  // Listen for online status changes
   useEffect(() => {
     if (userId && onlineUsers.has(userId)) {
       setOnlineStatus(true);
@@ -126,11 +155,23 @@ export default function UserProfileScreen() {
     );
   }
 
-  // Edge Cases
-  if (profile.isBlocked) {
+  if (!profile) {
     return (
       <ThemedView style={styles.centerContainer}>
-        <Ionicons name="lock-closed-outline" size={64} color="#666" />
+        <Ionicons name="person" size={64} color="#666" />
+        <ThemedText style={styles.errorTitle}>Profile Not Found</ThemedText>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchProfile}>
+          <ThemedText style={styles.retryText}>Retry</ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+    );
+  }
+
+  // Edge Cases
+  if (profile?.isBlocked) {
+    return (
+      <ThemedView style={styles.centerContainer}>
+        <Ionicons name="lock-closed" size={64} color="#666" />
         <ThemedText style={styles.errorTitle}>Blocked User</ThemedText>
         <ThemedText style={styles.errorText}>You have blocked this user. Their profile is not visible.</ThemedText>
         <TouchableOpacity style={styles.retryButton} onPress={fetchProfile}>
@@ -140,10 +181,10 @@ export default function UserProfileScreen() {
     );
   }
 
-  if (profile.isPrivate && !profile.isFollowing) {
+  if (profile?.isPrivate && !profile?.isFollowing) {
     return (
       <ThemedView style={styles.centerContainer}>
-        <Ionicons name="lock-outline" size={64} color="#007AFF" />
+        <Ionicons name="lock-closed" size={64} color="#007AFF" />
         <ThemedText style={styles.errorTitle}>Private Account</ThemedText>
         <ThemedText style={styles.errorText}>This account is private. Follow to see their posts.</ThemedText>
         <TouchableOpacity style={styles.retryButton} onPress={fetchProfile}>
@@ -168,43 +209,68 @@ export default function UserProfileScreen() {
   return (
     <ThemedView style={styles.container}>
       {/* Cover Photo */}
-      {profile.coverPhoto && (
+      {profile?.coverPhoto && (
         <Image source={{ uri: profile.coverPhoto }} style={styles.coverPhoto} />
       )}
 
       {/* Profile Header */}
       <View style={styles.header}>
         <View style={styles.avatarContainer}>
-          <Image source={{ uri: profile.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
+          <Image source={{ uri: profile?.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
           <View style={[
             styles.statusDot,
             onlineStatus ? styles.onlineDot : styles.offlineDot
           ]} />
         </View>
         <View style={styles.infoContainer}>
-          <ThemedText type="title" style={styles.username}>@{profile.username}</ThemedText>
-          <ThemedText style={styles.name}>{profile.name}</ThemedText>
-          {profile.bio && <ThemedText style={styles.bio}>{profile.bio}</ThemedText>}
+          <ThemedText type="title" style={styles.username}>@{profile?.username}</ThemedText>
+          <ThemedText style={styles.name}>{profile?.name}</ThemedText>
+          {profile?.bio && <ThemedText style={styles.bio}>{profile.bio}</ThemedText>}
           <View style={styles.statsRow}>
             <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile.stats.posts}</ThemedText>
+              <ThemedText type="subtitle">{profile?.stats.posts}</ThemedText>
               <ThemedText>Posts</ThemedText>
             </View>
             <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile.stats.followers}</ThemedText>
+              <ThemedText type="subtitle">{profile?.stats.followers}</ThemedText>
               <ThemedText>Followers</ThemedText>
             </View>
             <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile.stats.following}</ThemedText>
+              <ThemedText type="subtitle">{profile?.stats.following}</ThemedText>
               <ThemedText>Following</ThemedText>
             </View>
           </View>
         </View>
-        {/* Message Button */}
-        <TouchableOpacity style={styles.messageButton} onPress={handleMessagePress}>
-          <Ionicons name="send" size={20} color="#fff" />
-          <ThemedText style={styles.messageButtonText}>Message</ThemedText>
-        </TouchableOpacity>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          {/* Follow/Unfollow Button */}
+          <TouchableOpacity
+            style={[
+              styles.followButton,
+              isFollowing && styles.followButtonActive
+            ]}
+            onPress={handleFollowToggle}
+            disabled={followLoading}
+          >
+            {followLoading ? (
+              <ActivityIndicator size="small" color={isFollowing ? "#007AFF" : "#fff"} />
+            ) : (
+              <>
+                <Ionicons name={isFollowing ? "person-remove" : "person-add"} size={16} color={isFollowing ? "#007AFF" : "#fff"} />
+                <ThemedText style={[styles.followButtonText, isFollowing && styles.followButtonTextActive]}>
+                  {isFollowing ? 'Following' : 'Follow'}
+                </ThemedText>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Message Button */}
+          <TouchableOpacity style={styles.messageButton} onPress={handleMessagePress}>
+            <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+            <ThemedText style={styles.messageButtonText}>Message</ThemedText>
+          </TouchableOpacity>
+        </View>
         
         {/* Top-right Menu Button */}
         <TouchableOpacity style={styles.menuButton} onPress={toggleMenu}>
@@ -306,18 +372,50 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+  actionButtons: {
+    flexDirection: 'column',
+    gap: 8,
+    justifyContent: 'flex-end',
+  },
+  followButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 40,
+  },
+  followButtonActive: {
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  followButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  followButtonTextActive: {
+    color: '#007AFF',
+  },
   messageButton: {
     flexDirection: 'row',
     backgroundColor: '#007AFF',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 20,
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 40,
   },
   messageButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
+    fontWeight: '600',
+    fontSize: 14,
   },
   postsList: {
     padding: 16,

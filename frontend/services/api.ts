@@ -67,6 +67,11 @@ api.interceptors.response.use(
     }
 
     if (status === 404) {
+      console.warn('[API] 404 Not Found:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        originalUrl: error.response?.config?.url,
+      });
       return Promise.reject({
         type: 'NOT_FOUND',
         message: 'Resource not found.',

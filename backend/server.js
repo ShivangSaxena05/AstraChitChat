@@ -301,10 +301,10 @@ io.on('connection', (socket) => {
             // Emit conversationUpdated to both sender and receiver
             // so both users' chat lists update in real time
             const conversationUpdate = {
-                conversationId: rawData.chat,
+                conversationId: String(rawData.chat),  // ✅ FIX: Ensure conversationId is a string
                 lastMessage: lastMessageForSocket,
                 updatedAt: new Date().toISOString(),
-                senderId: rawData.sender,
+                senderId: String(rawData.sender),  // ✅ FIX: Ensure senderId is a string
                 isNewMessage: true,
             };
 
@@ -508,6 +508,18 @@ io.on('connection', (socket) => {
             }
         }
     });
+});
+
+// ── 404 Handler ──────────────────────────────────────────────────────────────
+// ✅ FIX: Catch undefined routes before error handler
+app.use((req, res, next) => {
+    if (!res.headersSent) {
+        res.status(404).json({ 
+            message: 'Route not found', 
+            path: req.originalUrl,
+            method: req.method,
+        });
+    }
 });
 
 // ── Global Error Handler ──────────────────────────────────────────────────────

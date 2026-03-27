@@ -129,46 +129,83 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     return !isNaN(date.getTime());
   };
 
-  // ✅ FIX 2.3: Comprehensive conversation validation
+  // ✅ FIX 2.3: Comprehensive conversation validation with better error handling
   const validateConversationUpdate = (update: any): update is ConversationUpdate => {
-    if (!update || typeof update !== 'object') return false;
+    if (!update || typeof update !== 'object') {
+      console.warn('[Socket] Validation failed: update is not an object');
+      return false;
+    }
     
+    // Check conversationId
     if (typeof update.conversationId !== 'string' || !update.conversationId.trim()) {
+      console.warn('[Socket] Validation failed: invalid conversationId:', update.conversationId);
       return false;
     }
 
+    // Check lastMessage exists and is an object
     if (!update.lastMessage || typeof update.lastMessage !== 'object') {
+      console.warn('[Socket] Validation failed: lastMessage missing or invalid:', update.lastMessage);
       return false;
     }
 
-    if (typeof update.lastMessage.text !== 'string' || update.lastMessage.text.length === 0) {
+    // Check text - allow empty strings for attachments
+    const text = update.lastMessage.text;
+    if (typeof text !== 'string') {
+      console.warn('[Socket] Validation failed: lastMessage.text is not a string:', text);
       return false;
     }
 
-    if (update.lastMessage.text.length > 10000) {
-      return false; // Prevent oversized payloads
-    }
-
-    // Validate createdAt is valid ISO date
-    if (!update.lastMessage.createdAt || !isValidISODate(update.lastMessage.createdAt)) {
+    if (text.length > 10000) {
+      console.warn('[Socket] Validation failed: text too long');
       return false;
     }
 
-    // Validate sender object
+    // Check createdAt - be lenient with date formats
+    const createdAt = update.lastMessage.createdAt;
+    if (!createdAt) {
+      console.warn('[Socket] Validation failed: createdAt missing');
+      return false;
+    }
+    
+    if (!isValidISODate(createdAt)) {
+      console.warn('[Socket] Validation failed: invalid createdAt format:', createdAt);
+      return false;
+    }
+
+    // Check sender object
     if (!update.lastMessage.sender || typeof update.lastMessage.sender !== 'object') {
+      console.warn('[Socket] Validation failed: sender missing or invalid:', update.lastMessage.sender);
       return false;
     }
 
     const sender = update.lastMessage.sender;
-    if (typeof sender._id !== 'string' || !sender._id.trim()) return false;
-    if (typeof sender.username !== 'string' || !sender.username.trim()) return false;
-    if (typeof sender.profilePicture !== 'string') return false;
+    if (!sender._id || typeof sender._id !== 'string') {
+      console.warn('[Socket] Validation failed: sender._id invalid:', sender._id);
+      return false;
+    }
+    if (typeof sender.username !== 'string') {
+      console.warn('[Socket] Validation failed: sender.username invalid:', sender.username);
+      return false;
+    }
+    if (typeof sender.profilePicture !== 'string') {
+      console.warn('[Socket] Validation failed: sender.profilePicture invalid:', sender.profilePicture);
+      return false;
+    }
 
+    // Check senderId
     if (typeof update.senderId !== 'string' || !update.senderId.trim()) {
+      console.warn('[Socket] Validation failed: invalid senderId:', update.senderId);
+      return false;
+    }
+
+    // Check updatedAt
+    if (!update.updatedAt) {
+      console.warn('[Socket] Validation failed: updatedAt missing');
       return false;
     }
 
     if (!isValidISODate(update.updatedAt)) {
+      console.warn('[Socket] Validation failed: invalid updatedAt format:', update.updatedAt);
       return false;
     }
 
@@ -190,7 +227,13 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
   const updateConversation = useCallback((rawUpdate: any) => {
     if (!validateConversationUpdate(rawUpdate)) {
-      console.warn('[Socket] Invalid conversation update received:', rawUpdate);
+      console.warn('[Socket] Invalid conversation update received:', {
+        received: rawUpdate,
+        type: typeof rawUpdate,
+        keys: rawUpdate ? Object.keys(rawUpdate) : 'null',
+        lastMessageKeys: rawUpdate?.lastMessage ? Object.keys(rawUpdate.lastMessage) : 'none',
+        senderKeys: rawUpdate?.lastMessage?.sender ? Object.keys(rawUpdate.lastMessage.sender) : 'none',
+      });
       return;
     }
 

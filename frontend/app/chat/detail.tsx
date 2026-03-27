@@ -196,7 +196,7 @@ const MessageItem = memo(
                       ? "📷 Photo"
                       : message.quotedMessage.msgType === "video"
                         ? "🎥 Video"
-                        : message.quotedMessage.bodyText || "Message"
+                        : sanitizeMessage(message.quotedMessage.bodyText || "Message")
                     : "Original message unavailable"}
                 </Text>
               </TouchableOpacity>
@@ -394,6 +394,8 @@ export default function ChatDetailScreen() {
     const interval = setInterval(() => {
       if (messageIdsRef.current.size > 1000) {
         messageIdsRef.current.clear();
+        // ✅ FIX: Also clear retry attempts to prevent memory leak
+        retryAttempts.current.clear();
       }
     }, 30000);
     return () => clearInterval(interval);

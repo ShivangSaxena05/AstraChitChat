@@ -216,17 +216,11 @@ export default function ProfileScreen() {
       : `Check out @${user.username} on Astra!\n\n${user.bio ? `"${user.bio.substring(0, 100)}${user.bio.length > 100 ? '...' : ''}"\n\n` : ''}${profileUrl}`;
 
     try {
-      const result = await Share.share(
-        {
-          message: shareMessage,
-          url: profileUrl,
-          title: `${user.name || user.username}'s Profile`,
-        },
-        {
-          dialogTitle: 'Share Profile',
-          subject: `Check out ${user.name || user.username} on Astra!`,
-        }
-      );
+      const result = await Share.share({
+        message: shareMessage,
+        url: profileUrl,
+        title: `${user.name || user.username}'s Profile`,
+      });
 
       if (result.action === Share.sharedAction) {
         if (result.activityType) {
@@ -235,6 +229,7 @@ export default function ProfileScreen() {
       }
     } catch (error: any) {
       if (error.message !== 'User did not share') {
+        console.error('Share error:', error);
         Alert.alert('Error', 'Failed to share profile. Please try again.');
       }
     }

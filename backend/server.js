@@ -51,9 +51,46 @@ const authLimiter = rateLimit({
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 // ✅ FIX: Restrict to your frontend domain instead of allowing all origins
+const allowedOrigins = [
+    'http://localhost:8081',
+    'http://localhost:8082',
+    'http://localhost:3000',
+    'exp://localhost:8081',
+];
+
+// Add environment-configured origins
+if (process.env.CLIENT_URL) {
+    allowedOrigins.push(process.env.CLIENT_URL);
+}
+if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:8081',
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('CORS not allowed'), false);
+        }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// ── Explicit OPTIONS handler for preflight requests ──────────────────────────
+app.options('*', cors({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('CORS not allowed'), false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(express.json({ limit: '10mb' }));

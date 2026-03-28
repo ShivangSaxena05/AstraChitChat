@@ -46,9 +46,15 @@ interface Post {
 }
 
 export default function UserProfileScreen() {
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const params = useLocalSearchParams<{ userId: string }>();
+  const userId = params?.userId as string;
   const router = useRouter();
   const { currentUserId, onlineUsers } = useSocket();
+
+  useEffect(() => {
+    console.log('Profile Screen - Received userId:', userId);
+    console.log('Profile Screen - All params:', params);
+  }, [userId, params]);
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -67,24 +73,48 @@ export default function UserProfileScreen() {
     // Layout animation for smooth data update
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
-    if (!userId) return;
+    if (!userId) {
+      console.error('No userId provided');
+      setLoading(false);
+      setIsSkeleton(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      const data = await get(`/profile/${userId}`);
+      // Try multiple endpoints to fetch profile
+      let data;
+      try {
+        data = await get(`/profile/${userId}`);
+      } catch (error) {
+        // Fallback to user endpoint
+        data = await get(`/users/${userId}`);
+      }
+
+      if (!data) {
+        throw new Error('Profile data not available');
+      }
+
       setProfile(data);
       setIsFollowing(data.isFollowing || false);
       setOnlineStatus(data.isOnline || onlineUsers.has(userId));
 
       // Fetch user's posts
-      const postsData = await get(`/posts/user/${userId}`);
-      setPosts(postsData.posts || []);
+      try {
+        const postsData = await get(`/posts/user/${userId}`);
+        setPosts(postsData.posts || []);
+      } catch (postError) {
+        console.log('No posts available:', postError);
+        setPosts([]);
+      }
     } catch (error: any) {
+      console.error('Fetch profile error:', error);
       Alert.alert('Error', error.response?.data?.message || 'Failed to load profile');
     } finally {
       setLoading(false);
       setIsSkeleton(false);
     }
-  }, [userId]);
+  }, [userId, onlineUsers]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -94,23 +124,33 @@ export default function UserProfileScreen() {
   // Handle follow/unfollow
   const handleFollowToggle = async () => {
     if (!userId) return;
+    
+    // Store previous state for rollback
+    const previousFollowState = isFollowing;
+    
     try {
       setFollowLoading(true);
-      if (isFollowing) {
+      
+      // Optimistic UI update
+      setIsFollowing(!isFollowing);
+      
+      if (previousFollowState) {
         // Unfollow
         await del(`/follow/${userId}`);
-        setIsFollowing(false);
         Alert.alert('Unfollowed', `You unfollowed ${profile?.username}`);
       } else {
         // Follow
         await post(`/follow/${userId}`, {});
-        setIsFollowing(true);
         Alert.alert('Following', `You are now following ${profile?.username}`);
       }
-      // Refresh profile to update stats
+      
+      // Refresh profile to update stats and verify follow status
       fetchProfile();
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to update follow status');
+      // Rollback on failure
+      setIsFollowing(previousFollowState);
+      console.error('Follow toggle error:', error);
+      Alert.alert('Error', error.response?.data?.message || error.message || 'Failed to update follow status');
     } finally {
       setFollowLoading(false);
     }
@@ -208,74 +248,67 @@ export default function UserProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Cover Photo */}
-      {profile?.coverPhoto && (
-        <Image source={{ uri: profile.coverPhoto }} style={styles.coverPhoto} />
-      )}
+      {/* Cover Photo Section */}
+      <View style={styles.coverSection}>
+        {profile?.coverPhoto && (
+          <Image source={{ uri: profile.coverPhoto }} style={styles.coverPhoto} />
+        )}
+        {/* Menu Button */}
+        <TouchableOpacity style={styles.menuButton} onPress={toggleMenu}>
+          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
 
-      {/* Profile Header */}
-      <View style={styles.header}>
-        <View style={styles.avatarContainer}>
-          <Image source={{ uri: profile?.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
-          <View style={[
-            styles.statusDot,
-            onlineStatus ? styles.onlineDot : styles.offlineDot
-          ]} />
-        </View>
-        <View style={styles.infoContainer}>
-          <ThemedText type="title" style={styles.username}>@{profile?.username}</ThemedText>
-          <ThemedText style={styles.name}>{profile?.name}</ThemedText>
-          {profile?.bio && <ThemedText style={styles.bio}>{profile.bio}</ThemedText>}
-          <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile?.stats.posts}</ThemedText>
-              <ThemedText>Posts</ThemedText>
-            </View>
-            <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile?.stats.followers}</ThemedText>
-              <ThemedText>Followers</ThemedText>
-            </View>
-            <View style={styles.stat}>
-              <ThemedText type="subtitle">{profile?.stats.following}</ThemedText>
-              <ThemedText>Following</ThemedText>
-            </View>
+      {/* Profile Header - Modern Card Style */}
+      <View style={styles.headerCard}>
+        {/* Avatar with Status */}
+        <View style={styles.avatarSection}>
+          <View style={styles.avatarContainer}>
+            <Image source={{ uri: profile?.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
+            <View style={[
+              styles.statusDot,
+              onlineStatus ? styles.onlineDot : styles.offlineDot
+            ]} />
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          {/* Follow/Unfollow Button */}
-          <TouchableOpacity
-            style={[
-              styles.followButton,
-              isFollowing && styles.followButtonActive
-            ]}
-            onPress={handleFollowToggle}
-            disabled={followLoading}
-          >
-            {followLoading ? (
-              <ActivityIndicator size="small" color={isFollowing ? "#007AFF" : "#fff"} />
-            ) : (
-              <>
-                <Ionicons name={isFollowing ? "person-remove" : "person-add"} size={16} color={isFollowing ? "#007AFF" : "#fff"} />
-                <ThemedText style={[styles.followButtonText, isFollowing && styles.followButtonTextActive]}>
-                  {isFollowing ? 'Following' : 'Follow'}
-                </ThemedText>
-              </>
-            )}
+        {/* User Info Section */}
+        <View style={styles.userInfoSection}>
+          <ThemedText style={styles.username}>{profile?.name}</ThemedText>
+          <ThemedText style={styles.displayName}>@{profile?.username}</ThemedText>
+          {profile?.bio && <ThemedText style={styles.bio}>{profile.bio}</ThemedText>}
+        </View>
+
+        {/* Stats Section - Three Column Layout */}
+        <View style={styles.statsSection}>
+          <View style={styles.statItem}>
+            <ThemedText style={styles.statNumber}>{profile?.stats.posts}</ThemedText>
+            <ThemedText style={styles.statLabel}>Posts</ThemedText>
+          </View>
+          <View style={[styles.statItem, styles.statItemMiddle]}>
+            <ThemedText style={styles.statNumber}>{profile?.stats.followers}</ThemedText>
+            <ThemedText style={styles.statLabel}>Followers</ThemedText>
+          </View>
+          <View style={styles.statItem}>
+            <ThemedText style={styles.statNumber}>{profile?.stats.following}</ThemedText>
+            <ThemedText style={styles.statLabel}>Following</ThemedText>
+          </View>
+        </View>
+
+        {/* Action Buttons Section */}
+        <View style={styles.actionButtonsSection}>
+          {/* Message Button */}
+          <TouchableOpacity style={styles.primaryButton} onPress={handleMessagePress}>
+            <Ionicons name="chatbubble-outline" size={18} color="#fff" />
+            <ThemedText style={styles.primaryButtonText}>Message</ThemedText>
           </TouchableOpacity>
 
-          {/* Message Button */}
-          <TouchableOpacity style={styles.messageButton} onPress={handleMessagePress}>
-            <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
-            <ThemedText style={styles.messageButtonText}>Message</ThemedText>
+          {/* Share Profile Button */}
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleMessagePress}>
+            <Ionicons name="share-social" size={18} color="#007AFF" />
+            <ThemedText style={styles.secondaryButtonText}>Share</ThemedText>
           </TouchableOpacity>
         </View>
-        
-        {/* Top-right Menu Button */}
-        <TouchableOpacity style={styles.menuButton} onPress={toggleMenu}>
-          <Ionicons name="ellipsis-vertical" size={24} color="#666" />
-        </TouchableOpacity>
       </View>
 
       <ProfileMenu visible={menuVisible} onClose={toggleMenu} />
@@ -302,26 +335,62 @@ export default function UserProfileScreen() {
   }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { 
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  centerContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  
+  // Cover Section
+  coverSection: {
+    position: 'relative',
+    height: 140,
+    backgroundColor: '#e8e8e8',
+  },
   coverPhoto: {
     width: '100%',
-    height: 200,
+    height: '100%',
   },
-  header: {
-    flexDirection: 'row',
-    padding: 20,
-    backgroundColor: '#fff',
-    marginTop: -50,
+  menuButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     borderRadius: 20,
+    padding: 8,
+    zIndex: 10,
+  },
+
+  // Profile Header Card
+  headerCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 12,
+    marginTop: -50,
+    marginBottom: 12,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 60,
+    paddingBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 3,
+  },
+
+  // Avatar Section
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: 12,
   },
   avatarContainer: {
     position: 'relative',
+    marginTop: -70,
   },
   avatar: {
     width: 100,
@@ -329,11 +398,12 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     borderWidth: 4,
     borderColor: '#fff',
+    backgroundColor: '#e8e8e8',
   },
   statusDot: {
     position: 'absolute',
-    bottom: 8,
-    right: 8,
+    bottom: 4,
+    right: 4,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -344,101 +414,135 @@ const styles = StyleSheet.create({
     backgroundColor: '#4ADDAE',
   },
   offlineDot: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#bbb',
   },
-  infoContainer: {
-    flex: 1,
-    marginLeft: 16,
-    justifyContent: 'center',
+
+  // User Info Section
+  userInfoSection: {
+    alignItems: 'center',
+    marginBottom: 16,
   },
   username: {
-    fontWeight: 'bold',
     fontSize: 20,
+    fontWeight: '700',
+    color: '#000',
   },
-  name: {
-    fontSize: 16,
-    marginVertical: 4,
+  displayName: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
   },
   bio: {
     fontSize: 14,
-    color: '#666',
-    marginVertical: 8,
+    color: '#555',
+    marginTop: 8,
+    textAlign: 'center',
   },
-  statsRow: {
+
+  // Stats Section
+  statsSection: {
     flexDirection: 'row',
-    marginTop: 12,
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#f0f0f0',
   },
-  stat: {
-    flex: 1,
+  statItem: {
     alignItems: 'center',
+    flex: 1,
   },
-  actionButtons: {
-    flexDirection: 'column',
-    gap: 8,
-    justifyContent: 'flex-end',
+  statItemMiddle: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#f0f0f0',
   },
-  followButton: {
+  statNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 4,
+  },
+
+  // Action Buttons Section
+  actionButtonsSection: {
     flexDirection: 'row',
+    gap: 12,
+  },
+  primaryButton: {
+    flex: 1,
     backgroundColor: '#007AFF',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    minHeight: 40,
+    flexDirection: 'row',
+    gap: 8,
   },
-  followButtonActive: {
-    backgroundColor: '#f0f0f0',
+  primaryButtonActive: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1.5,
+    borderColor: '#007AFF',
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  primaryButtonTextActive: {
+    color: '#007AFF',
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
     borderWidth: 1,
     borderColor: '#007AFF',
   },
-  followButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  followButtonTextActive: {
+  secondaryButtonText: {
     color: '#007AFF',
-  },
-  messageButton: {
-    flexDirection: 'row',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    minHeight: 40,
-  },
-  messageButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 14,
   },
+
+  // Posts List
   postsList: {
-    padding: 16,
-    paddingTop: 8,
+    padding: 12,
+    paddingTop: 0,
+    backgroundColor: '#f5f5f5',
   },
-  menuButton: {
-    padding: 8,
-  },
+
+  // Empty State
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
+    backgroundColor: '#f5f5f5',
   },
   emptyText: {
-    marginTop: 8,
-    color: '#666',
+    marginTop: 12,
+    color: '#999',
+    fontSize: 14,
   },
+
+  // Error States
   errorTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
     marginVertical: 12,
+    color: '#000',
   },
   errorText: {
-    fontSize: 16,
+    fontSize: 14,
     textAlign: 'center',
     color: '#666',
     marginBottom: 24,
@@ -448,11 +552,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 20,
+    borderRadius: 24,
   },
   retryText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });
 

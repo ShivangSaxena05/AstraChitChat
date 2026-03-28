@@ -1,8 +1,8 @@
 const User = require('../models/User');
+const UserStats = require('../models/UserStats');
 const Follow = require('../models/Follow');
 const { getPresignedUploadUrl } = require('../services/mediaService');
-
-// FIX: removed unused Post and Like imports — counts come from denormalized User fields
+const { getUserStats } = require('../services/userStatsService');
 
 // @desc    Get current user's profile
 // @route   GET /api/profile/me
@@ -13,6 +13,9 @@ const getUserProfile = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+
+    // Fetch stats from UserStats model
+    const userStats = await getUserStats(req.user._id);
 
     res.json({
       _id: user._id,
@@ -28,10 +31,10 @@ const getUserProfile = async (req, res) => {
       pronouns: user.pronouns || '',
       encryptionPublicKey: user.encryptionPublicKey || null,
       stats: {
-        posts: user.postsCount || 0,
-        followers: user.followersCount || 0,
-        following: user.followingCount || 0,
-        likes: user.totalLikesCount || 0,
+        posts: userStats?.postsCount || 0,
+        followers: userStats?.followersCount || 0,
+        following: userStats?.followingCount || 0,
+        likes: userStats?.totalLikesCount || 0,
       },
       isPrivate: user.isPrivate,
       isOnline: user.isOnline,
@@ -49,8 +52,12 @@ const getUserProfileById = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // FIX: single DB query instead of two — select everything except password
-    const user = await User.findById(userId).select('-password');
+    // Fetch user info and stats in parallel
+    const [user, userStats] = await Promise.all([
+      User.findById(userId).select('-password'),
+      getUserStats(userId),
+    ]);
+
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -79,10 +86,10 @@ const getUserProfileById = async (req, res) => {
       bio: user.bio || '',
       encryptionPublicKey: user.encryptionPublicKey || null,
       stats: {
-        posts: user.postsCount || 0,
-        followers: user.followersCount || 0,
-        following: user.followingCount || 0,
-        likes: user.totalLikesCount || 0,
+        posts: userStats?.postsCount || 0,
+        followers: userStats?.followersCount || 0,
+        following: userStats?.followingCount || 0,
+        likes: userStats?.totalLikesCount || 0,
       },
       isPrivate: user.isPrivate,
       isTwoFactorEnabled: user.isTwoFactorEnabled,

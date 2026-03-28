@@ -62,15 +62,26 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
   const colorScheme = useColorScheme();
   const { socket } = useSocket();
 
+  // Ensure stats are always available (with defaults if needed)
+  const userStats = user?.stats || {
+    posts: 0,
+    followers: 0,
+    following: 0,
+    likes: 0,
+  };
+
   // useFocusEffect will refetch data every time the screen comes into view
   useFocusEffect(
     React.useCallback(() => {
       const fetchData = async () => {
         try {
           setLoading(true);
-          console.log('Fetching other user profile:', `/users/${userId}`);
-          const userData = await get(`/users/${userId}`);
+          console.log('Fetching other user profile:', `/profile/${userId}`);
+          const userData = await get(`/profile/${userId}`);
           console.log('User data received:', userData);
+          console.log('User stats:', userData.stats);
+          console.log('Followers count:', userData.stats?.followers);
+          console.log('Following count:', userData.stats?.following);
           setUser(userData);
           setIsBlocked(userData.isBlocked || false);
           setIsMuted(userData.isMuted || false);
@@ -312,78 +323,227 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
   );
 
   const styles = useMemo(() => StyleSheet.create({
+    // Container
     container: {
       flex: 1,
+      backgroundColor: colorScheme === 'dark' ? '#000' : '#f5f5f5',
     },
     loadingContainer: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
+      backgroundColor: colorScheme === 'dark' ? '#000' : '#f5f5f5',
     },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 16,
+
+    // Cover Section
+    coverSection: {
+      position: 'relative',
+      height: 140,
+      backgroundColor: colorScheme === 'dark' ? '#222' : '#e8e8e8',
     },
-    profileImage: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
+    coverPhoto: {
+      width: '100%',
+      height: '100%',
     },
-    statsContainer: {
-      flex: 1,
-      flexDirection: 'row',
-      justifyContent: 'space-around',
+    menuButton: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      borderRadius: 20,
+      padding: 8,
+      zIndex: 10,
     },
-    stat: {
-      alignItems: 'center',
-    },
-    statNumber: {
-      fontSize: 18,
-      fontWeight: 'bold',
-    },
-    statLabel: {
-      fontSize: 14,
-      color: colorScheme === 'dark' ? '#ccc' : 'gray',
-    },
-    bioContainer: {
+
+    // Profile Header Card
+    headerCard: {
+      backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff',
+      marginHorizontal: 12,
+      marginTop: -50,
+      marginBottom: 12,
+      borderRadius: 16,
       paddingHorizontal: 16,
+      paddingTop: 60,
+      paddingBottom: 16,
+      shadowColor: colorScheme === 'dark' ? 'rgba(0,0,0,0.5)' : '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: colorScheme === 'dark' ? 0.3 : 0.08,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+
+    // Avatar Section
+    avatarSection: {
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    avatarContainer: {
+      position: 'relative',
+      marginTop: -70,
+    },
+    avatar: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      borderWidth: 4,
+      borderColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff',
+      backgroundColor: colorScheme === 'dark' ? '#333' : '#e8e8e8',
+    },
+    statusDot: {
+      position: 'absolute',
+      bottom: 4,
+      right: 4,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 3,
+      borderColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff',
+    },
+    onlineDot: {
+      backgroundColor: '#4ADDAE',
+    },
+    offlineDot: {
+      backgroundColor: '#bbb',
+    },
+
+    // User Info Section
+    userInfoSection: {
+      alignItems: 'center',
       marginBottom: 16,
     },
     username: {
-      fontWeight: 'bold',
+      fontSize: 20,
+      fontWeight: '700',
+      color: colorScheme === 'dark' ? '#fff' : '#000',
       marginBottom: 4,
     },
-    buttonContainer: {
+    displayName: {
+      fontSize: 14,
+      color: colorScheme === 'dark' ? '#aaa' : '#666',
+      marginTop: 2,
+    },
+    statusContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    statusIndicator: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: 6,
+    },
+    statusText: {
+      fontSize: 12,
+      color: colorScheme === 'dark' ? '#aaa' : '#888',
+    },
+
+    // Stats Section
+    statsSection: {
       flexDirection: 'row',
       justifyContent: 'space-around',
+      marginBottom: 16,
+      paddingVertical: 12,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: colorScheme === 'dark' ? '#333' : '#f0f0f0',
+    },
+    statItem: {
+      alignItems: 'center',
+      flex: 1,
+    },
+    statItemMiddle: {
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: colorScheme === 'dark' ? '#333' : '#f0f0f0',
+    },
+    statNumber: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colorScheme === 'dark' ? '#fff' : '#000',
+    },
+    statLabel: {
+      fontSize: 12,
+      color: colorScheme === 'dark' ? '#aaa' : '#888',
+      marginTop: 4,
+    },
+
+    // Action Buttons Section
+    actionButtonsSection: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    primaryButton: {
+      flex: 1,
+      backgroundColor: '#007AFF',
+      paddingVertical: 12,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+    },
+    primaryButtonActive: {
+      backgroundColor: colorScheme === 'dark' ? '#333' : '#f5f5f5',
+      borderWidth: 1.5,
+      borderColor: '#007AFF',
+    },
+    primaryButtonText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    primaryButtonTextActive: {
+      color: '#007AFF',
+    },
+    secondaryButton: {
+      flex: 1,
+      backgroundColor: colorScheme === 'dark' ? '#333' : '#f5f5f5',
+      paddingVertical: 12,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: '#007AFF',
+    },
+    secondaryButtonText: {
+      color: '#007AFF',
+      fontWeight: '600',
+      fontSize: 14,
+    },
+
+    // Tab Container
+    tabContainer: {
+      flexDirection: 'row',
       paddingHorizontal: 16,
       marginBottom: 16,
+      backgroundColor: colorScheme === 'dark' ? '#000' : '#f5f5f5',
     },
-    button: {
+    tab: {
       flex: 1,
-      marginHorizontal: 4,
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef',
       paddingVertical: 8,
+      paddingHorizontal: 16,
       borderRadius: 8,
       alignItems: 'center',
+      backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#f0f0f0',
     },
-    followButton: {
-      backgroundColor: '#4ADDAE',
+    activeTab: {
+      backgroundColor: '#007AFF',
     },
-    followButtonText: {
+    tabText: {
+      fontSize: 14,
+      color: colorScheme === 'dark' ? '#aaa' : '#666',
+    },
+    activeTabText: {
       color: '#fff',
-      fontWeight: 'bold',
+      fontWeight: '600',
     },
-    messageButton: {
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef',
-    },
-    messageButtonText: {
-      color: colorScheme === 'dark' ? '#fff' : '#000',
-      fontWeight: 'bold',
-    },
+
+    // Grid
     grid: {
       flex: 1,
+      backgroundColor: colorScheme === 'dark' ? '#000' : '#f5f5f5',
     },
     gridItem: {
       width: GRID_ITEM_SIZE,
@@ -393,29 +553,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
     gridImage: {
       width: '100%',
       height: '100%',
-    },
-    tabContainer: {
-      flexDirection: 'row',
-      paddingHorizontal: 16,
-      marginBottom: 16,
-    },
-    tab: {
-      flex: 1,
-      paddingVertical: 8,
-      paddingHorizontal: 16,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    activeTab: {
-      backgroundColor: '#4ADDAE',
-    },
-    tabText: {
-      fontSize: 16,
-      color: colorScheme === 'dark' ? '#ccc' : 'gray',
-    },
-    activeTabText: {
-      color: '#fff',
-      fontWeight: 'bold',
     },
     videoIndicator: {
       position: 'absolute',
@@ -441,6 +578,8 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       fontSize: 12,
       color: colorScheme === 'dark' ? '#000' : '#fff',
     },
+
+    // Empty State
     emptyContainer: {
       flex: 1,
       justifyContent: 'center',
@@ -458,6 +597,8 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
       color: colorScheme === 'dark' ? '#999' : '#999',
       textAlign: 'center',
     },
+
+    // Modal
     modalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.5)',
@@ -477,6 +618,7 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
     actionItemText: {
       fontSize: 16,
       textAlign: 'center',
+      color: colorScheme === 'dark' ? '#fff' : '#000',
     },
     actionItemTextDestructive: {
       fontSize: 16,
@@ -498,99 +640,122 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
     <ThemedView style={styles.container}>
       <Stack.Screen 
         options={{
-          headerTitle: user.username || 'Profile',
-          headerRight: () => (
-            <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ marginRight: 15 }}>
-              <Ionicons name="ellipsis-vertical" size={24} color={colorScheme === 'dark' ? '#fff' : '#000'} />
-            </TouchableOpacity>
-          ),
+          headerShown: false,
         }}
       />
-      {/* Profile Header */}
-      <View style={styles.header}>
-        <TouchableOpacity activeOpacity={0.8} onPress={() => setProfileModalVisible(true)}>
-          <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.profileImage} />
+
+      {/* Cover Photo Section */}
+      <View style={styles.coverSection}>
+        <View style={styles.coverPhoto} />
+        {/* Menu Button */}
+        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
         </TouchableOpacity>
-        <View style={styles.statsContainer}>
-          <View style={styles.stat}>
-            <ThemedText style={styles.statNumber}>{user.stats.posts}</ThemedText>
-            <ThemedText style={styles.statLabel}>Posts</ThemedText>
+      </View>
+
+      {/* Profile Header Card - Modern Style */}
+      <View style={styles.headerCard}>
+        {/* Avatar */}
+        <TouchableOpacity 
+          activeOpacity={0.8} 
+          onPress={() => setProfileModalVisible(true)}
+          style={styles.avatarSection}
+        >
+          <View style={styles.avatarContainer}>
+            <Image source={{ uri: user.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
           </View>
+        </TouchableOpacity>
+
+        {/* User Info */}
+        <View style={styles.userInfoSection}>
+          <ThemedText style={styles.username}>{user.name}</ThemedText>
+          <ThemedText style={styles.displayName}>@{user.username}</ThemedText>
+          
+          {/* Online Status */}
+          <View style={styles.statusContainer}>
+            <View style={[
+              styles.statusIndicator,
+              { backgroundColor: user.isOnline ? '#4ADDAE' : '#bbb' }
+            ]} />
+            <ThemedText style={styles.statusText}>
+              {user.isOnline ? 'Online now' : (user.lastSeen ? `Last seen ${new Date(user.lastSeen).toLocaleString()}` : 'Offline')}
+            </ThemedText>
+          </View>
+
+          {user.bio && <ExpandableBio text={user.bio} maxLines={3} />}
+        </View>
+
+        {/* Stats Section */}
+        <View style={styles.statsSection}>
+          <TouchableOpacity style={styles.statItem} activeOpacity={0.7}>
+            <ThemedText style={styles.statNumber}>{userStats.posts}</ThemedText>
+            <ThemedText style={styles.statLabel}>Posts</ThemedText>
+          </TouchableOpacity>
           <TouchableOpacity 
-            style={styles.stat}
+            style={[styles.statItem, styles.statItemMiddle]}
             onPress={() => router.push({
               pathname: '/followers-list' as any,
-              params: { userId: userId, username: user.username, type: 'followers' }
+              params: { userId: userId, username: user?.username || '', type: 'followers' }
             })}
             activeOpacity={0.7}
           >
-            <ThemedText style={styles.statNumber}>{user.stats.followers}</ThemedText>
+            <ThemedText style={styles.statNumber}>{userStats.followers}</ThemedText>
             <ThemedText style={styles.statLabel}>Followers</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity 
-            style={styles.stat}
+            style={[styles.statItem, styles.statItemMiddle]}
             onPress={() => router.push({
               pathname: '/followers-list' as any,
-              params: { userId: userId, username: user.username, type: 'following' }
+              params: { userId: userId, username: user?.username || '', type: 'following' }
             })}
             activeOpacity={0.7}
           >
-            <ThemedText style={styles.statNumber}>{user.stats.following}</ThemedText>
+            <ThemedText style={styles.statNumber}>{userStats.following}</ThemedText>
             <ThemedText style={styles.statLabel}>Following</ThemedText>
           </TouchableOpacity>
-          {user.stats.posts > 0 && (
-            <View style={styles.stat}>
-              <ThemedText style={styles.statNumber}>{user.stats.likes}</ThemedText>
-              <ThemedText style={styles.statLabel}>Likes</ThemedText>
-            </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtonsSection}>
+          {isFollowing ? (
+            <>
+              <TouchableOpacity 
+                disabled={isActionLoading} 
+                style={[styles.primaryButton, { opacity: isActionLoading ? 0.6 : 1 }]} 
+                onPress={handleMessage}
+              >
+                <Ionicons name="chatbubble-outline" size={16} color="#fff" />
+                <ThemedText style={styles.primaryButtonText}>Message</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                disabled={isActionLoading} 
+                style={[styles.secondaryButton, { opacity: isActionLoading ? 0.6 : 1 }]} 
+                onPress={handleUnfollow}
+              >
+                <ThemedText style={styles.secondaryButtonText}>Unfollow</ThemedText>
+              </TouchableOpacity>
+            </>
+          ) : isRequested ? (
+            <TouchableOpacity 
+              disabled={isActionLoading} 
+              style={[styles.secondaryButton, { opacity: isActionLoading ? 0.6 : 1 }]} 
+              onPress={handleUnfollow}
+            >
+              <ThemedText style={styles.secondaryButtonText}>Requested</ThemedText>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              disabled={isActionLoading} 
+              style={[styles.primaryButton, { opacity: isActionLoading ? 0.6 : 1 }]} 
+              onPress={handleFollow}
+            >
+              <ThemedText style={styles.primaryButtonText}>Follow</ThemedText>
+            </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Bio Section */}
-      <View style={styles.bioContainer}>
-        <ThemedText style={styles.username}>@{user.username}</ThemedText>
-        
-        {/* ONLINE STATUS */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
-          <View style={{ 
-            width: 8, 
-            height: 8, 
-            borderRadius: 4, 
-            backgroundColor: user.isOnline ? '#4ADDAE' : '#FF4444',
-            marginRight: 6 
-          }} />
-          <ThemedText style={{ fontSize: 13, color: colorScheme === 'dark' ? '#aaa' : '#666' }}>
-            {user.isOnline ? 'Online now' : (user.lastSeen ? `Last seen ${new Date(user.lastSeen).toLocaleString()}` : 'Offline')}
-          </ThemedText>
-        </View>
-
-        <ExpandableBio text={user.bio} maxLines={3} />
-      </View>
-
-      {/* Action Buttons */}
-      <View style={styles.buttonContainer}>
-        {isFollowing ? (
-          <>
-            <TouchableOpacity disabled={isActionLoading} style={[styles.button, styles.messageButton, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleMessage}>
-              <ThemedText style={styles.messageButtonText}>Message</ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity disabled={isActionLoading} style={[styles.button, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleUnfollow}>
-              <ThemedText style={{ color: '#ff4444', fontWeight: 'bold' }}>Unfollow</ThemedText>
-            </TouchableOpacity>
-          </>
-        ) : isRequested ? (
-          <TouchableOpacity disabled={isActionLoading} style={[styles.button, { backgroundColor: colorScheme === 'dark' ? '#333' : '#efefef', opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleUnfollow}>
-            <ThemedText style={{ color: colorScheme === 'dark' ? '#fff' : '#000', fontWeight: 'bold' }}>Requested</ThemedText>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity disabled={isActionLoading} style={[styles.button, styles.followButton, { opacity: isActionLoading ? 0.6 : 1 }]} onPress={handleFollow}>
-            <ThemedText style={styles.followButtonText}>Follow</ThemedText>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Tab Navigation */}
+      {/* Tab Container */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'posts' && styles.activeTab]}

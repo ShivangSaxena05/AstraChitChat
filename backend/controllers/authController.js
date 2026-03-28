@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const asyncHandler = require('./asyncHandler');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const { initializeUserStats } = require('../services/userStatsService');
 
 // Helper function to generate a JWT token
 const generateToken = (id) => {
@@ -71,6 +72,14 @@ exports.registerUser = asyncHandler(async (req, res) => {
   });
 
   if (user) {
+    // Initialize UserStats for the new user
+    try {
+      await initializeUserStats(user._id);
+    } catch (statsError) {
+      console.error('Failed to initialize UserStats:', statsError.message);
+      // Don't fail registration if stats initialization fails
+    }
+
     // Return user data with token
     res.status(201).json({
       _id: user._id,

@@ -21,6 +21,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 
+
+
 const app = express();
 
 // ── Security: HTTP headers ────────────────────────────────────────────────────
@@ -164,6 +166,8 @@ const io = new Server(server, {
     },
 });
 
+console.log('⚡ Using in-memory adapter');
+
 app.set('io', io);
 
 // ── Socket.io Auth Middleware ─────────────────────────────────────────────────
@@ -189,6 +193,24 @@ io.on('connection', (socket) => {
     const Chat = require('./models/Chat');
 
     console.log('A user connected via socket.');
+
+    // ✅ NEW: Cache sender data on socket to avoid repeated DB queries
+    let senderCache = null;
+    let senderCacheExpiry = 0;
+
+    // ✅ NEW: Helper to get cached or fetch sender data
+    const getCachedSenderData = async (userId) => {
+        const now = Date.now();
+        // Cache expires after 5 minutes
+        if (senderCache && senderCache._id === userId && senderCacheExpiry > now) {
+            return senderCache;
+        }
+        // Fetch and cache
+        const sender = await User.findById(userId).select('_id name username profilePicture');
+        senderCache = sender;
+        senderCacheExpiry = now + (5 * 60 * 1000); // 5 minutes
+        return sender;
+    };
 
     // ── setup: user joins their own room ─────────────────────────────────────
     socket.on('setup', async (userData) => {
@@ -216,23 +238,61 @@ io.on('connection', (socket) => {
     socket.on('new message', async (rawData) => {
         const Message = require('./models/Message');
 
+        // ✅ FIX: Strict limits to prevent DoS attacks
         // Validate payload to prevent DoS / malformed data
+        const MAX_TEXT_LENGTH = 2000;      // chars (was 5000)
+        const MAX_ATTACHMENTS = 5;         // count (was 10)
+        const MAX_ATTACHMENT_SIZE = 5242880; // 5MB per attachment
+        const MAX_TOTAL_PAYLOAD_SIZE = 25 * 1024 * 1024; // 25MB total request
+
         const validateMessageData = (data) => {
-            return (
-                data &&
-                typeof data.sender === 'string' && data.sender.length === 24 && mongoose.Types.ObjectId.isValid(data.sender) &&
-                typeof data.receiver === 'string' && data.receiver.length === 24 && mongoose.Types.ObjectId.isValid(data.receiver) &&
-                typeof data.chat === 'string' && data.chat.length === 24 && mongoose.Types.ObjectId.isValid(data.chat) &&
-                (!data.bodyText || (typeof data.bodyText === 'string' && data.bodyText.length <= 5000)) &&
-                (!data.msgType || (typeof data.msgType === 'string' && ['text', 'image', 'audio', 'video', 'file'].includes(data.msgType))) &&
-                (!data.attachments || (Array.isArray(data.attachments) && data.attachments.length <= 10)) &&
-                (!data.quotedMsgId || (typeof data.quotedMsgId === 'string' && data.quotedMsgId.length === 24 && mongoose.Types.ObjectId.isValid(data.quotedMsgId)))
-            );
+            if (!data) return false;
+
+            // Validate ObjectIds
+            if (typeof data.sender !== 'string' || data.sender.length !== 24 || !mongoose.Types.ObjectId.isValid(data.sender)) return false;
+            if (typeof data.receiver !== 'string' || data.receiver.length !== 24 || !mongoose.Types.ObjectId.isValid(data.receiver)) return false;
+            if (typeof data.chat !== 'string' || data.chat.length !== 24 || !mongoose.Types.ObjectId.isValid(data.chat)) return false;
+
+            // ✅ FIX: Stricter text validation (max 2000 chars)
+            if (data.bodyText && (typeof data.bodyText !== 'string' || data.bodyText.length > MAX_TEXT_LENGTH)) {
+                return false;
+            }
+
+            // ✅ FIX: Validate msgType
+            if (data.msgType && (typeof data.msgType !== 'string' || !['text', 'image', 'audio', 'video', 'file'].includes(data.msgType))) {
+                return false;
+            }
+
+            // ✅ FIX: Stricter attachment validation (max 5 attachments, validate sizes)
+            if (data.attachments) {
+                if (!Array.isArray(data.attachments) || data.attachments.length > MAX_ATTACHMENTS) {
+                    return false;
+                }
+                // Validate each attachment
+                for (const attachment of data.attachments) {
+                    if (!attachment.url || typeof attachment.url !== 'string') return false;
+                    if (attachment.size && (typeof attachment.size !== 'number' || attachment.size > MAX_ATTACHMENT_SIZE)) {
+                        return false;
+                    }
+                }
+            }
+
+            // Validate quoted message ID
+            if (data.quotedMsgId && (typeof data.quotedMsgId !== 'string' || data.quotedMsgId.length !== 24 || !mongoose.Types.ObjectId.isValid(data.quotedMsgId))) {
+                return false;
+            }
+
+            return true;
         };
 
         if (!validateMessageData(rawData)) {
-            console.warn('Socket: Invalid new message payload rejected');
-            socket.emit('error', { message: 'Invalid message format' });
+            console.warn('Socket: Invalid new message payload rejected', {
+                sender: rawData?.sender,
+                textLength: rawData?.bodyText?.length,
+                attachmentCount: rawData?.attachments?.length,
+                reason: 'Validation failed - possible DoS attempt'
+            });
+            socket.emit('error', { message: 'Invalid message format (size limits exceeded)' });
             return;
         }
 
@@ -257,12 +317,15 @@ io.on('connection', (socket) => {
                 readBy: [{ user: new mongoose.Types.ObjectId(rawData.sender), readAt: new Date() }],
             };
 
-            // Create and populate the message
-            const message = await Message.create(messageData);
+            // ✅ OPTIMIZATION: Create message and update chat in parallel + use cached sender
+            const [message, senderDoc] = await Promise.all([
+                Message.create(messageData),
+                getCachedSenderData(rawData.sender),
+            ]);
+
+            // Populate message fields
             await message.populate('sender', 'name username profilePicture');
             await message.populate('receiver', 'name username profilePicture');
-            
-            // ✅ FIX: Populate chat with convoType so frontend can determine chat type
             await message.populate('chat', '_id convoType');
 
             // Populate quoted message if present
@@ -286,22 +349,19 @@ io.on('connection', (socket) => {
                 }
             }
 
-            // ✅ FIX: Using rawData instead of undefined newMessageReceived
+            // ✅ OPTIMIZATION: Use cached senderDoc instead of fetching again
             // STEP 1: Update chat's lastMessage — store sender as ObjectId reference
             await Chat.findByIdAndUpdate(rawData.chat, {
                 lastMessage: {
                     text: rawData.bodyText || rawData.content ||
                         (rawData.attachments?.length ? 'Attachment' : ''),
                     createdAt: message.createdAt,
-                    sender: message.sender._id, // Store ObjectId, not full object
+                    sender: message.sender._id,
                 },
                 updatedAt: new Date(),
             });
 
-            // STEP 2: Fetch sender doc for socket event
-            const senderDoc = await User.findById(rawData.sender).select('name username profilePicture');
-
-            // STEP 3: Build lastMessage payload for socket (with populated sender)
+            // STEP 2: Build lastMessage payload for socket (with cached sender data)
             const lastMessageForSocket = {
                 text: rawData.bodyText || rawData.content ||
                     (rawData.attachments?.length ? 'Attachment' : ''),
@@ -411,9 +471,10 @@ io.on('connection', (socket) => {
     });
 
     // ── WebRTC Signaling ──────────────────────────────────────────────────────
+    // ✅ FIX: Verify both users belong to the same chat before signaling
 
-    socket.on('webrtc-offer', (data) => {
-        if (!data?.targetId || !data?.callerId || !data?.offer) {
+    socket.on('webrtc-offer', async (data) => {
+        if (!data?.targetId || !data?.callerId || !data?.offer || !data?.chatId) {
             console.warn(`[SECURITY] Malformed webrtc-offer from: ${socket.userId}`);
             return;
         }
@@ -421,6 +482,30 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] webrtc-offer callerId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both caller and target are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] webrtc-offer chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isCallerInChat = chat.participants?.some(p => p.toString() === data.callerId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isCallerInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] webrtc-offer: User not in chat. Caller: ${isCallerInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating webrtc-offer chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('webrtc-offer', {
             offer: data.offer,
             callerId: data.callerId,
@@ -429,8 +514,8 @@ io.on('connection', (socket) => {
         });
     });
 
-    socket.on('webrtc-answer', (data) => {
-        if (!data?.targetId || !data?.responderId || !data?.answer) {
+    socket.on('webrtc-answer', async (data) => {
+        if (!data?.targetId || !data?.responderId || !data?.answer || !data?.chatId) {
             console.warn(`[SECURITY] Malformed webrtc-answer from: ${socket.userId}`);
             return;
         }
@@ -438,14 +523,38 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] webrtc-answer responderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both responder and target are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] webrtc-answer chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isResponderInChat = chat.participants?.some(p => p.toString() === data.responderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isResponderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] webrtc-answer: User not in chat. Responder: ${isResponderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating webrtc-answer chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('webrtc-answer', {
             answer: data.answer,
             responderId: data.responderId,
         });
     });
 
-    socket.on('webrtc-candidate', (data) => {
-        if (!data?.targetId || !data?.senderId || !data?.candidate) {
+    socket.on('webrtc-candidate', async (data) => {
+        if (!data?.targetId || !data?.senderId || !data?.candidate || !data?.chatId) {
             console.warn(`[SECURITY] Malformed webrtc-candidate from: ${socket.userId}`);
             return;
         }
@@ -453,14 +562,38 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] webrtc-candidate senderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both sender and target are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] webrtc-candidate chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isSenderInChat = chat.participants?.some(p => p.toString() === data.senderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isSenderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] webrtc-candidate: User not in chat. Sender: ${isSenderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating webrtc-candidate chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('webrtc-candidate', {
             candidate: data.candidate,
             senderId: data.senderId,
         });
     });
 
-    socket.on('end-call', (data) => {
-        if (!data?.targetId || !data?.senderId) {
+    socket.on('end-call', async (data) => {
+        if (!data?.targetId || !data?.senderId || !data?.chatId) {
             console.warn(`[SECURITY] Malformed end-call from: ${socket.userId}`);
             return;
         }
@@ -468,11 +601,35 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] end-call senderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both users are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] end-call chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isSenderInChat = chat.participants?.some(p => p.toString() === data.senderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isSenderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] end-call: User not in chat. Sender: ${isSenderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating end-call chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('end-call', { senderId: data.senderId });
     });
 
-    socket.on('request-video-upgrade', (data) => {
-        if (!data?.targetId || !data?.callerId) {
+    socket.on('request-video-upgrade', async (data) => {
+        if (!data?.targetId || !data?.callerId || !data?.chatId) {
             console.warn(`[SECURITY] Malformed request-video-upgrade from: ${socket.userId}`);
             return;
         }
@@ -480,11 +637,35 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] request-video-upgrade callerId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both users are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] request-video-upgrade chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isCallerInChat = chat.participants?.some(p => p.toString() === data.callerId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isCallerInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] request-video-upgrade: User not in chat. Caller: ${isCallerInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating request-video-upgrade chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('request-video-upgrade', { callerId: data.callerId });
     });
 
-    socket.on('accept-video-upgrade', (data) => {
-        if (!data?.targetId || !data?.responderId) {
+    socket.on('accept-video-upgrade', async (data) => {
+        if (!data?.targetId || !data?.responderId || !data?.chatId) {
             console.warn(`[SECURITY] Malformed accept-video-upgrade from: ${socket.userId}`);
             return;
         }
@@ -492,11 +673,35 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] accept-video-upgrade responderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both users are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] accept-video-upgrade chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isResponderInChat = chat.participants?.some(p => p.toString() === data.responderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isResponderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] accept-video-upgrade: User not in chat. Responder: ${isResponderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating accept-video-upgrade chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('accept-video-upgrade', { responderId: data.responderId });
     });
 
-    socket.on('decline-video-upgrade', (data) => {
-        if (!data?.targetId || !data?.responderId) {
+    socket.on('decline-video-upgrade', async (data) => {
+        if (!data?.targetId || !data?.responderId || !data?.chatId) {
             console.warn(`[SECURITY] Malformed decline-video-upgrade from: ${socket.userId}`);
             return;
         }
@@ -504,11 +709,35 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] decline-video-upgrade responderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both users are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] decline-video-upgrade chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isResponderInChat = chat.participants?.some(p => p.toString() === data.responderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isResponderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] decline-video-upgrade: User not in chat. Responder: ${isResponderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating decline-video-upgrade chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('decline-video-upgrade', { responderId: data.responderId });
     });
 
-    socket.on('busy', (data) => {
-        if (!data?.targetId || !data?.senderId) {
+    socket.on('busy', async (data) => {
+        if (!data?.targetId || !data?.senderId || !data?.chatId) {
             console.warn(`[SECURITY] Malformed busy payload from: ${socket.userId}`);
             return;
         }
@@ -516,6 +745,30 @@ io.on('connection', (socket) => {
             console.warn(`[SECURITY] busy senderId mismatch. Socket: ${socket.userId}`);
             return;
         }
+
+        // ✅ NEW: Verify both users are participants in the chat
+        try {
+            const chat = await Chat.findById(data.chatId);
+            if (!chat) {
+                console.warn(`[SECURITY] busy chat not found: ${data.chatId}`);
+                socket.emit('error', { message: 'Chat not found' });
+                return;
+            }
+
+            const isSenderInChat = chat.participants?.some(p => p.toString() === data.senderId);
+            const isTargetInChat = chat.participants?.some(p => p.toString() === data.targetId);
+
+            if (!isSenderInChat || !isTargetInChat) {
+                console.warn(`[SECURITY] busy: User not in chat. Sender: ${isSenderInChat}, Target: ${isTargetInChat}`);
+                socket.emit('error', { message: 'Unauthorized: Users not in same chat' });
+                return;
+            }
+        } catch (error) {
+            console.error('[SECURITY] Error validating busy chat membership:', error);
+            socket.emit('error', { message: 'Validation error' });
+            return;
+        }
+
         socket.to(data.targetId).emit('busy', { senderId: data.senderId });
     });
 

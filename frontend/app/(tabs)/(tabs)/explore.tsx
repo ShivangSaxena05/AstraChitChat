@@ -59,7 +59,7 @@ export default function ExploreScreen() {
   const renderUserCard = (user: any) => (
     <TouchableOpacity 
       style={styles.userCard}
-      onPress={() => router.push({ pathname: '/', params: { showProfile: user._id } })}
+      onPress={() => router.push(`/profile/${user._id}`)}
     >
       <Image 
         source={{ uri: user.profilePicture || 'https://via.placeholder.com/50' }} 

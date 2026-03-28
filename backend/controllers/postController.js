@@ -1,6 +1,7 @@
 const Post = require('../models/Post');
 const User = require('../models/User');
 const { deleteS3Object } = require('../services/mediaService');
+const { incrementStat, decrementStat } = require('../services/userStatsService');
 
 // @desc    Create a new post
 // @route   POST /api/posts/upload
@@ -21,8 +22,8 @@ const createPost = async (req, res) => {
             caption,
         });
 
-        // Atomically increment user's post count
-        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: 1 } });
+        // Update stats using UserStats service (atomically)
+        await incrementStat(req.user._id, 'postsCount', 1);
 
         res.status(201).json({
             message: 'Post created successfully',
@@ -61,8 +62,8 @@ const deletePost = async (req, res) => {
 
         await post.deleteOne();
 
-        // Atomically decrement user's post count
-        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: -1 } });
+        // Update stats using UserStats service (atomically)
+        await decrementStat(req.user._id, 'postsCount', 1);
 
         res.json({ message: 'Post deleted successfully.' });
     } catch (error) {

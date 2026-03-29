@@ -2,6 +2,8 @@
 
 # dependencies
 node_modules/
+package-lock.json
+yarn.lock
 
 # Expo
 .expo/
@@ -31,7 +33,9 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.local
+.env.*.local
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +45,24 @@ app-example
 # generated native folders
 /ios
 /android
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+build/
+dist/
+*.apk
+*.app
+*.ipa
+
+# OS files
+Thumbs.db

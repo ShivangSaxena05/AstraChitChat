@@ -5,10 +5,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useSocket } from '@/contexts/SocketContext';
 import { post } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function HamburgerMenu() {
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<any[]>([]);
   const { connect, disconnect } = useSocket();
@@ -127,7 +129,7 @@ export default function HamburgerMenu() {
     }
   };
 
-  const iconColor = colorScheme === 'dark' ? '#fff' : '#000';
+  const iconColor = colors.icon;
 
   return (
     <>
@@ -142,18 +144,18 @@ export default function HamburgerMenu() {
         onRequestClose={() => setModalVisible(false)}
       >
         <Pressable style={styles.overlay} onPress={() => setModalVisible(false)}>
-          <Pressable style={[styles.menuContainer, { backgroundColor: colorScheme === 'dark' ? '#333' : '#fff' }]} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[styles.menuContainer, { backgroundColor: colors.card }]} onPress={(e) => e.stopPropagation()}>
             
             {savedAccounts.length > 0 && (
               <View style={styles.accountsSection}>
-                <Text style={[styles.sectionTitle, { color: iconColor }]}>Switch Account</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Switch Account</Text>
                 {savedAccounts.map(acc => (
                   <TouchableOpacity key={acc.userId} style={styles.menuItem} onPress={() => handleSwitchAccount(acc)}>
                     <Image source={{ uri: acc.profilePicture }} style={{ width: 30, height: 30, borderRadius: 15 }} />
                     <Text style={[styles.menuText, { color: iconColor }]}>@{acc.username}</Text>
                   </TouchableOpacity>
                 ))}
-                <View style={[styles.divider, { backgroundColor: colorScheme === 'dark' ? '#555' : '#eee' }]} />
+                <View style={[styles.divider, { backgroundColor: colors.border }]} />
               </View>
             )}
 
@@ -171,8 +173,8 @@ export default function HamburgerMenu() {
               <Text style={[styles.menuText, { color: iconColor }]}>Privacy</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
-              <Ionicons name="log-out-outline" size={24} color="#ff3b30" />
-              <Text style={[styles.menuText, { color: '#ff3b30' }]}>Logout</Text>
+              <Ionicons name="log-out-outline" size={24} color={colors.error} />
+              <Text style={[styles.menuText, { color: colors.error }]}>Logout</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>

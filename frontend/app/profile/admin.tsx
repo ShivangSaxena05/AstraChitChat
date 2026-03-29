@@ -4,6 +4,7 @@ import { get, put } from '@/services/api';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Report {
   _id: string;
@@ -25,6 +26,7 @@ export default function AdminScreen() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const colorScheme = useColorScheme();
+  const colors = useTheme();
 
   useFocusEffect(
     useCallback(() => {
@@ -72,12 +74,12 @@ export default function AdminScreen() {
 
       <View style={styles.actionRow}>
         {item.status !== 'reviewed' && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FFA500' }]} onPress={() => handleUpdateStatus(item._id, 'reviewed')}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.warning }]} onPress={() => handleUpdateStatus(item._id, 'reviewed')}>
             <ThemedText style={styles.actionText}>Mark Reviewed</ThemedText>
           </TouchableOpacity>
         )}
         {item.status !== 'resolved' && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4ADDAE' }]} onPress={() => handleUpdateStatus(item._id, 'resolved')}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={() => handleUpdateStatus(item._id, 'resolved')}>
             <ThemedText style={styles.actionText}>Mark Resolved</ThemedText>
           </TouchableOpacity>
         )}
@@ -95,12 +97,12 @@ export default function AdminScreen() {
       alignItems: 'center',
     },
     reportCard: {
-      backgroundColor: colorScheme === 'dark' ? '#111' : '#fff',
+      backgroundColor: colors.card,
       margin: 10,
       padding: 16,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: colorScheme === 'dark' ? '#333' : '#eee',
+      borderColor: colors.border,
     },
     reportHeader: {
       flexDirection: 'row',
@@ -122,25 +124,25 @@ export default function AdminScreen() {
       overflow: 'hidden',
     },
     statusPending: {
-      backgroundColor: '#ff4444',
+      backgroundColor: colors.error,
       color: 'white',
     },
     statusReviewed: {
-      backgroundColor: '#FFA500',
+      backgroundColor: colors.warning,
       color: 'white',
     },
     statusResolved: {
-      backgroundColor: '#4ADDAE',
+      backgroundColor: colors.success,
       color: 'white',
     },
     detailText: {
-      color: 'gray',
+      color: colors.textSecondary,
       marginBottom: 4,
     },
     description: {
       marginTop: 8,
       fontStyle: 'italic',
-      color: colorScheme === 'dark' ? '#ccc' : '#444',
+      color: colors.textSecondary,
     },
     actionRow: {
       flexDirection: 'row',

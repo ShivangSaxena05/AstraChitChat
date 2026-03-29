@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { ThemedText } from './themed-text';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Message {
   _id: string;
@@ -25,6 +26,8 @@ interface ChatBubbleProps {
 }
 
 export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) {
+  const colors = useTheme();
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -39,32 +42,54 @@ export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) 
     return message.sender?.name || 'Unknown User';
   }, [message.sender?.name]);
 
+  const timestamp: any = styles.timestamp;
+  const sentTimestamp: any = [
+    styles.sentTimestamp,
+    { color: 'rgba(255, 255, 255, 0.7)' }
+  ];
+  const receivedTimestamp: any = [
+    styles.receivedTimestamp,
+    { color: colors.textTertiary }
+  ];
+
   return (
     <View style={[styles.container, isCurrentUser ? styles.sent : styles.received]}>
       {!isCurrentUser && (
-        <Text style={styles.senderName}>{displayName}</Text>
+        <Text style={[styles.senderName, { color: colors.textSecondary }]}>{displayName}</Text>
       )}
 
-      <View style={[styles.bubble, isCurrentUser ? styles.sentBubble : styles.receivedBubble]}>
+      <View
+        style={[
+          styles.bubble,
+          isCurrentUser
+            ? [styles.sentBubble, { backgroundColor: colors.tint }]
+            : [styles.receivedBubble, { backgroundColor: colors.card }],
+        ]}
+      >
         {message.chatType === 'text' && (
-          <ThemedText style={[styles.messageText, isCurrentUser ? styles.sentText : styles.receivedText]}>
+          <ThemedText
+            style={[
+              styles.messageText,
+              isCurrentUser ? styles.sentText : [styles.receivedText, { color: colors.text }],
+            ]}
+          >
             {message.content}
           </ThemedText>
         )}
 
         {message.chatType === 'image' && (
-          <View style={styles.mediaContainer}>
+          <View style={[styles.mediaContainer, { backgroundColor: colors.backgroundSecondary }]}>
             <Text style={styles.mediaPlaceholder}>🖼️ Image</Text>
           </View>
         )}
 
         {message.chatType === 'video' && (
-          <View style={styles.mediaContainer}>
+          <View style={[styles.mediaContainer, { backgroundColor: colors.backgroundSecondary }]}>
             <Text style={styles.mediaPlaceholder}>🎥 Video</Text>
           </View>
         )}
 
-        <Text style={[styles.timestamp, isCurrentUser ? styles.sentTimestamp : styles.receivedTimestamp]}>
+        <Text style={isCurrentUser ? sentTimestamp : receivedTimestamp}>
           {formatTime(message.createdAt)}
         </Text>
       </View>
@@ -86,7 +111,6 @@ const styles = StyleSheet.create({
   },
   senderName: {
     fontSize: 12,
-    color: '#666',
     marginBottom: 4,
     marginLeft: 12,
   },
@@ -96,11 +120,9 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
   },
   sentBubble: {
-    backgroundColor: '#007AFF',
     borderBottomRightRadius: 4,
   },
   receivedBubble: {
-    backgroundColor: '#E5E5EA',
     borderBottomLeftRadius: 4,
   },
   messageText: {
@@ -108,15 +130,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sentText: {
-    color: '#fff',
+    // Color will be applied dynamically via inline style
   },
   receivedText: {
-    color: '#000',
+    // Color will be applied dynamically via inline style
   },
   mediaContainer: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
     borderRadius: 8,
   },
   mediaPlaceholder: {
@@ -128,10 +149,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   sentTimestamp: {
-    color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'right',
+    // color will be applied dynamically
   },
   receivedTimestamp: {
-    color: '#999',
+    // color will be applied dynamically
   },
 });

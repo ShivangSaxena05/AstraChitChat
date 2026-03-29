@@ -5,6 +5,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { get } from '@/services/api';
 import TopHeaderComponent from '@/components/TopHeaderComponent';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Notification {
   _id: string;
@@ -31,6 +32,7 @@ export default function NotificationsScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [followRequestsCount, setFollowRequestsCount] = useState(0);
   const router = useRouter();
+  const colors = useTheme();
 
   useEffect(() => {
     fetchNotifications();
@@ -180,7 +182,7 @@ export default function NotificationsScreen() {
     if (!loading || !hasMore || notifications.length === 0) return null;
     return (
       <View style={styles.footer}>
-        <ActivityIndicator size="small" color="#4ADDAE" />
+        <ActivityIndicator size="small" color={colors.accent} />
       </View>
     );
   };
@@ -201,8 +203,8 @@ export default function NotificationsScreen() {
       <ThemedView style={styles.container}>
         <TopHeaderComponent />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4ADDAE" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.accent }]}>Loading notifications...</Text>
         </View>
       </ThemedView>
     );
@@ -218,7 +220,7 @@ export default function NotificationsScreen() {
         renderItem={renderNotification}
         keyExtractor={(item) => item._id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#4ADDAE" colors={['#4ADDAE']} />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.accent} colors={[colors.accent]} />
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
@@ -241,27 +243,27 @@ function getMockNotifications(): Notification[] {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#888', marginTop: 10, fontSize: 16 },
-  followRequestBanner: { padding: 16, backgroundColor: '#111', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#333' },
-  followRequestText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  followRequestArrow: { color: '#4ADDAE', fontSize: 18, fontWeight: 'bold' },
-  notificationItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#222', backgroundColor: '#000' },
-  unreadItem: { backgroundColor: '#111' },
+  loadingText: { marginTop: 10, fontSize: 16 },
+  followRequestBanner: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1 },
+  followRequestText: { fontWeight: 'bold', fontSize: 16 },
+  followRequestArrow: { fontSize: 18, fontWeight: 'bold' },
+  notificationItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1 },
+  unreadItem: { },
   iconContainer: { marginRight: 12 },
   avatar: { width: 48, height: 48, borderRadius: 24 },
-  avatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#222', justifyContent: 'center', alignItems: 'center' },
+  avatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' },
   iconText: { fontSize: 20 },
   content: { flex: 1 },
-  username: { fontWeight: 'bold', color: '#fff' },
-  message: { color: '#ccc', fontSize: 14 },
-  time: { color: '#666', fontSize: 12, marginTop: 4 },
+  username: { fontWeight: 'bold', color: '#ffffff' },
+  message: { color: '#b8b8b8', fontSize: 14 },
+  time: { color: '#888888', fontSize: 12, marginTop: 4 },
   thumbnail: { width: 48, height: 48, borderRadius: 8, marginLeft: 8 },
   footer: { padding: 20, alignItems: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
   emptyIcon: { fontSize: 64, marginBottom: 16 },
-  emptyText: { fontSize: 18, color: '#fff', fontWeight: 'bold', marginBottom: 8 },
-  emptySubtext: { fontSize: 14, color: '#666', textAlign: 'center', paddingHorizontal: 40 },
+  emptyText: { fontSize: 18, color: '#ffffff', fontWeight: 'bold', marginBottom: 8 },
+  emptySubtext: { fontSize: 14, color: '#888888', textAlign: 'center', paddingHorizontal: 40 },
 });
 

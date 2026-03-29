@@ -1,8 +1,9 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, useColorScheme } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { ThemedText } from './themed-text';
 import { post as apiPost, put, del } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Post {
   _id: string;
@@ -37,6 +38,7 @@ export default function PostCard({
   onShare,
   onUpdate,
 }: PostCardProps) {
+  const colors = useTheme();
   // ✅ FIX 4.1 & 6.3: Proper state management and sync
   const [isLiked, setIsLiked] = useState(
     post.likedBy ? post.likedBy.includes(currentUserId || '') : false
@@ -109,7 +111,7 @@ export default function PostCard({
   }, []);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.card }]}>
       {/* User Header */}
       <View style={styles.header}>
         <Image
@@ -120,7 +122,7 @@ export default function PostCard({
         />
         <View style={styles.userInfo}>
           <ThemedText type="subtitle">{post.user.username}</ThemedText>
-          <Text style={styles.date}>{formatDate(post.createdAt)}</Text>
+          <Text style={[styles.date, { color: colors.textTertiary }]}>{formatDate(post.createdAt)}</Text>
         </View>
       </View>
 
@@ -155,7 +157,7 @@ export default function PostCard({
           {!isPlaying && (
             <View style={styles.playButtonContainer}>
               {isLoadingVideo ? (
-                <ActivityIndicator color="#fff" size="large" />
+                <ActivityIndicator color="#ffffff" size="large" />
               ) : (
                 <View style={styles.playButton}>
                   <Text style={styles.playButtonText}>▶️</Text>
@@ -177,20 +179,20 @@ export default function PostCard({
       </View>
 
       {/* Action Buttons */}
-      <View style={styles.actions}>
+      <View style={[styles.actions, { borderTopColor: colors.border }]}>
         <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
           <Text style={styles.actionIcon}>{isLiked ? '❤️' : '🤍'}</Text>
-          <Text style={styles.actionText}>{likeCount}</Text>
+          <Text style={[styles.actionText, { color: colors.textSecondary }]}>{likeCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={handleComment}>
           <Text style={styles.actionIcon}>💬</Text>
-          <Text style={styles.actionText}>{post.comments || 0}</Text>
+          <Text style={[styles.actionText, { color: colors.textSecondary }]}>{post.comments || 0}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
           <Text style={styles.actionIcon}>📤</Text>
-          <Text style={styles.actionText}>Share</Text>
+          <Text style={[styles.actionText, { color: colors.textSecondary }]}>Share</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -200,7 +202,6 @@ export default function PostCard({
 const styles = StyleSheet.create({
   container: {
     marginBottom: 16,
-    backgroundColor: '#fff',
     borderRadius: 8,
     overflow: 'hidden',
   },
@@ -220,13 +221,12 @@ const styles = StyleSheet.create({
   },
   date: {
     fontSize: 12,
-    color: '#999',
     marginTop: 4,
   },
   media: {
     width: '100%',
     height: 300,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f0f0f0', // Theme: light.backgroundSecondary
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   errorText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white
     fontSize: 12,
     textAlign: 'center',
   },
@@ -273,7 +273,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
   },
   actionButton: {
     flexDirection: 'row',
@@ -285,6 +284,5 @@ const styles = StyleSheet.create({
   },
   actionText: {
     fontSize: 14,
-    color: '#666',
   },
 });

@@ -23,6 +23,7 @@ import { uploadMedia } from '@/services/mediaService';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
 
 const { width } = Dimensions.get('window');
 
@@ -50,6 +51,7 @@ export default function UploadScreen() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const router = useRouter();
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -79,7 +81,7 @@ export default function UploadScreen() {
         fileName: asset.fileName || `upload_${Date.now()}.${asset.uri.split('.').pop()}`,
         width: asset.width,
         height: asset.height,
-        duration: asset.duration,
+        duration: asset.duration ?? undefined,
       });
     }
   };
@@ -134,7 +136,7 @@ export default function UploadScreen() {
         fileName: `video_${Date.now()}.mp4`,
         width: asset.width,
         height: asset.height,
-        duration: asset.duration,
+        duration: asset.duration ?? undefined,
       });
     }
   };
@@ -219,7 +221,7 @@ export default function UploadScreen() {
       icon: 'images',
       title: 'Photo Library',
       subtitle: 'Choose from your gallery',
-      color: '#4ADDAE',
+      color: colors.tint,
       action: () => pickFromLibrary('images'),
     },
     {
@@ -227,7 +229,7 @@ export default function UploadScreen() {
       icon: 'camera',
       title: 'Take Photo',
       subtitle: 'Use your camera',
-      color: '#007AFF',
+      color: colors.accent,
       action: takePhoto,
     },
     {
@@ -235,7 +237,7 @@ export default function UploadScreen() {
       icon: 'videocam',
       title: 'Video Library',
       subtitle: 'Choose a video',
-      color: '#FF6B6B',
+      color: colors.error,
       action: () => pickFromLibrary('videos'),
     },
     {
@@ -243,7 +245,7 @@ export default function UploadScreen() {
       icon: 'recording',
       title: 'Record Video',
       subtitle: 'Record up to 60 seconds',
-      color: '#9B59B6',
+      color: colors.warning,
       action: recordVideo,
     },
   ];
@@ -251,7 +253,7 @@ export default function UploadScreen() {
   const styles = StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colorScheme === 'dark' ? '#000' : '#fff',
+      backgroundColor: colors.background,
     },
     header: {
       flexDirection: 'row',
@@ -260,11 +262,12 @@ export default function UploadScreen() {
       paddingHorizontal: 20,
       paddingVertical: 16,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colorScheme === 'dark' ? '#333' : '#e5e5ea',
+      borderBottomColor: colors.border,
     },
     headerTitle: {
       fontSize: 20,
       fontWeight: '700',
+      color: colors.text,
     },
     scrollContent: {
       padding: 20,
@@ -273,7 +276,7 @@ export default function UploadScreen() {
     sectionTitle: {
       fontSize: 16,
       fontWeight: '600',
-      color: colorScheme === 'dark' ? '#888' : '#666',
+      color: colors.textSecondary,
       marginBottom: 16,
       textTransform: 'uppercase',
       letterSpacing: 0.5,
@@ -286,12 +289,12 @@ export default function UploadScreen() {
     },
     optionCard: {
       width: (width - 52) / 2,
-      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f8f8f8',
+      backgroundColor: colors.card,
       borderRadius: 20,
       padding: 20,
       marginBottom: 12,
       borderWidth: 1,
-      borderColor: colorScheme === 'dark' ? '#2c2c2e' : '#e5e5ea',
+      borderColor: colors.border,
     },
     optionIconContainer: {
       width: 50,
@@ -305,10 +308,11 @@ export default function UploadScreen() {
       fontSize: 15,
       fontWeight: '700',
       marginBottom: 4,
+      color: colors.text,
     },
     optionSubtitle: {
       fontSize: 12,
-      color: colorScheme === 'dark' ? '#888' : '#666',
+      color: colors.textSecondary,
     },
     previewSection: {
       marginBottom: 24,
@@ -317,7 +321,7 @@ export default function UploadScreen() {
       position: 'relative',
       borderRadius: 20,
       overflow: 'hidden',
-      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f0f0f0',
+      backgroundColor: colors.backgroundSecondary,
     },
     previewMedia: {
       width: '100%',
@@ -348,7 +352,7 @@ export default function UploadScreen() {
       gap: 6,
     },
     mediaTypeText: {
-      color: '#fff',
+      color: colors.card,
       fontSize: 12,
       fontWeight: '600',
     },
@@ -356,16 +360,16 @@ export default function UploadScreen() {
       marginBottom: 24,
     },
     captionContainer: {
-      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f8f8f8',
+      backgroundColor: colors.card,
       borderRadius: 16,
       borderWidth: 1,
-      borderColor: colorScheme === 'dark' ? '#2c2c2e' : '#e5e5ea',
+      borderColor: colors.border,
       overflow: 'hidden',
     },
     captionInput: {
       padding: 16,
       fontSize: 16,
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
       minHeight: 120,
       textAlignVertical: 'top',
     },
@@ -376,17 +380,17 @@ export default function UploadScreen() {
       paddingHorizontal: 16,
       paddingVertical: 12,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colorScheme === 'dark' ? '#333' : '#e5e5ea',
+      borderTopColor: colors.border,
     },
     charCount: {
       fontSize: 12,
-      color: colorScheme === 'dark' ? '#666' : '#999',
+      color: colors.textSecondary,
     },
     emojiButton: {
       padding: 4,
     },
     uploadButton: {
-      backgroundColor: '#4ADDAE',
+      backgroundColor: colors.tint,
       borderRadius: 16,
       paddingVertical: 16,
       flexDirection: 'row',
@@ -395,33 +399,33 @@ export default function UploadScreen() {
       gap: 10,
     },
     uploadButtonDisabled: {
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#ccc',
+      backgroundColor: colors.backgroundTertiary,
     },
     uploadButtonText: {
-      color: '#000',
+      color: colors.text,
       fontSize: 16,
       fontWeight: '700',
     },
     uploadButtonTextDisabled: {
-      color: colorScheme === 'dark' ? '#666' : '#999',
+      color: colors.textTertiary,
     },
     progressContainer: {
       marginTop: 16,
     },
     progressBar: {
       height: 4,
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#e5e5ea',
+      backgroundColor: colors.backgroundTertiary,
       borderRadius: 2,
       overflow: 'hidden',
     },
     progressFill: {
       height: '100%',
-      backgroundColor: '#4ADDAE',
+      backgroundColor: colors.tint,
       borderRadius: 2,
     },
     progressText: {
       fontSize: 12,
-      color: colorScheme === 'dark' ? '#888' : '#666',
+      color: colors.textSecondary,
       textAlign: 'center',
       marginTop: 8,
     },
@@ -431,9 +435,9 @@ export default function UploadScreen() {
       alignItems: 'center',
       borderWidth: 2,
       borderStyle: 'dashed',
-      borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
+      borderColor: colors.border,
       borderRadius: 20,
-      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f8f8f8',
+      backgroundColor: colors.backgroundSecondary,
     },
     emptyPreviewIcon: {
       marginBottom: 12,
@@ -441,12 +445,12 @@ export default function UploadScreen() {
     emptyPreviewText: {
       fontSize: 16,
       fontWeight: '600',
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
       marginBottom: 4,
     },
     emptyPreviewSubtext: {
       fontSize: 13,
-      color: colorScheme === 'dark' ? '#666' : '#999',
+      color: colors.textTertiary,
     },
   });
 
@@ -461,7 +465,7 @@ export default function UploadScreen() {
           <ThemedText style={styles.headerTitle}>Create Post</ThemedText>
           {selectedMedia && (
             <TouchableOpacity onPress={handleUpload} disabled={uploading}>
-              <ThemedText style={{ color: '#4ADDAE', fontSize: 16, fontWeight: '600' }}>
+              <ThemedText style={{ color: colors.tint, fontSize: 16, fontWeight: '600' }}>
                 {uploading ? 'Posting...' : 'Post'}
               </ThemedText>
             </TouchableOpacity>
@@ -500,7 +504,7 @@ export default function UploadScreen() {
                 <Ionicons
                   name="cloud-upload-outline"
                   size={48}
-                  color={colorScheme === 'dark' ? '#444' : '#ccc'}
+                  color={colors.iconMuted}
                   style={styles.emptyPreviewIcon}
                 />
                 <ThemedText style={styles.emptyPreviewText}>No media selected</ThemedText>
@@ -530,14 +534,14 @@ export default function UploadScreen() {
                   )}
 
                   <TouchableOpacity style={styles.clearButton} onPress={clearMedia}>
-                    <Ionicons name="close" size={20} color="#fff" />
+                    <Ionicons name="close" size={20} color={colors.card} />
                   </TouchableOpacity>
 
                   <View style={styles.mediaTypeIndicator}>
                     <Ionicons
                       name={selectedMedia.type === 'image' ? 'image' : 'videocam'}
                       size={14}
-                      color="#fff"
+                      color={colors.card}
                     />
                     <ThemedText style={styles.mediaTypeText}>
                       {selectedMedia.type === 'image' ? 'Photo' : 'Video'}
@@ -554,7 +558,7 @@ export default function UploadScreen() {
                   <TextInput
                     style={styles.captionInput}
                     placeholder="Write a caption..."
-                    placeholderTextColor={colorScheme === 'dark' ? '#666' : '#999'}
+                    placeholderTextColor={colors.placeholder}
                     value={caption}
                     onChangeText={setCaption}
                     multiline
@@ -563,7 +567,7 @@ export default function UploadScreen() {
                   <View style={styles.captionFooter}>
                     <ThemedText style={styles.charCount}>{caption.length}/2200</ThemedText>
                     <TouchableOpacity style={styles.emojiButton}>
-                      <Ionicons name="happy-outline" size={24} color={colorScheme === 'dark' ? '#666' : '#999'} />
+                      <Ionicons name="happy-outline" size={24} color={colors.textTertiary} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -577,10 +581,10 @@ export default function UploadScreen() {
                 activeOpacity={0.8}
               >
                 {uploading ? (
-                  <ActivityIndicator color="#000" />
+                  <ActivityIndicator color={colors.text} />
                 ) : (
                   <>
-                    <Ionicons name="cloud-upload" size={20} color="#000" />
+                    <Ionicons name="cloud-upload" size={20} color={colors.text} />
                     <ThemedText style={styles.uploadButtonText}>Share Post</ThemedText>
                   </>
                 )}

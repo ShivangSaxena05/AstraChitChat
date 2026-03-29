@@ -6,6 +6,7 @@ import { get, post } from "@/services/api";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useTheme } from "@/hooks/use-theme-color";
 import React, {
   memo,
   useCallback,
@@ -27,6 +28,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useColorScheme,
 } from "react-native";
 import {
   Gesture,
@@ -116,6 +118,7 @@ const MessageItem = memo(
     onReplyPress,
     highlightedMessageId,
     retryAttempts,
+    colors,
   }: {
     item: ListItem;
     currentUserId: string | null;
@@ -125,6 +128,7 @@ const MessageItem = memo(
     onReplyPress?: (messageId: string) => void;
     highlightedMessageId?: string | null;
     retryAttempts: React.MutableRefObject<Map<string, number>>;
+    colors: any;
   }) => {
     // Handle swipe to reply - must be called unconditionally
     const handleSwipe = useCallback(() => {
@@ -256,7 +260,7 @@ const MessageItem = memo(
               {isOwnMessage && message.status ? (
                 <View style={styles.statusContainer}>
                   {message.status === "sending" ? (
-                    <ActivityIndicator size="small" color="#e9edef" />
+                    <ActivityIndicator size="small" color={colors.textSecondary} />
                   ) : message.status === "sent" ? (
                     <Text style={[styles.statusIcon, styles.sentIcon]}>✓✓</Text>
                   ) : (
@@ -304,6 +308,8 @@ const MessageItem = memo(
 MessageItem.displayName = "MessageItem";
 
 export default function ChatDetailScreen() {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [groupedMessages, setGroupedMessages] = useState<ListItem[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -1216,6 +1222,7 @@ export default function ChatDetailScreen() {
         onReplyPress={handleReplyPress}
         highlightedMessageId={highlightedMessageId}
         retryAttempts={retryAttempts}
+        colors={colors}
       />
     ),
     [
@@ -1225,6 +1232,7 @@ export default function ChatDetailScreen() {
       handleSwipeReply,
       handleReplyPress,
       highlightedMessageId,
+      colors,
     ],
   );
 
@@ -1242,10 +1250,77 @@ export default function ChatDetailScreen() {
     () => [...groupedMessages].reverse(),
     [groupedMessages],
   );
+
+  // Create dynamic styles based on theme
+  const dynamicStyles = StyleSheet.create({
+    containerDynamic: { 
+      flex: 1, 
+      backgroundColor: colors.background 
+    },
+    chatHeaderDynamic: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      paddingTop: Platform.OS === "ios" ? 60 : (StatusBar.currentHeight || 30) + 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    backButtonDynamic: {
+      padding: 8,
+      borderRadius: 20,
+      backgroundColor: colors.backgroundSecondary,
+    },
+    partnerNameDynamic: {
+      fontSize: 17,
+      fontWeight: "600",
+      marginBottom: 2,
+      color: colors.text,
+    },
+    statusTextDynamic: {
+      fontSize: 12,
+      color: colors.textTertiary,
+    },
+    messageInputContainerDynamic: {
+      backgroundColor: colors.card,
+      borderTopColor: colors.border,
+      borderTopWidth: 1,
+      paddingHorizontal: 12,
+      paddingBottom: 10,
+      paddingTop: 8,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+    },
+    inputContainerDynamic: {
+      flex: 1,
+      backgroundColor: colors.input,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    textInputDynamic: {
+      color: colors.text,
+      fontSize: 16,
+      maxHeight: 100,
+    },
+    sendButtonDynamic: {
+      backgroundColor: colors.tint,
+      borderRadius: 20,
+      width: 40,
+      height: 40,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+  });
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={[{ flex: 1, backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
-        style={styles.container}
+        style={[styles.container, { backgroundColor: colors.background }]}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={90}
       >
@@ -1262,7 +1337,7 @@ export default function ChatDetailScreen() {
                   cx="40"
                   cy="40"
                   r="36"
-                  stroke="#333"
+                  stroke={colors.textTertiary}
                   strokeWidth="4"
                   fill="none"
                 />
@@ -1270,7 +1345,7 @@ export default function ChatDetailScreen() {
                   cx="40"
                   cy="40"
                   r="36"
-                  stroke="#4ADDAE"
+                  stroke={colors.success}
                   strokeWidth="4"
                   fill="none"
                   strokeDasharray={`${2 * Math.PI * 36}`}
@@ -1282,7 +1357,7 @@ export default function ChatDetailScreen() {
               <Ionicons
                 name="call"
                 size={32}
-                color={callProgress >= 1 ? "#4ADDAE" : "#fff"}
+                color={callProgress >= 1 ? colors.success : colors.card}
               />
             </View>
             <Text style={styles.callHoverText}>
@@ -1298,7 +1373,7 @@ export default function ChatDetailScreen() {
             style={styles.backButton}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={colors.card} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1445,7 +1520,7 @@ export default function ChatDetailScreen() {
                 onPress={() => setQuotedMessage(null)}
                 style={styles.cancelReplyButton}
               >
-                <Ionicons name="close-circle" size={24} color="#666" />
+                <Ionicons name="close-circle" size={24} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
           )}
@@ -1453,7 +1528,7 @@ export default function ChatDetailScreen() {
           {/* ✅ FIX: Show "Follow to start conversation" message if not following */}
           {!isFollowing && (
             <View style={styles.followPromptContainer}>
-              <Ionicons name="information-circle" size={20} color="#4ADDAE" />
+              <Ionicons name="information-circle" size={20} color={colors.success} />
               <Text style={styles.followPromptText}>
                 Follow {otherUsername} to start a conversation
               </Text>
@@ -1477,7 +1552,7 @@ export default function ChatDetailScreen() {
                     ? "Write your reply..."
                     : "Type a message..."
               }
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.placeholder}
               multiline={false}
               blurOnSubmit={false}
               onSubmitEditing={isFollowing ? sendMessage : undefined}  // ✅ FIX: Disable sending if not following
@@ -1510,8 +1585,8 @@ export default function ChatDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#151718" },
+const createStyles = (colors: any) => StyleSheet.create({
+  container: { flex: 1 },
   chatHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1520,8 +1595,8 @@ const styles = StyleSheet.create({
     paddingTop:
       Platform.OS === "ios" ? 60 : (StatusBar.currentHeight || 30) + 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#2a2a2a",
-    backgroundColor: "#1a1a1a",
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   profileImage: {
     width: 40,
@@ -1532,7 +1607,7 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: colors.backgroundSecondary,
   },
   headerTouchable: {
     flex: 1,
@@ -1542,10 +1617,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   partnerName: {
-    color: "#fff",
     fontSize: 17,
     fontWeight: "600",
     marginBottom: 2,
+    color: colors.text,
   },
   statusRow: {
     flexDirection: "row",
@@ -1555,15 +1630,15 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#34C759",
+    backgroundColor: colors.success,
     marginRight: 6,
   },
   lastSeen: {
-    color: "#8E8E93",
+    color: colors.textSecondary,
     fontSize: 13,
   },
   typingText: {
-    color: "#4ADDAE",
+    color: colors.tint,
     fontSize: 13,
     marginLeft: 6,
   },
@@ -1571,8 +1646,8 @@ const styles = StyleSheet.create({
   messagesContainer: { padding: 16, paddingTop: 8 },
   dateSeparator: { alignItems: "center", marginVertical: 12 },
   dateSeparatorText: {
-    backgroundColor: "#2b2b2b",
-    color: "#aaa",
+    backgroundColor: colors.backgroundSecondary,
+    color: colors.textSecondary,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -1588,30 +1663,30 @@ const styles = StyleSheet.create({
   },
   ownMessage: {
     alignSelf: "flex-end",
-    backgroundColor: "#005c4b",
+    backgroundColor: colors.tint,
     borderBottomRightRadius: 4,
   },
   otherMessage: {
     alignSelf: "flex-start",
-    backgroundColor: "#202c33",
+    backgroundColor: colors.card,
     borderBottomLeftRadius: 4,
   },
   highlightedMessage: {
-    backgroundColor: "#3b4a54", // A slightly lighter/different shade to indicate highlight
+    backgroundColor: colors.backgroundSecondary,
     transform: [{ scale: 1.02 }],
   },
   messageText: { fontSize: 15, lineHeight: 20 },
-  ownMessageText: { color: "#e9edef" },
-  otherMessageText: { color: "#e9edef" },
+  ownMessageText: { color: colors.background },
+  otherMessageText: { color: colors.text },
   senderNameText: {
-    color: "#4ADDAE",
+    color: colors.tint,
     fontSize: 12,
     fontWeight: "bold",
     marginBottom: 4,
   },
   timestamp: { fontSize: 12, marginTop: 4 },
-  ownTimestamp: { color: "#e0e0e0", textAlign: "right" },
-  otherTimestamp: { color: "#aaa" },
+  ownTimestamp: { color: colors.background, textAlign: "right" },
+  otherTimestamp: { color: colors.textSecondary },
   timestampContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1624,34 +1699,34 @@ const styles = StyleSheet.create({
   },
   statusIcon: {
     fontSize: 12,
-    color: "#e0e0e0",
+    color: colors.background,
   },
   sentIcon: {
-    color: "#34B7F1",
+    color: colors.info,
   },
   retryButton: {
     padding: 2,
     borderRadius: 10,
-    backgroundColor: "rgba(255,0,0,0.2)",
+    backgroundColor: `${colors.error}20`,
   },
   retryIcon: {
     fontSize: 14,
-    color: "#ff4444",
+    color: colors.error,
     fontWeight: "bold",
   },
   readStatus: { fontSize: 12, marginLeft: 8 },
-  readStatusBlue: { color: "#34B7F1" },
-  readStatusGray: { color: "#e0e0e0" },
+  readStatusBlue: { color: colors.info },
+  readStatusGray: { color: colors.background },
   editedText: { fontSize: 12, marginTop: 2 },
-  ownEditedText: { color: "#e0e0e0" },
-  otherEditedText: { color: "#999" },
+  ownEditedText: { color: colors.background },
+  otherEditedText: { color: colors.textSecondary },
   inputContainer: {
     flexDirection: "column",
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: "#202c33",
-    backgroundColor: "#1f2c34",
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
     width: "100%",
   },
   inputContainerWithReply: {
@@ -1668,21 +1743,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     maxHeight: 120,
-    color: "#e9edef",
-    backgroundColor: "#2a3942",
+    color: colors.text,
+    backgroundColor: colors.card,
     fontSize: 16,
   },
   sendButton: {
-    backgroundColor: "#00a884",
+    backgroundColor: colors.tint,
     width: 44,
     height: 44,
     borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
   },
-  sendButtonDisabled: { backgroundColor: "#3b4a54" },
-  sendButtonText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
-  sendButtonTextDisabled: { color: "#8b9a9f" },
+  sendButtonDisabled: { backgroundColor: colors.backgroundSecondary },
+  sendButtonText: { color: colors.background, fontWeight: "bold", fontSize: 14 },
+  sendButtonTextDisabled: { color: colors.textSecondary },
   callHoverContainer: {
     position: "absolute",
     top: 100,
@@ -1697,27 +1772,27 @@ const styles = StyleSheet.create({
     height: 80,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: colors.shadow,
     borderRadius: 40,
   },
   circularProgress: { position: "absolute" },
   callHoverText: {
-    color: "#fff",
+    color: colors.text,
     marginTop: 12,
     fontWeight: "bold",
     fontSize: 14,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: colors.shadow,
     paddingHorizontal: 16,
     paddingVertical: 4,
     borderRadius: 12,
     overflow: "hidden",
   },
   loadingMoreContainer: { padding: 12, alignItems: "center" },
-  loadingMoreText: { color: "#8E8E93", fontSize: 12 },
+  loadingMoreText: { color: colors.textSecondary, fontSize: 12 },
   replyPreviewContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#2a3942",
+    backgroundColor: colors.card,
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -1726,33 +1801,33 @@ const styles = StyleSheet.create({
   replyPreviewLine: {
     width: 3,
     height: "100%",
-    backgroundColor: "#4ADDAE",
+    backgroundColor: colors.tint,
     marginRight: 12,
   },
   replyPreviewContent: { flex: 1 },
   replyPreviewName: {
-    color: "#4ADDAE",
+    color: colors.tint,
     fontSize: 12,
     fontWeight: "bold",
     marginBottom: 2,
   },
-  replyPreviewText: { color: "#aaa", fontSize: 14 },
+  replyPreviewText: { color: colors.textSecondary, fontSize: 14 },
   cancelReplyButton: { padding: 4 },
   // ✅ FIX: Follow prompt styles
   followPromptContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(74, 221, 174, 0.1)",
+    backgroundColor: `${colors.tint}15`,
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 8,
     borderLeftWidth: 3,
-    borderLeftColor: "#4ADDAE",
+    borderLeftColor: colors.tint,
   },
   followPromptText: {
-    color: "#4ADDAE",
+    color: colors.tint,
     fontSize: 14,
     fontWeight: "600",
     marginLeft: 8,
@@ -1760,7 +1835,7 @@ const styles = StyleSheet.create({
   // ✅ FIX: Disabled input style
   inputDisabled: {
     opacity: 0.5,
-    backgroundColor: "#1a2332",
+    backgroundColor: colors.backgroundSecondary,
   },
   quotedMessageContainer: {
     padding: 8,
@@ -1769,17 +1844,19 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   ownQuotedMessage: {
-    backgroundColor: "rgba(0,0,0,0.15)",
-    borderLeftColor: "#87ceeb",
+    backgroundColor: `${colors.tint}10`,
+    borderLeftColor: colors.accent,
   },
   otherQuotedMessage: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderLeftColor: "#4ADDAE",
+    backgroundColor: `${colors.card}80`,
+    borderLeftColor: colors.tint,
   },
   quotedMessageName: { fontSize: 12, fontWeight: "bold", marginBottom: 2 },
-  ownQuotedName: { color: "#87ceeb" },
-  otherQuotedName: { color: "#4ADDAE" },
+  ownQuotedName: { color: colors.accent },
+  otherQuotedName: { color: colors.tint },
   quotedMessageText: { fontSize: 13 },
-  ownQuotedText: { color: "#e0e0e0" },
-  otherQuotedText: { color: "#c0c0c0" },
+  ownQuotedText: { color: colors.background },
+  otherQuotedText: { color: colors.textSecondary },
 });
+
+const styles = createStyles({} as any); // Placeholder, will be created in component

@@ -188,7 +188,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   avatar: {
     width: 50,
@@ -239,7 +238,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   closeButtonText: {
-    color: '#fff',
+    color: '#f8f9fa',
     fontSize: 18,
   },
 });

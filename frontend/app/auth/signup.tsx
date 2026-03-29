@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
 import { handleErrorResponse } from '@/services/errorHandler';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function SignupScreen() {
   const [name, setName] = useState('');
@@ -14,6 +15,7 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const { connect } = useSocket();
+  const colors = useTheme();
 
   const validateInput = (): boolean => {
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
@@ -164,20 +166,30 @@ export default function SignupScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, { 
+          borderColor: colors.inputBorder, 
+          backgroundColor: colors.input,
+          color: colors.text,
+        }]}
         placeholder="Full Name"
+        placeholderTextColor={colors.placeholder}
         value={name}
         onChangeText={setName}
         editable={!loading}
       />
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, { 
+          borderColor: colors.inputBorder, 
+          backgroundColor: colors.input,
+          color: colors.text,
+        }]}
         placeholder="Email"
+        placeholderTextColor={colors.placeholder}
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
@@ -186,8 +198,13 @@ export default function SignupScreen() {
       />
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, { 
+          borderColor: colors.inputBorder, 
+          backgroundColor: colors.input,
+          color: colors.text,
+        }]}
         placeholder="Password (min 8 chars, uppercase, lowercase, number)"
+        placeholderTextColor={colors.placeholder}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -195,8 +212,13 @@ export default function SignupScreen() {
       />
 
       <TextInput
-        style={styles.input}
+        style={[styles.input, { 
+          borderColor: colors.inputBorder, 
+          backgroundColor: colors.input,
+          color: colors.text,
+        }]}
         placeholder="Confirm Password"
+        placeholderTextColor={colors.placeholder}
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry
@@ -204,19 +226,19 @@ export default function SignupScreen() {
       />
 
       <TouchableOpacity
-        style={[styles.button, loading && styles.buttonDisabled]}
+        style={[styles.button, { backgroundColor: colors.tint }, loading && styles.buttonDisabled]}
         onPress={handleSignup}
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.background} />
         ) : (
-          <Text style={styles.buttonText}>Sign Up</Text>
+          <Text style={[styles.buttonText, { color: colors.background }]}>Sign Up</Text>
         )}
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push('/auth/login')} disabled={loading}>
-        <Text style={styles.link}>Already have an account? Login</Text>
+        <Text style={[styles.link, { color: colors.tint }]}>Already have an account? Login</Text>
       </TouchableOpacity>
     </View>
   );
@@ -227,7 +249,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#fff',
   },
   title: {
     fontSize: 24,
@@ -237,14 +258,12 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     padding: 12,
     marginBottom: 10,
     borderRadius: 8,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -254,13 +273,11 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },
   link: {
     textAlign: 'center',
-    color: '#007AFF',
     marginTop: 15,
   },
 });

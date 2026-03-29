@@ -5,6 +5,7 @@ import { Alert, Modal, TouchableOpacity, View, Text, FlatList, Image, StyleSheet
 import { Ionicons } from '@expo/vector-icons';
 import { get } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export interface SavedAccount {
   userId: string;
@@ -121,14 +122,16 @@ export function useAccountSwitcher() {
 // Use AccountSwitcherModal separately with the returned state/methods
 
 export function UsernameHeader({ username, onPress }: { username: string, onPress: () => void }) {
+  const colors = useTheme();
+  
   return (
     <TouchableOpacity 
       style={styles.usernameHeaderSelector} 
       activeOpacity={0.7}
       onPress={onPress}
     >
-      <Text style={styles.usernameHeaderText}>{username}</Text>
-      <Ionicons name="chevron-down" size={20} color="white" style={styles.usernameHeaderIcon} />
+      <Text style={[styles.usernameHeaderText, { color: colors.text }]}>{username}</Text>
+      <Ionicons name="chevron-down" size={20} color={colors.text} style={styles.usernameHeaderIcon} />
     </TouchableOpacity>
   );
 }
@@ -152,6 +155,8 @@ export function AccountSwitcherModal({
   onAddAccount,
   onClose,
 }: AccountSwitcherModalProps) {
+  const colors = useTheme();
+
   return (
     <Modal
       visible={visible}
@@ -160,34 +165,34 @@ export function AccountSwitcherModal({
       onRequestClose={onClose}
     >
       <TouchableOpacity 
-        style={styles.modalOverlay}
+        style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}
         activeOpacity={1}
         onPress={onClose}
       >
-        <View style={styles.bottomSheetModal}>
+        <View style={[styles.bottomSheetModal, { backgroundColor: colors.card }]}>
           <View style={styles.modalDragIndicator} />
-          <Text style={styles.modalTitle}>Switch Account</Text>
+          <Text style={[styles.modalTitle, { color: colors.text }]}>Switch Account</Text>
           
           <FlatList
             data={accounts}
             keyExtractor={(item) => item.userId}
             renderItem={({ item }) => (
               <TouchableOpacity 
-                style={styles.accountRow}
+                style={[styles.accountRow, { borderBottomColor: colors.border }]}
                 onPress={() => onSwitch(item)}
               >
                 <Image source={{ uri: item.profilePicture }} style={styles.accountAvatar} />
-                <Text style={styles.accountUsername}>{item.username}</Text>
+                <Text style={[styles.accountUsername, { color: colors.text }]}>{item.username}</Text>
                 {item.username === currentUsername && (
-                  <Ionicons name="checkmark-circle" size={24} color="#4ADDAE" />
+                  <Ionicons name="checkmark-circle" size={24} color={colors.success} />
                 )}
               </TouchableOpacity>
             )}
           />
 
-          <TouchableOpacity style={styles.addAccountButton} onPress={onAddAccount}>
-            <Ionicons name="add-circle-outline" size={24} color="#fff" style={{ marginRight: 10 }} />
-            <Text style={styles.addAccountText}>Add Account</Text>
+          <TouchableOpacity style={[styles.addAccountButton, { borderTopColor: colors.border }]} onPress={onAddAccount}>
+            <Ionicons name="add-circle-outline" size={24} color={colors.text} style={{ marginRight: 10 }} />
+            <Text style={[styles.addAccountText, { color: colors.text }]}>Add Account</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -203,7 +208,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   usernameHeaderText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,
@@ -215,10 +219,8 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   bottomSheetModal: {
-    backgroundColor: '#1c1c1e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -229,13 +231,12 @@ const styles = StyleSheet.create({
   modalDragIndicator: {
     width: 40,
     height: 5,
-    backgroundColor: '#3a3a3c',
+    backgroundColor: 'rgba(100,100,100,0.5)',
     borderRadius: 3,
     alignSelf: 'center',
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 20,
@@ -246,7 +247,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2c2c2e',
   },
   accountAvatar: {
     width: 40,
@@ -256,7 +256,6 @@ const styles = StyleSheet.create({
   },
   accountUsername: {
     flex: 1,
-    color: '#fff',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -266,9 +265,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 15,
     marginTop: 10,
+    borderTopWidth: 1,
   },
   addAccountText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },

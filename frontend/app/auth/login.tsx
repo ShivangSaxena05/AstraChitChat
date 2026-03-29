@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
 import { handleErrorResponse } from '@/services/errorHandler';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -16,6 +17,7 @@ export default function LoginScreen() {
   const [mfaTimer, setMfaTimer] = useState(300); // 5 minutes
   const router = useRouter();
   const { connect } = useSocket();
+  const colors = useTheme();
 
   // ✅ FIX 1.3: 2FA Timeout protection
   useEffect(() => {
@@ -216,7 +218,7 @@ export default function LoginScreen() {
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.card} />
         ) : (
           <Text style={styles.buttonText}>
             {requires2FA ? 'Verify Code' : 'Login'}
@@ -247,7 +249,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#fff',
   },
   title: {
     fontSize: 24,
@@ -257,14 +258,12 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     padding: 12,
     marginBottom: 10,
     borderRadius: 8,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -274,19 +273,16 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },
   link: {
     textAlign: 'center',
-    color: '#007AFF',
     marginTop: 15,
     fontSize: 14,
   },
   timer: {
     textAlign: 'center',
-    color: '#ff6b6b',
     fontSize: 14,
     marginBottom: 10,
   },

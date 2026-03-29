@@ -63,14 +63,14 @@ export default function ProfilePictureModal({ visible, uri, isEditable, onClose,
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.header}>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Ionicons name="close" size={32} color="#fff" />
+              <Ionicons name="close" size={32} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
           <View style={styles.content}>
             {!uri || uri.includes('anonymous-avatar-icon') || uri.includes('pravatar.cc') ? (
               <View style={[styles.imagePlaceholder, styles.image]}>
-                <Ionicons name="person" size={120} color="#888" />
+                <Ionicons name="person" size={120} color="#888888" />
               </View>
             ) : (
               <Image source={{ uri }} style={styles.image} resizeMode="contain" />
@@ -83,10 +83,10 @@ export default function ProfilePictureModal({ visible, uri, isEditable, onClose,
                  disabled={uploading}
               >
                 {uploading ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="#ffffff" />
                 ) : (
                   <>
-                    <Ionicons name="camera" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Ionicons name="camera" size={20} color="#ffffff" style={{ marginRight: 8 }} />
                     <ThemedText style={styles.changePhotoText}>Change Photo</ThemedText>
                   </>
                 )}
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
   },
   imagePlaceholder: {
-    backgroundColor: '#222',
+    backgroundColor: '#1a1a1a', // Theme: dark background
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     marginTop: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#0a7ea4', // Theme: light.info / primary tint
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 30,
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   changePhotoText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     fontSize: 16,
     fontWeight: 'bold',
   }

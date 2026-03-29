@@ -1,12 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function FeaturedContentCard() {
+  const colors = useTheme();
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Featured Content</Text>
+    <View style={[styles.container, { backgroundColor: colors.card }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Featured Content</Text>
       {/* Placeholder for featured content */}
-      <Text style={styles.placeholder}>Featured posts will appear here</Text>
+      <Text style={[styles.placeholder, { color: colors.textTertiary }]}>Featured posts will appear here</Text>
     </View>
   );
 }
@@ -15,16 +18,13 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#000',
   },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: 'white',
     marginBottom: 8,
   },
   placeholder: {
-    color: '#888',
     fontSize: 14,
   },
 });

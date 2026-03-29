@@ -9,8 +9,10 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SocketProvider } from '@/contexts/SocketContext';
 import { CallProvider } from '@/contexts/CallContext';
+import { ThemeProvider as CustomThemeProvider } from '@/contexts/ThemeContext';
 import CallOverlay from '@/components/CallOverlay';
 import { validateToken } from '@/services/tokenManager';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -26,6 +28,7 @@ interface AuthState {
 // Root Layout Content (wrapped by providers)
 function RootLayoutContent() {
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const [authState, setAuthState] = useState<AuthState>({
     isLoading: true,
     isSignedIn: false,
@@ -98,8 +101,8 @@ function RootLayoutContent() {
   // Show splash screen while checking auth status
   if (authState.isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.tint} />
       </View>
     );
   }
@@ -128,11 +131,13 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   return (
-    <SocketProvider>
-      <CallProvider>
-        <RootLayoutContent />
-      </CallProvider>
-    </SocketProvider>
+    <CustomThemeProvider>
+      <SocketProvider>
+        <CallProvider>
+          <RootLayoutContent />
+        </CallProvider>
+      </SocketProvider>
+    </CustomThemeProvider>
   );
 }
 
@@ -141,6 +146,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
   },
 });

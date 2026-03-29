@@ -24,7 +24,7 @@ const chatDetailStyles = StyleSheet.create({
     marginLeft: 12,
   },
   partnerName: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     fontSize: 17,
     fontWeight: '600',
     marginBottom: 2,
@@ -81,7 +81,7 @@ const chatDetailStyles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 20,
     elevation: 1,
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.1)', // Theme: shadow with transparency
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 1,
@@ -161,7 +161,7 @@ const chatDetailStyles = StyleSheet.create({
     marginBottom: 2,
   },
   sendButtonDisabled: { backgroundColor: '#3b4a54' },
-  sendButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  sendButtonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 }, // Theme: white text
   sendButtonTextDisabled: { color: '#8b9a9f' },
   callHoverContainer: { 
     position: 'absolute', 
@@ -182,7 +182,7 @@ const chatDetailStyles = StyleSheet.create({
   },
   circularProgress: { position: 'absolute' },
   callHoverText: { 
-    color: '#fff', 
+    color: '#ffffff', // Theme: white text
     marginTop: 12, 
     fontWeight: 'bold', 
     fontSize: 14, 

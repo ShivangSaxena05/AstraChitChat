@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { StyleSheet, Text, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedText } from './themed-text';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface ExpandableBioProps {
   text: string;
@@ -12,10 +13,11 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
   const [isExpanded, setIsExpanded] = useState(false);
   const [isTruncated, setIsTruncated] = useState(false);
   const router = useRouter();
+  const colors = useTheme();
 
   if (!text) return null;
 
-  // HIGH FIX: Properly reset truncation state when text changes
+  // Reset truncation state when text changes
   useEffect(() => {
     setIsTruncated(false);
     setIsExpanded(false);
@@ -26,7 +28,6 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
   };
 
   const handleMentionPress = (username: string) => {
-    // HIGH FIX: Add error handling for navigation
     try {
       router.push({
         pathname: '/(tabs)/(tabs)/explore' as any,
@@ -38,7 +39,6 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
   };
 
   const handleHashtagPress = (tag: string) => {
-    // HIGH FIX: Add error handling for navigation
     try {
       router.push({
         pathname: '/(tabs)/(tabs)/explore' as any,
@@ -56,19 +56,19 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
     return parts.map((part, i) => {
       if (part.match(/^https?:\/\//)) {
         return (
-          <Text key={i} onPress={() => handleURLPress(part)} style={styles.link}>
+          <Text key={i} onPress={() => handleURLPress(part)} style={[styles.link, { color: colors.success }]}>
             {part}
           </Text>
         );
       } else if (part.startsWith('@')) {
         return (
-          <Text key={i} onPress={() => handleMentionPress(part)} style={styles.link}>
+          <Text key={i} onPress={() => handleMentionPress(part)} style={[styles.link, { color: colors.success }]}>
             {part}
           </Text>
         );
       } else if (part.startsWith('#')) {
         return (
-          <Text key={i} onPress={() => handleHashtagPress(part)} style={styles.link}>
+          <Text key={i} onPress={() => handleHashtagPress(part)} style={[styles.link, { color: colors.success }]}>
             {part}
           </Text>
         );
@@ -95,12 +95,12 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
         {parseText(text)}
       </ThemedText>
       {isTruncated && !isExpanded && (
-        <Text onPress={() => setIsExpanded(true)} style={styles.readMore}>
+        <Text onPress={() => setIsExpanded(true)} style={[styles.readMore, { color: colors.textSecondary }]}>
           Read more
         </Text>
       )}
       {isTruncated && isExpanded && (
-        <Text onPress={() => setIsExpanded(false)} style={styles.readMore}>
+        <Text onPress={() => setIsExpanded(false)} style={[styles.readMore, { color: colors.textSecondary }]}>
           Show less
         </Text>
       )}
@@ -114,11 +114,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   link: {
-    color: '#4ADDAE',
+    // Color applied dynamically via inline style
   },
   readMore: {
-    color: '#888',
     marginTop: 2,
     fontWeight: 'bold',
-  }
+    // Color applied dynamically via inline style
+  },
 });

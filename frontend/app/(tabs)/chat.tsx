@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemedView } from '@/components/themed-view';
 import ChatBubble from '@/components/ChatBubble';
 import { useSocket } from '@/contexts/SocketContext';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Message {
   _id: string;
@@ -41,6 +42,7 @@ export default function ChatScreen() {
 
   const flatListRef = useRef<FlatList>(null);
   const { socket, isConnected, queueMessage } = useSocket();
+  const colors = useTheme();
 
   // ✅ FIX 5.1: Proper socket listener cleanup and initialization
   useEffect(() => {
@@ -166,7 +168,7 @@ export default function ChatScreen() {
   if (isLoading) {
     return (
       <ThemedView style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={colors.tint} />
       </ThemedView>
     );
   }
@@ -183,19 +185,20 @@ export default function ChatScreen() {
       />
       <View style={styles.inputContainer}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: colors.text, borderColor: colors.border }]}
           value={newMessage}
           onChangeText={setNewMessage}
           placeholder="Type a message..."
+          placeholderTextColor={colors.placeholder}
           editable={!isSending}
         />
         <TouchableOpacity
-          style={[styles.sendButton, isSending && styles.sendButtonDisabled]}
+          style={[styles.sendButton, { backgroundColor: colors.tint }, isSending && styles.sendButtonDisabled]}
           onPress={sendMessage}
           disabled={isSending}
         >
           {isSending ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={colors.card} size="small" />
           ) : (
             <Text style={styles.sendButtonText}>Send</Text>
           )}
@@ -226,37 +229,34 @@ const styles = StyleSheet.create({
   },
   sent: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#0a7ea4', // Theme: light.info / primary tint
   },
   received: {
     alignSelf: 'flex-start',
-    backgroundColor: '#E5E5EA',
+    backgroundColor: '#e8e8e8', // Theme: light.backgroundTertiary
   },
   messageText: {
-    color: '#000',
+    color: '#1a1a1a', // Theme: light.text
   },
   timestamp: {
     fontSize: 12,
-    color: '#666',
+    color: '#888888', // Theme: light.textTertiary
     marginTop: 5,
   },
   inputContainer: {
     flexDirection: 'row',
     padding: 10,
     borderTopWidth: 1,
-    borderTopColor: '#ddd',
   },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 10,
     marginRight: 10,
   },
   sendButton: {
-    backgroundColor: '#007AFF',
     borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   sendButtonText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     fontWeight: 'bold',
   },
 });

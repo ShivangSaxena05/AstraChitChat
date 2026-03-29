@@ -3,6 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, Image, Dimensions, Platform, 
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import { useTheme } from '@/hooks/use-theme-color';
 
 let RTCView: any = null;
 if (Platform.OS !== 'web') {
@@ -110,6 +111,8 @@ const DraggablePIP = React.memo(
 );
 
 export default function CallScreen(props: CallScreenProps) {
+  const colors = useTheme();
+
   // ✅ FIX 4.3: Early return optimization
   if (!props.visible) {
     return null;
@@ -130,17 +133,17 @@ export default function CallScreen(props: CallScreenProps) {
       return (
         <View style={styles.incomingControls}>
           <TouchableOpacity 
-            style={[styles.controlButton, styles.declineButton]} 
+            style={[styles.controlButton, { backgroundColor: colors.error }, styles.declineButton]} 
             onPress={props.onDecline}
           >
-            <Ionicons name="close" size={32} color="#fff" />
+            <Ionicons name="close" size={32} color={colors.background} />
             <Text style={styles.controlText}>Decline</Text>
           </TouchableOpacity>
           <TouchableOpacity 
-            style={[styles.controlButton, styles.acceptButton]} 
+            style={[styles.controlButton, { backgroundColor: colors.success }, styles.acceptButton]} 
             onPress={() => props.onAccept(props.isVideoCallContext)}
           >
-            <Ionicons name="call" size={32} color="#fff" />
+            <Ionicons name="call" size={32} color={colors.background} />
             <Text style={styles.controlText}>Accept</Text>
           </TouchableOpacity>
         </View>
@@ -158,7 +161,7 @@ export default function CallScreen(props: CallScreenProps) {
           <Ionicons 
             name={props.isMuted ? "mic-off" : "mic"} 
             size={24} 
-            color="#fff" 
+            color={colors.background} 
           />
         </TouchableOpacity>
         
@@ -172,7 +175,7 @@ export default function CallScreen(props: CallScreenProps) {
             <Ionicons 
               name={props.isSpeaker ? "volume-high" : "volume-medium"} 
               size={24} 
-              color="#fff" 
+              color={colors.background} 
             />
           </TouchableOpacity>
         )}
@@ -192,7 +195,7 @@ export default function CallScreen(props: CallScreenProps) {
           <Ionicons 
             name={props.isVideoEnabled ? "videocam" : "videocam-off"} 
             size={24} 
-            color="#fff" 
+            color={colors.background} 
           />
         </TouchableOpacity>
 
@@ -203,28 +206,28 @@ export default function CallScreen(props: CallScreenProps) {
             disabled={isConnecting}
             activeOpacity={isConnecting ? 1 : 0.7}
           >
-            <Ionicons name="camera-reverse" size={24} color="#fff" />
+            <Ionicons name="camera-reverse" size={24} color={colors.background} />
           </TouchableOpacity>
         )}
 
         <TouchableOpacity 
-          style={[styles.iconButton, styles.endButton]} 
+          style={[styles.iconButton, { backgroundColor: colors.error }, styles.endButton]} 
           onPress={props.onEnd}
         >
           <Ionicons 
             name="call" 
             size={24} 
-            color="#fff" 
+            color={colors.background} 
             style={{ transform: [{ rotate: '135deg' }] }} 
           />
         </TouchableOpacity>
       </View>
     );
-  }, [props.status, props.isMuted, props.isSpeaker, props.isVideoEnabled, props.isVideoCallContext, isConnecting, props.onMute, props.onSpeaker, props.onSwitchVideo, props.onUpgradeToVideo, props.onSwitchCamera, props.onEnd]);
+  }, [props.status, props.isMuted, props.isSpeaker, props.isVideoEnabled, props.isVideoCallContext, isConnecting, props.onMute, props.onSpeaker, props.onSwitchVideo, props.onUpgradeToVideo, props.onSwitchCamera, props.onEnd, colors]);
 
   return (
     <Modal visible={props.visible} animationType="fade" transparent={false}>
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         
         {/* Fullscreen Background Layer (Remote Video OR Fallback) */}
         <View style={StyleSheet.absoluteFill}>
@@ -234,12 +237,12 @@ export default function CallScreen(props: CallScreenProps) {
              ) : RTCView ? (
                <RTCView
                  streamURL={props.remoteStream.toURL ? props.remoteStream.toURL() : ''}
-                 style={styles.remoteVideo}
+                 style={[styles.remoteVideo, { backgroundColor: colors.background }]}
                  objectFit="cover"
                />
              ) : null
            ) : (
-             <View style={styles.fallbackBackground}>
+             <View style={[styles.fallbackBackground, { backgroundColor: colors.backgroundTertiary }]}>
                 <Image
                   source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}
                   style={[styles.profileImageBlur, props.status === 'incoming' && { opacity: 0.5 }]}
@@ -264,8 +267,8 @@ export default function CallScreen(props: CallScreenProps) {
                   />
                 ) : null
              ) : (
-                <View style={styles.pipFallback}>
-                   <Ionicons name="person" size={40} color="#fff" />
+                <View style={[styles.pipFallback, { backgroundColor: colors.backgroundSecondary }]}>
+                   <Ionicons name="person" size={40} color={colors.text} />
                 </View>
              )}
           </DraggablePIP>
@@ -276,13 +279,13 @@ export default function CallScreen(props: CallScreenProps) {
           <View style={styles.header}>
             <Image
               source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}
-              style={styles.headerProfileImage}
+              style={[styles.headerProfileImage, { borderColor: colors.tint }]}
             />
-            <Text style={styles.nameText}>{props.otherUser?.username || 'Unknown'}</Text>
+            <Text style={[styles.nameText, { color: colors.text }]}>{props.otherUser?.username || 'Unknown'}</Text>
             
             <View style={styles.statusContainer}>
-              {isConnecting && <ActivityIndicator size="small" color="#4ADDAE" style={{ marginRight: 8 }} />}
-              <Text style={styles.timerText}>
+              {isConnecting && <ActivityIndicator size="small" color={colors.success} style={{ marginRight: 8 }} />}
+              <Text style={[styles.timerText, { color: colors.tint }]}>
                 {props.status === 'incoming' ? 'Incoming Call...' : 
                 isConnecting ? 'Connecting...' : 
                 props.isVideoUpgradePending ? 'Requesting Video Upgrade...' :
@@ -298,10 +301,10 @@ export default function CallScreen(props: CallScreenProps) {
                     {props.otherUser?.username || 'User'} is requesting to switch to a Video Call.
                  </Text>
                  <View style={styles.upgradeRequestActions}>
-                    <TouchableOpacity style={[styles.actionBtn, styles.declineButton]} onPress={props.onDeclineVideoUpgrade}>
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.error }]} onPress={props.onDeclineVideoUpgrade}>
                        <Text style={styles.actionBtnText}>Decline</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionBtn, styles.acceptVideoButton]} onPress={props.onAcceptVideoUpgrade}>
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success }]} onPress={props.onAcceptVideoUpgrade}>
                        <Text style={styles.actionBtnText}>Accept</Text>
                     </TouchableOpacity>
                  </View>
@@ -318,17 +321,17 @@ export default function CallScreen(props: CallScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    // backgroundColor will be applied dynamically
   },
   remoteVideo: {
     flex: 1,
     width: width,
     height: height,
-    backgroundColor: '#000',
+    // backgroundColor will be applied dynamically
   },
   fallbackBackground: {
     flex: 1,
-    backgroundColor: '#111',
+    // backgroundColor will be applied dynamically
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -346,9 +349,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.5)',
-    backgroundColor: '#222',
+    // backgroundColor will be applied dynamically
     elevation: 10,
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.3)', // Theme: shadow with transparency
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 5,
@@ -362,7 +365,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#333',
+    // backgroundColor will be applied dynamically
   },
   videoOverlay: {
     flex: 1,
@@ -383,18 +386,18 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: '#4ADDAE',
+    // borderColor will be applied dynamically
   },
   nameText: {
-    color: '#fff',
     fontSize: 24,
     fontWeight: '700',
+    // color will be applied dynamically
   },
   timerText: {
-    color: '#4ADDAE',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 8,
+    // color will be applied dynamically
   },
   controlsBottomWrapper: {
     paddingBottom: 40,
@@ -426,7 +429,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
   },
   endButton: {
-    backgroundColor: '#FF3B30',
+    // backgroundColor will be applied dynamically
     width: 64,
     height: 64,
     borderRadius: 32,
@@ -436,25 +439,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   acceptButton: {
-    backgroundColor: '#34C759',
+    // backgroundColor will be applied dynamically
     width: 70,
     height: 70,
     borderRadius: 35,
   },
   acceptVideoButton: {
-    backgroundColor: '#007AFF',
+    // backgroundColor will be applied dynamically
     width: 70,
     height: 70,
     borderRadius: 35,
   },
   declineButton: {
-    backgroundColor: '#FF3B30',
+    // backgroundColor will be applied dynamically
     width: 70,
     height: 70,
     borderRadius: 35,
   },
   controlText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     marginTop: 8,
     fontSize: 14,
     fontWeight: '600',
@@ -468,7 +471,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   upgradeRequestText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 20,
@@ -484,7 +487,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   actionBtnText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: white text
     fontWeight: 'bold',
     fontSize: 16,
   },

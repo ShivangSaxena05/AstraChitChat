@@ -3,6 +3,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -57,16 +58,15 @@ const StatCard = ({
   label,
   icon,
   onPress,
-  colorScheme,
   delay = 0
 }: {
   value: number;
   label: string;
   icon: string;
   onPress?: () => void;
-  colorScheme: string | null | undefined;
   delay?: number;
 }) => {
+  const colors = useTheme();
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -90,12 +90,12 @@ const StatCard = ({
   }, []);
 
   const cardStyle = {
-    backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.03)',
-    borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+    backgroundColor: colors.card,
+    borderColor: colors.border,
   };
 
   const iconBgStyle = {
-    backgroundColor: colorScheme === 'dark' ? 'rgba(74,221,174,0.15)' : 'rgba(74,221,174,0.1)',
+    backgroundColor: `${colors.tint}15`,
   };
 
   return (
@@ -124,20 +124,20 @@ const StatCard = ({
           alignItems: 'center',
           marginBottom: 8,
         }, iconBgStyle]}>
-          <Ionicons name={icon as any} size={18} color="#4ADDAE" />
+          <Ionicons name={icon as any} size={18} color={colors.tint} />
         </View>
         <ThemedText style={{
           fontSize: 22,
           fontWeight: '800',
           letterSpacing: -0.5,
-          color: colorScheme === 'dark' ? '#fff' : '#000',
+          color: colors.text,
         }}>
           {formatNumber(value)}
         </ThemedText>
         <ThemedText style={{
           fontSize: 11,
           fontWeight: '600',
-          color: colorScheme === 'dark' ? '#888' : '#666',
+          color: colors.textSecondary,
           marginTop: 2,
           textTransform: 'uppercase',
           letterSpacing: 0.5,
@@ -159,6 +159,7 @@ export default function ProfileScreen() {
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const { socket } = useSocket();
 
 
@@ -266,12 +267,12 @@ export default function ProfileScreen() {
       <Image source={{ uri: item.mediaUrl }} style={styles.gridImage} />
       {item.mediaType === 'video' && (
         <View style={styles.mediaIndicator}>
-          <Ionicons name="play-circle" size={24} color="#fff" />
+          <Ionicons name="play-circle" size={24} color={colors.background} />
         </View>
       )}
       {item.mediaType === 'reel' && (
         <View style={styles.mediaIndicator}>
-          <Ionicons name="film" size={20} color="#fff" />
+          <Ionicons name="film" size={20} color={colors.background} />
         </View>
       )}
       <View style={styles.gridItemOverlay} />
@@ -284,7 +285,7 @@ export default function ProfileScreen() {
         <Ionicons
           name={activeTab === 'posts' ? 'camera-outline' : activeTab === 'videos' ? 'videocam-outline' : 'film-outline'}
           size={48}
-          color={colorScheme === 'dark' ? '#444' : '#ccc'}
+          color={colors.iconMuted}
         />
       </View>
       <ThemedText style={styles.emptyTitle}>
@@ -333,7 +334,7 @@ export default function ProfileScreen() {
       position: 'relative',
       padding: 4,
       borderRadius: 60,
-      backgroundColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
+      backgroundColor: colors.card,
     },
     profileImageRing: {
       position: 'absolute',
@@ -343,15 +344,15 @@ export default function ProfileScreen() {
       bottom: 0,
       borderRadius: 60,
       borderWidth: 3,
-      borderColor: '#4ADDAE',
+      borderColor: colors.tint,
     },
     profileImage: {
       width: 110,
       height: 110,
       borderRadius: 55,
       borderWidth: 4,
-      borderColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#eee',
+      borderColor: colors.card,
+      backgroundColor: colors.backgroundSecondary,
     },
     onlineIndicator: {
       position: 'absolute',
@@ -360,9 +361,9 @@ export default function ProfileScreen() {
       width: 20,
       height: 20,
       borderRadius: 10,
-      backgroundColor: '#4ADDAE',
+      backgroundColor: colors.success,
       borderWidth: 3,
-      borderColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
+      borderColor: colors.card,
     },
 
     // Stats Container - Updated
@@ -396,7 +397,7 @@ export default function ProfileScreen() {
       marginLeft: 6,
     },
     pronounBadge: {
-      backgroundColor: colorScheme === 'dark' ? 'rgba(74,221,174,0.15)' : 'rgba(74,221,174,0.1)',
+      backgroundColor: `${colors.tint}15`,
       paddingHorizontal: 10,
       paddingVertical: 4,
       borderRadius: 12,
@@ -405,12 +406,12 @@ export default function ProfileScreen() {
     pronounText: {
       fontSize: 11,
       fontWeight: '600',
-      color: '#4ADDAE',
+      color: colors.tint,
     },
     username: {
       fontSize: 14,
       fontWeight: '500',
-      color: colorScheme === 'dark' ? '#8e8e93' : '#8e8e93',
+      color: colors.textSecondary,
       marginBottom: 12,
     },
 
@@ -426,7 +427,7 @@ export default function ProfileScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+      backgroundColor: colors.backgroundSecondary,
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 20,
@@ -434,7 +435,7 @@ export default function ProfileScreen() {
     metadataText: {
       fontSize: 12,
       fontWeight: '500',
-      color: colorScheme === 'dark' ? '#aaa' : '#666',
+      color: colors.textSecondary,
     },
 
     // Enhanced Buttons
@@ -450,24 +451,24 @@ export default function ProfileScreen() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#f2f2f7',
+      backgroundColor: colors.backgroundSecondary,
       paddingVertical: 12,
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: colorScheme === 'dark' ? '#2c2c2e' : '#e5e5ea',
+      borderColor: colors.border,
       gap: 6,
     },
     primaryButton: {
-      backgroundColor: '#4ADDAE',
-      borderColor: '#4ADDAE',
+      backgroundColor: colors.tint,
+      borderColor: colors.tint,
     },
     buttonText: {
       fontWeight: '600',
       fontSize: 14,
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
     },
     primaryButtonText: {
-      color: '#000',
+      color: colors.background,
     },
 
     // Enhanced Tab Container
@@ -476,7 +477,7 @@ export default function ProfileScreen() {
       marginHorizontal: 20,
       marginTop: 8,
       marginBottom: 8,
-      backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+      backgroundColor: colors.backgroundSecondary,
       borderRadius: 14,
       padding: 4,
     },
@@ -490,8 +491,8 @@ export default function ProfileScreen() {
       gap: 6,
     },
     activeTab: {
-      backgroundColor: colorScheme === 'dark' ? '#2c2c2e' : '#fff',
-      shadowColor: '#000',
+      backgroundColor: colors.card,
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.1,
       shadowRadius: 4,
@@ -500,10 +501,10 @@ export default function ProfileScreen() {
     tabText: {
       fontSize: 12,
       fontWeight: '600',
-      color: colorScheme === 'dark' ? '#666' : '#999',
+      color: colors.textTertiary,
     },
     activeTabText: {
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
       fontWeight: '700',
     },
 
@@ -549,34 +550,34 @@ export default function ProfileScreen() {
       width: 100,
       height: 100,
       borderRadius: 50,
-      backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+      backgroundColor: colors.backgroundSecondary,
       justifyContent: 'center',
       alignItems: 'center',
       marginBottom: 20,
       borderWidth: 2,
-      borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+      borderColor: colors.border,
       borderStyle: 'dashed',
     },
     emptyTitle: {
       fontSize: 18,
       fontWeight: '700',
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
       marginBottom: 8,
     },
     emptySubtext: {
       fontSize: 14,
-      color: colorScheme === 'dark' ? '#666' : '#999',
+      color: colors.textSecondary,
       textAlign: 'center',
     },
 
     // Header Content Wrapper
     headerContentWrapper: {
-      backgroundColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff',
+      backgroundColor: colors.background,
       borderTopLeftRadius: 32,
       borderTopRightRadius: 32,
       marginTop: -28,
       paddingTop: 16,
-      shadowColor: '#000',
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: -6 },
       shadowOpacity: 0.15,
       shadowRadius: 12,
@@ -599,7 +600,7 @@ export default function ProfileScreen() {
     coverPhotoPlaceholder: {
       width: '100%',
       height: '100%',
-      backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#e8e8e8',
+      backgroundColor: colors.backgroundSecondary,
     },
     coverPhotoOverlay: {
       position: 'absolute',
@@ -609,14 +610,14 @@ export default function ProfileScreen() {
       bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.2)',
     },
-  }), [colorScheme]);
+  }), [colorScheme, colors]);
 
   if (loading) {
     return (
       <ThemedView style={styles.loadingContainer}>
         <View style={{ alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#4ADDAE" />
-          <ThemedText style={{ marginTop: 16, color: colorScheme === 'dark' ? '#888' : '#666', fontSize: 14 }}>
+          <ActivityIndicator size="large" color={colors.tint} />
+          <ThemedText style={{ marginTop: 16, color: colors.textSecondary, fontSize: 14 }}>
             Loading profile...
           </ThemedText>
         </View>
@@ -637,7 +638,7 @@ export default function ProfileScreen() {
             <View style={styles.profileImageRing} />
             {!user.profilePicture || user.profilePicture.includes('anonymous-avatar-icon') || user.profilePicture.includes('pravatar.cc') ? (
               <View style={[styles.profileImage, { justifyContent: 'center', alignItems: 'center' }]}>
-                <Ionicons name="person" size={60} color={colorScheme === 'dark' ? '#aaa' : '#888'} />
+                <Ionicons name="person" size={60} color={colors.iconSecondary} />
               </View>
             ) : (
               <Image source={{ uri: user.profilePicture }} style={styles.profileImage} />
@@ -652,14 +653,12 @@ export default function ProfileScreen() {
             value={user.stats.posts}
             label="Posts"
             icon="grid-outline"
-            colorScheme={colorScheme}
             delay={0}
           />
           <StatCard
             value={user.stats.followers}
             label="Followers"
             icon="people-outline"
-            colorScheme={colorScheme}
             delay={100}
             onPress={() => router.push({
               pathname: '/followers-list' as any,
@@ -670,7 +669,6 @@ export default function ProfileScreen() {
             value={user.stats.following}
             label="Following"
             icon="person-add-outline"
-            colorScheme={colorScheme}
             delay={200}
             onPress={() => router.push({
               pathname: '/followers-list' as any,
@@ -684,7 +682,7 @@ export default function ProfileScreen() {
       <View style={styles.bioContainer}>
         <View style={styles.nameRow}>
           <ThemedText style={styles.nameText}>{user.name || user.username}</ThemedText>
-          <Ionicons name="checkmark-circle" size={20} color="#4ADDAE" style={styles.verifiedBadge} />
+          <Ionicons name="checkmark-circle" size={20} color={colors.tint} style={styles.verifiedBadge} />
           {user.pronouns ? (
             <View style={styles.pronounBadge}>
               <ThemedText style={styles.pronounText}>{user.pronouns}</ThemedText>
@@ -700,15 +698,15 @@ export default function ProfileScreen() {
         <View style={styles.metadataRow}>
           {user.location ? (
             <View style={styles.metadataItem}>
-              <Ionicons name="location" size={14} color="#4ADDAE" />
+              <Ionicons name="location" size={14} color={colors.tint} />
               <ThemedText style={styles.metadataText}>{user.location}</ThemedText>
             </View>
           ) : null}
 
           {user.website ? (
             <TouchableOpacity style={styles.metadataItem} onPress={() => openWebsite(user.website!)}>
-              <Ionicons name="link" size={14} color="#007AFF" />
-              <ThemedText style={[styles.metadataText, { color: '#007AFF' }]}>
+              <Ionicons name="link" size={14} color={colors.accent} />
+              <ThemedText style={[styles.metadataText, { color: colors.accent }]}>
                 {user.website.replace(/^https?:\/\//, '')}
               </ThemedText>
             </TouchableOpacity>
@@ -716,7 +714,7 @@ export default function ProfileScreen() {
 
           {user.stats.likes > 0 && (
             <View style={styles.metadataItem}>
-              <Ionicons name="heart" size={14} color="#ff3b30" />
+              <Ionicons name="heart" size={14} color={colors.error} />
               <ThemedText style={styles.metadataText}>{formatNumber(user.stats.likes)} likes</ThemedText>
             </View>
           )}
@@ -730,7 +728,7 @@ export default function ProfileScreen() {
           onPress={() => router.push('/profile/edit' as any)}
           activeOpacity={0.8}
         >
-          <Ionicons name="pencil" size={16} color="#000" />
+          <Ionicons name="pencil" size={16} color={colors.background} />
           <ThemedText style={[styles.buttonText, styles.primaryButtonText]}>Edit Profile</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity
@@ -738,7 +736,7 @@ export default function ProfileScreen() {
           onPress={handleShareProfile}
           activeOpacity={0.8}
         >
-          <Ionicons name="share-outline" size={16} color={colorScheme === 'dark' ? '#fff' : '#000'} />
+          <Ionicons name="share-outline" size={16} color={colors.icon} />
           <ThemedText style={styles.buttonText}>Share</ThemedText>
         </TouchableOpacity>
       </View>
@@ -753,7 +751,7 @@ export default function ProfileScreen() {
           <Ionicons
             name={activeTab === 'posts' ? 'grid' : 'grid-outline'}
             size={18}
-            color={activeTab === 'posts' ? (colorScheme === 'dark' ? '#fff' : '#000') : (colorScheme === 'dark' ? '#666' : '#999')}
+            color={activeTab === 'posts' ? colors.text : colors.textTertiary}
           />
           <ThemedText style={[styles.tabText, activeTab === 'posts' && styles.activeTabText]}>Posts</ThemedText>
         </TouchableOpacity>
@@ -765,7 +763,7 @@ export default function ProfileScreen() {
           <Ionicons
             name={activeTab === 'videos' ? 'videocam' : 'videocam-outline'}
             size={18}
-            color={activeTab === 'videos' ? (colorScheme === 'dark' ? '#fff' : '#000') : (colorScheme === 'dark' ? '#666' : '#999')}
+            color={activeTab === 'videos' ? colors.text : colors.textTertiary}
           />
           <ThemedText style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>Videos</ThemedText>
         </TouchableOpacity>
@@ -777,7 +775,7 @@ export default function ProfileScreen() {
           <Ionicons
             name={activeTab === 'reels' ? 'film' : 'film-outline'}
             size={18}
-            color={activeTab === 'reels' ? (colorScheme === 'dark' ? '#fff' : '#000') : (colorScheme === 'dark' ? '#666' : '#999')}
+            color={activeTab === 'reels' ? colors.text : colors.textTertiary}
           />
           <ThemedText style={[styles.tabText, activeTab === 'reels' && styles.activeTabText]}>Reels</ThemedText>
         </TouchableOpacity>

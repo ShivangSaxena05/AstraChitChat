@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
 import { get } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Story {
   id: string;
@@ -15,6 +16,7 @@ const mockStories: Story[] = [
 ];
 
 export default function StoriesReelsComponent() {
+  const colors = useTheme();
   const [stories, setStories] = useState<Story[]>(mockStories);
   const [loading, setLoading] = useState(true);
 
@@ -55,14 +57,14 @@ export default function StoriesReelsComponent() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="small" color="#007AFF" />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="small" color={colors.tint} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
         {stories.map((story) => (
           <TouchableOpacity
@@ -70,16 +72,16 @@ export default function StoriesReelsComponent() {
             style={styles.storyContainer}
             onPress={() => handleStoryPress(story.id)}
           >
-            <View style={[styles.storyCircle, story.isUserStory && styles.addStoryCircle]}>
+            <View style={[styles.storyCircle, { borderColor: colors.tint }, story.isUserStory && styles.addStoryCircle]}>
               {story.profilePicture && !story.isUserStory ? (
                 <Image source={{ uri: story.profilePicture }} style={styles.storyImage} />
               ) : (
                 <View style={styles.addIcon}>
-                  <Text style={styles.addText}>+</Text>
+                  <Text style={[styles.addText, { color: colors.tint }]}>+</Text>
                 </View>
               )}
             </View>
-            <Text style={styles.username} numberOfLines={1}>
+            <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
               {story.username}
             </Text>
           </TouchableOpacity>
@@ -92,7 +94,7 @@ export default function StoriesReelsComponent() {
 const styles = StyleSheet.create({
   container: {
     paddingVertical: 10,
-    backgroundColor: '#000',
+    // backgroundColor will be applied dynamically
   },
   scrollView: {
     paddingHorizontal: 16,
@@ -106,7 +108,7 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    // borderColor will be applied dynamically
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
@@ -125,13 +127,13 @@ const styles = StyleSheet.create({
   },
   addText: {
     fontSize: 24,
-    color: '#007AFF',
     fontWeight: 'bold',
+    // color will be applied dynamically
   },
   username: {
     fontSize: 12,
-    color: 'white',
     textAlign: 'center',
     maxWidth: 60,
+    // color will be applied dynamically
   },
 });

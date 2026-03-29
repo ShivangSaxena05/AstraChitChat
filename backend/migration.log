@@ -1,0 +1,11 @@
+
+────────────────────────────────────────────────────────────
+  SCHEMA MIGRATION TOOL
+────────────────────────────────────────────────────────────
+
+[2026-03-28T18:59:27.984Z] [Migration] Environment: PRODUCTION
+[2026-03-28T18:59:27.987Z] [Migration] Batch size: 200
+[2026-03-28T18:59:27.988Z] [Migration] Concurrency: 3
+✗ Failed to connect to MongoDB: querySrv ECONNREFUSED _mongodb._tcp.astrachat.4u4hqac.mongodb.net
+[2026-03-28T18:59:28.029Z] [Migration] Fatal error: querySrv ECONNREFUSED _mongodb._tcp.astrachat.4u4hqac.mongodb.net
+✗ Migration failed

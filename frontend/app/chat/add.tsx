@@ -6,6 +6,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { get, post } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface User {
   _id: string;
@@ -19,6 +20,7 @@ export default function AddChatScreen() {
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const colors = useTheme();
 
   useEffect(() => {
     if (searchQuery.trim().length > 0) {
@@ -62,14 +64,14 @@ export default function AddChatScreen() {
   };
 
   const renderUser = ({ item }: { item: User }) => (
-    <TouchableOpacity style={styles.userItem} onPress={() => startChat(item)}>
+    <TouchableOpacity style={[styles.userItem, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => startChat(item)}>
       <Image 
         source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} 
         style={styles.avatar} 
       />
       <View style={styles.userInfo}>
         <ThemedText type="subtitle">{item.username}</ThemedText>
-        <Text style={styles.userName}>{item.name}</Text>
+        <Text style={{ color: colors.textTertiary, marginTop: 4 }}>{item.name}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -81,11 +83,11 @@ export default function AddChatScreen() {
 
       <View style={styles.searchContainer}>
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { backgroundColor: colors.input, color: colors.text, borderColor: colors.border }]}
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search users by username or name..."
-          placeholderTextColor="#666"
+          placeholderTextColor={colors.placeholder}
           autoCapitalize="none"
           autoCorrect={false}
         />
@@ -119,32 +121,27 @@ export default function AddChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
   },
   backButton: {
     fontSize: 24,
     marginRight: 16,
-    color: '#4ADDAE',
+    color: '#388e3c', // Theme: light.success (static style, using fallback)
   },
   searchContainer: {
     padding: 16,
   },
   searchInput: {
     borderWidth: 1,
-    borderColor: '#333',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#fff',
-    backgroundColor: '#111',
   },
   loadingContainer: {
     flex: 1,
@@ -152,7 +149,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#666',
     fontSize: 16,
   },
   resultsList: {
@@ -162,12 +158,10 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   userItem: {
-    backgroundColor: '#111',
     padding: 16,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#333',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -176,13 +170,11 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     marginRight: 12,
-    backgroundColor: '#333',
   },
   userInfo: {
     flex: 1,
   },
   userName: {
-    color: '#666',
     marginTop: 4,
   },
   emptyContainer: {
@@ -193,7 +185,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
     textAlign: 'center',
   },
 });

@@ -25,6 +25,7 @@ import PostCard from '@/components/PostCard';
 import TopHeaderComponent from '@/components/TopHeaderComponent';
 import SearchBarComponent from '@/components/SearchBarComponent';
 import { useSocket } from '@/contexts/SocketContext';
+import { useTheme } from '@/hooks/use-theme-color';
 
 const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
@@ -83,10 +84,24 @@ export default function HomeScreen() {
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState<number | null>(null);
   const [likedFlicks, setLikedFlicks] = useState<Set<string>>(new Set());
   const videoRefs = useRef<Record<string, Video | null>>({});
+  const colors = useTheme();
 
   // Initial load
   useEffect(() => {
     fetchFlicks();
+  }, []);
+
+  // CRITICAL FIX: Cleanup video refs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Stop all videos and clear refs
+      Object.values(videoRefs.current).forEach(ref => {
+        if (ref) {
+          ref.pauseAsync().catch(() => {});
+        }
+      });
+      videoRefs.current = {};
+    };
   }, []);
 
   // Fetch flicks
@@ -222,6 +237,22 @@ export default function HomeScreen() {
     const isVisible = index === currentVisibleIndex;
     const isLiked = likedFlicks.has(item._id);
 
+    // CRITICAL FIX: Validate media URL before rendering
+    if (!item.mediaUrl || !item.user?.username) {
+      return (
+        <View style={styles.flickContainer}>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Invalid media data</Text>
+          </View>
+        </View>
+      );
+    }
+
+    const handleVideoError = (error: any) => {
+      console.error('Video playback error for flick:', item._id, error);
+      Alert.alert('Video Error', 'Failed to play video. Please try again.');
+    };
+
     return (
       <View style={styles.flickContainer}>
         <Video
@@ -236,6 +267,7 @@ export default function HomeScreen() {
           isLooping
           shouldPlay={isVisible}
           isMuted={true}
+          onError={handleVideoError}
         />
         <View style={styles.overlay}>
           <View style={styles.overlayContent}>
@@ -261,7 +293,7 @@ export default function HomeScreen() {
                 style={styles.actionButton}
                 onPress={() => handleFlickLike(item._id)}
               >
-                <Text style={[styles.actionIcon, isLiked && { color: '#FF6B6B' }]}>
+                <Text style={[styles.actionIcon, isLiked && { color: colors.error }]}>
                   {isLiked ? '❤️' : '🤍'}
                 </Text>
               </TouchableOpacity>
@@ -322,8 +354,8 @@ export default function HomeScreen() {
     return (
       <ThemedView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4ADDAE" />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.accent }]}>Loading...</Text>
         </View>
       </ThemedView>
     );
@@ -385,8 +417,8 @@ export default function HomeScreen() {
                 <RefreshControl
                   refreshing={flicksRefreshing}
                   onRefresh={handleFlicksRefresh}
-                  tintColor="#4ADDAE"
-                  colors={['#4ADDAE']}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
                 />
               }
             />
@@ -403,8 +435,8 @@ export default function HomeScreen() {
                 <RefreshControl
                   refreshing={exploreRefreshing}
                   onRefresh={handleExploreRefresh}
-                  tintColor="#4ADDAE"
-                  colors={['#4ADDAE']}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
                 />
               }
               onEndReached={handleExploreLoadMore}
@@ -412,7 +444,7 @@ export default function HomeScreen() {
               showsVerticalScrollIndicator={false}
               ListFooterComponent={
                 exploreLoading && posts.length > 0 ? (
-                  <ActivityIndicator size="small" color="#4ADDAE" style={styles.footer} />
+                  <ActivityIndicator size="small" color={colors.accent} style={styles.footer} />
                 ) : null
               }
             />
@@ -427,7 +459,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
     position: 'relative',
   },
   loadingContainer: {
@@ -436,7 +467,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#4ADDAE',
     marginTop: 10,
     fontSize: 16,
   },
@@ -447,7 +477,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    color: '#666',
+    color: '#999999', // Theme: light.textTertiary
   },
   contentArea: {
     flex: 1,
@@ -462,7 +492,7 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
   usernameHeaderText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text / light fallback
     fontSize: 16, // Slightly smaller, more refined
     fontWeight: '600',
     letterSpacing: 0.5,
@@ -517,8 +547,8 @@ const styles = StyleSheet.create({
     left: 15,
     right: 15,
     height: 2,
-    backgroundColor: '#fff',
-    shadowColor: '#fff',
+    backgroundColor: '#ffffff', // Theme: white for glow
+    shadowColor: '#ffffff', // White glow
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 5,
@@ -531,12 +561,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     letterSpacing: 2,
     textTransform: 'uppercase',
-    color: 'rgba(255, 255, 255, 0.4)', 
+    color: 'rgba(255, 255, 255, 0.4)', // Theme: dark.textMuted with transparency
     zIndex: 4, 
     marginTop: 8, // Push text down a bit into the wider part of the trapezoid
   },
   activeTabText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text / white
     fontWeight: 'bold',
     zIndex: 4,
   },
@@ -549,6 +579,15 @@ const styles = StyleSheet.create({
   },
   video: {
     flex: 1,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   overlay: {
     position: 'absolute',
@@ -573,14 +612,12 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   username: {
-    color: '#fff',
     fontWeight: 'bold',
   },
   captionContainer: {
     marginBottom: 20,
   },
   caption: {
-    color: '#fff',
     fontSize: 16,
   },
   actions: {
@@ -593,7 +630,7 @@ const styles = StyleSheet.create({
   },
   actionIcon: {
     fontSize: 28,
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text / white
   },
 
   // Explore Styles
@@ -608,7 +645,7 @@ const styles = StyleSheet.create({
   exploreThumbnail: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#222',
+    backgroundColor: '#1a1a1a', // Theme: dark background fallback
   },
   exploreInfo: {
     position: 'absolute',
@@ -619,12 +656,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   exploreTitle: {
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text / white
     fontSize: 12,
     fontWeight: 'bold',
   },
   exploreMeta: {
-    color: '#aaa',
+    color: '#999999', // Theme: dark.textSecondary
     fontSize: 10,
     marginTop: 2,
   },
@@ -639,7 +676,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   bottomSheetModal: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#1a1a1a', // Theme: dark.backgroundTertiary
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
@@ -650,13 +687,13 @@ const styles = StyleSheet.create({
   modalDragIndicator: {
     width: 40,
     height: 5,
-    backgroundColor: '#3a3a3c',
+    backgroundColor: '#333333', // Theme: dark.border
     borderRadius: 3,
     alignSelf: 'center',
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 20,
@@ -667,7 +704,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2c2c2e',
+    borderBottomColor: '#2a2a2a', // Theme: dark.backgroundTertiary
   },
   accountAvatar: {
     width: 40,
@@ -677,7 +714,7 @@ const styles = StyleSheet.create({
   },
   accountUsername: {
     flex: 1,
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text
     fontSize: 16,
     fontWeight: '500',
   },
@@ -689,7 +726,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   addAccountText: {
-    color: '#fff',
+    color: '#ffffff', // Theme: dark.text
     fontSize: 16,
     fontWeight: '600',
   },

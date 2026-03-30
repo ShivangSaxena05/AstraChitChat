@@ -7,6 +7,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface User {
   _id: string;
@@ -25,6 +26,7 @@ export default function CreateGroupScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const router = useRouter();
+  const colors = useTheme();
 
   useEffect(() => {
     const fetchUserId = async () => {
@@ -104,56 +106,56 @@ export default function CreateGroupScreen() {
   };
 
   const renderSearchedUser = ({ item }: { item: User }) => (
-    <TouchableOpacity style={styles.userRow} onPress={() => toggleUserSelection(item)}>
+    <TouchableOpacity style={[styles.userRow, { borderBottomColor: colors.border }]} onPress={() => toggleUserSelection(item)}>
       <Image source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
       <View style={styles.userInfo}>
-        <ThemedText style={styles.userName}>{item.name}</ThemedText>
-        <Text style={styles.userHandle}>@{item.username}</Text>
+        <ThemedText style={[styles.userName, { color: colors.text }]}>{item.name}</ThemedText>
+        <Text style={[styles.userHandle, { color: colors.textTertiary }]}>@{item.username}</Text>
       </View>
-      <Ionicons name="add-circle-outline" size={24} color="#4ADDAE" />
+      <Ionicons name="add-circle-outline" size={24} color={colors.tint} />
     </TouchableOpacity>
   );
 
   const renderSelectedUser = ({ item }: { item: User }) => (
-    <View style={styles.selectedUserBadge}>
+    <View style={[styles.selectedUserBadge, { backgroundColor: colors.backgroundSecondary, borderRadius: 16 }]}>
       <Image source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.selectedAvatar} />
-      <Text style={styles.selectedUserName} numberOfLines={1}>{item.username}</Text>
+      <Text style={[styles.selectedUserName, { color: colors.text }]} numberOfLines={1}>{item.username}</Text>
       <TouchableOpacity 
-        style={styles.removeUserBtn} 
+        style={[styles.removeUserBtn, { backgroundColor: colors.card }]} 
         onPress={() => toggleUserSelection(item)}
       >
-        <Ionicons name="close-circle" size={20} color="#ff4444" />
+        <Ionicons name="close-circle" size={20} color={colors.error} />
       </TouchableOpacity>
     </View>
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       {/* Top Header with back navigation */}
       <TopHeaderComponent />
 
       {/* Group Info Input */}
-      <View style={styles.inputSection}>
-        <View style={styles.groupIconPlaceholder}>
-          <Ionicons name="camera" size={32} color="#aaa" />
+      <View style={[styles.inputSection, { backgroundColor: colors.card }]}>
+        <View style={[styles.groupIconPlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+          <Ionicons name="camera" size={32} color={colors.textMuted} />
         </View>
         <TextInput
-          style={styles.titleInput}
+          style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.tint }]}
           placeholder="Group Subject"
-          placeholderTextColor="#999"
+          placeholderTextColor={colors.textMuted}
           value={groupTitle}
           onChangeText={setGroupTitle}
           maxLength={25}
         />
       </View>
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: colors.backgroundSecondary }]} />
 
       {/* Selected Users Horizontal List */}
       {selectedUsers.length > 0 && (
-        <View style={styles.selectedSection}>
-          <Text style={styles.participantCountText}>Participants: {selectedUsers.length}</Text>
+        <View style={[styles.selectedSection, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          <Text style={[styles.participantCountText, { color: colors.textSecondary }]}>Participants: {selectedUsers.length}</Text>
           <FlatList
             horizontal
             data={selectedUsers}
@@ -166,25 +168,25 @@ export default function CreateGroupScreen() {
       )}
 
       {/* Search Bar */}
-      <View style={styles.searchSection}>
-        <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+      <View style={[styles.searchSection, { backgroundColor: colors.backgroundSecondary }]}>
+        <Ionicons name="search" size={20} color={colors.textMuted} style={styles.searchIcon} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: colors.text }]}
           placeholder="Search friends to add..."
-          placeholderTextColor="#999"
+          placeholderTextColor={colors.textMuted}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Ionicons name="close-circle" size={20} color="#999" />
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
 
       {/* Search Results */}
       {searching ? (
-        <ActivityIndicator size="large" color="#4ADDAE" style={styles.loader} />
+        <ActivityIndicator size="large" color={colors.tint} style={styles.loader} />
       ) : (
         <FlatList
           data={searchResults}
@@ -194,7 +196,7 @@ export default function CreateGroupScreen() {
           contentContainerStyle={styles.resultsList}
           ListEmptyComponent={
             searchQuery.trim().length > 0 ? (
-              <Text style={styles.emptyText}>No users found.</Text>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No users found.</Text>
             ) : null
           }
         />
@@ -206,17 +208,14 @@ export default function CreateGroupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#151718',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    paddingTop: 50, // accommodate safe area roughly
-    backgroundColor: '#1a1a1a',
+    paddingTop: 50,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
   },
   backButton: {
     padding: 4,
@@ -229,24 +228,21 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   createText: {
-    color: '#4ADDAE',
     fontWeight: 'bold',
     fontSize: 16,
   },
   disabledText: {
-    color: '#555',
+    fontSize: 16,
   },
   inputSection: {
     flexDirection: 'row',
     padding: 16,
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
   },
   groupIconPlaceholder: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -254,24 +250,18 @@ const styles = StyleSheet.create({
   titleInput: {
     flex: 1,
     fontSize: 18,
-    color: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#4ADDAE',
     paddingVertical: 8,
   },
   divider: {
     height: 10,
-    backgroundColor: '#000',
   },
   selectedSection: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
   },
   participantCountText: {
-    color: '#999',
     fontSize: 14,
     marginBottom: 8,
     fontWeight: 'bold',
@@ -291,7 +281,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   selectedUserName: {
-    color: '#fff',
     fontSize: 12,
     textAlign: 'center',
   },
@@ -299,13 +288,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -4,
     right: 4,
-    backgroundColor: '#1a1a1a',
     borderRadius: 10,
   },
   searchSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
     margin: 16,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -316,7 +303,6 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     paddingVertical: 12,
-    color: '#fff',
     fontSize: 16,
   },
   resultsList: {
@@ -328,7 +314,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#222',
   },
   avatar: {
     width: 50,
@@ -344,7 +329,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   userHandle: {
-    color: '#999',
     fontSize: 14,
     marginTop: 2,
   },
@@ -352,7 +336,6 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   emptyText: {
-    color: '#999',
     textAlign: 'center',
     marginTop: 32,
     fontSize: 16,

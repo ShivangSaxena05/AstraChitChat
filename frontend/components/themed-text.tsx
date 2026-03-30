@@ -16,6 +16,7 @@ export function ThemedText({
   ...rest
 }: ThemedTextProps) {
   const color = useThemeColor({ light: lightColor, dark: darkColor }, 'text');
+  const colors = useThemeColor({ light: lightColor, dark: darkColor }, 'tint');
 
   return (
     <Text
@@ -25,7 +26,7 @@ export function ThemedText({
         type === 'title' ? styles.title : undefined,
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
-        type === 'link' ? styles.link : undefined,
+        type === 'link' ? [styles.link, { color: colors }] : undefined,
         style,
       ]}
       {...rest}
@@ -55,6 +56,11 @@ const styles = StyleSheet.create({
   link: {
     lineHeight: 30,
     fontSize: 16,
-    color: '#0a7ea4',
+    // Color will be applied dynamically via inline style
   },
+});
+
+// Component-level color override for link type
+const LinkColorOverride = (colors: any) => ({
+  color: colors.tint,
 });

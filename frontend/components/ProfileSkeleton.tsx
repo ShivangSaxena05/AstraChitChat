@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import { ThemedView } from './themed-view';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useTheme } from '@/hooks/use-theme-color';
 
 const ProfileSkeleton = () => {
-  const colorScheme = useColorScheme();
+  const colors = useTheme();
   const shimmerAnim = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -19,7 +19,7 @@ const ProfileSkeleton = () => {
   }, []);
 
   const shimmerStyle = {
-    backgroundColor: colorScheme === 'dark' ? '#333' : '#f0f0f0',
+    backgroundColor: colors.backgroundSecondary,
     transform: [{
       translateX: shimmerAnim.interpolate({
         inputRange: [0, 1],
@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
   coverSkeleton: {
     width: '100%',
     height: 200,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied via props dynamically
     borderRadius: 0,
   },
   headerSkeleton: {
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     marginRight: 16,
   },
   infoSkeleton: {
@@ -93,14 +93,14 @@ const styles = StyleSheet.create({
   usernameSkeleton: {
     width: 120,
     height: 20,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     borderRadius: 4,
     marginBottom: 8,
   },
   bioSkeleton: {
     width: 200,
     height: 14,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     borderRadius: 4,
     marginBottom: 16,
   },
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   buttonSkeleton: {
     width: 80,
     height: 40,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     borderRadius: 20,
     alignSelf: 'center',
   },
@@ -133,14 +133,14 @@ const styles = StyleSheet.create({
   },
   postMediaSkeleton: {
     height: 250,
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     borderRadius: 12,
     marginBottom: 12,
   },
   postContentSkeleton: {
     height: 16,
     width: '70%',
-    backgroundColor: '#e0e0e0',
+    // backgroundColor will be applied dynamically
     borderRadius: 4,
   },
 });

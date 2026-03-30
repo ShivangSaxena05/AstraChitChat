@@ -2,6 +2,7 @@ import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -20,17 +21,24 @@ interface BottomTabBarComponentProps {
 
 export default function BottomTabBarComponent({ navigation, state }: BottomTabBarComponentProps) {
   const router = useRouter();
+  const colors = useTheme();
   
-  // Map state index to tab name
-  const getIndexFromState = () => {
+  // HIGH FIX: Sync current index with state more reliably
+  const getCurrentIndex = () => {
+    if (!state || !state.routes || state.index === undefined) {
+      return 0;
+    }
+
     const routeName = state.routes[state.index]?.name;
+    
+    // Map route names to tab indices more explicitly
     if (routeName === 'chat-list') return 1;
     if (routeName === 'notifications') return 2;
     if (routeName === 'profile') return 3;
-    return 0; // Home
+    return 0; // Home/index is default
   };
 
-  const currentIndex = getIndexFromState();
+  const currentIndex = getCurrentIndex();
 
   const handleTabPress = (tabName: string) => {
     navigation.navigate(tabName);
@@ -42,9 +50,9 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.card }]}>
       {/* Main Tab Bar */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { borderTopColor: colors.border }]}>
         {tabs.map((tab, index) => (
           <TouchableOpacity
             key={tab.name}
@@ -54,9 +62,9 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
             <Ionicons
               name={tab.icon as any}
               size={24}
-              color={currentIndex === index ? '#4ADDAE' : '#888'}
+              color={currentIndex === index ? colors.tint : colors.icon}
             />
-            <Text style={[styles.label, currentIndex === index && styles.activeLabel]}>
+            <Text style={[styles.label, currentIndex === index && { color: colors.tint }]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -69,8 +77,8 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
         onPress={handleCreatePress}
         activeOpacity={0.8}
       >
-        <View style={styles.fab}>
-          <Ionicons name="add" size={32} color="#fff" />
+        <View style={[styles.fab, { backgroundColor: colors.tint, borderColor: colors.card }]}>
+          <Ionicons name="add" size={32} color={colors.background} />
         </View>
       </TouchableOpacity>
     </View>
@@ -79,11 +87,9 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#000',
     paddingTop: 10,
     paddingBottom: 30, // Account for safe area
     borderTopWidth: 1,
-    borderTopColor: '#333',
   },
   tabBar: {
     flexDirection: 'row',
@@ -98,11 +104,10 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 12,
-    color: '#888',
     marginTop: 2,
   },
   activeLabel: {
-    color: '#4ADDAE',
+    // Color will be applied via inline style
   },
   fabContainer: {
     position: 'absolute',
@@ -114,15 +119,13 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#4ADDAE',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4ADDAE',
+    shadowColor: 'rgba(0,0,0,0.3)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 8,
     borderWidth: 3,
-    borderColor: '#000',
   },
 });

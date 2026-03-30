@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, RefreshControl, ActivityIndicator, Image, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { get } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Chat {
   _id: string;
@@ -55,6 +56,7 @@ const ChatItem = memo(({
   onPress: () => void;
   currentUserId: string | null;
 }) => {
+  const colors = useTheme();
   const otherParticipant = item.participants.find(p => String(p._id) !== String(currentUserId));
   const isFromMe = String(item.lastMessage?.sender?._id) === String(currentUserId);
 
@@ -73,7 +75,7 @@ const ChatItem = memo(({
   };
 
   return (
-    <TouchableOpacity style={styles.chatItem} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={[styles.chatItem, { backgroundColor: colors.card }]} onPress={onPress} activeOpacity={0.7}>
       {/* Avatar */}
       <View style={styles.avatarContainer}>
         <Image 
@@ -89,12 +91,12 @@ const ChatItem = memo(({
           <ThemedText type="subtitle" style={styles.username} numberOfLines={1} ellipsizeMode="tail">
             {otherParticipant?.username || 'Unknown User'}
           </ThemedText>
-          <Text style={styles.timestamp}>
+          <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
             {formatRelativeTime(item.updatedAt)}
           </Text>
         </View>
         <View style={styles.messageRow}>
-          <Text style={[styles.lastMessage, isFromMe && styles.ownMessagePreview, item.unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>
+          <Text style={[styles.lastMessage, { color: colors.textSecondary }, isFromMe && { color: colors.tint }, item.unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>
             {formatLastMessage()}
           </Text>
           <View style={styles.rightSection}>
@@ -114,6 +116,7 @@ const ChatItem = memo(({
 ChatItem.displayName = 'ChatItem';
 
 export default function ChatListScreen() {
+  const colors = useTheme();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -130,9 +133,27 @@ export default function ChatListScreen() {
       fetchChats(true);
     }
   }, []);
-  // SocketContext already handles listening for 'conversationUpdated'
-  // and updating the 'conversations' global state. We don't need a local
-  // listener here that fetches from the API on every single message.
+
+  // MEDIUM FIX: Handle unread message updates from socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleUnreadUpdate = (data: { chatId: string; unreadCount: number }) => {
+      // Sync unread count with API state
+      setConversations((prev) =>
+        prev.map((c) =>
+          String(c._id) === String(data.chatId)
+            ? { ...c, unreadCount: data.unreadCount }
+            : c
+        )
+      );
+    };
+
+    socket.on('unread count updated', handleUnreadUpdate);
+    return () => {
+      socket.off('unread count updated', handleUnreadUpdate);
+    };
+  }, [socket, setConversations]);
 
   // Fetch all chats from server
   const fetchChats = async (showLoading = true) => {
@@ -206,7 +227,7 @@ export default function ChatListScreen() {
   if (loading && chats.length === 0) {
     return (
       <ThemedView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={colors.tint} />
       </ThemedView>
     );
   }
@@ -225,8 +246,8 @@ export default function ChatListScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#007AFF" // iOS spinner color
-            colors={['#007AFF']} // Android spinner color
+            tintColor={colors.tint} // iOS spinner color
+            colors={[colors.tint]} // Android spinner color
           />
         }
         initialNumToRender={10}
@@ -242,7 +263,6 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     padding: 4,
-    backgroundColor: '#f5f5f5'
   },
   avatarContainer: {
     position: 'relative',
@@ -252,7 +272,6 @@ const styles = StyleSheet.create({
     width: 56, 
     height: 56, 
     borderRadius: 28,
-    backgroundColor: '#f0f0f0'
   },
   unreadDot: {
     position: 'absolute',
@@ -261,9 +280,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#0a7ea4', // Theme: light.info / primary tint
     borderWidth: 3,
-    borderColor: 'white'
+    borderColor: '#ffffff' // Theme: white border
   },
   username: {
     fontWeight: '700',
@@ -281,7 +300,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
   },
   chatItem: { 
     flexDirection: 'row', 
@@ -289,9 +307,8 @@ const styles = StyleSheet.create({
     padding: 16, 
     marginHorizontal: 12,
     marginVertical: 4,
-    backgroundColor: 'white',
     borderRadius: 16,
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.3)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
@@ -307,7 +324,6 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   timestamp: { 
-    color: '#8e8e93', 
     fontSize: 13,
     marginLeft: 12
   },
@@ -317,13 +333,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between' 
   },
   lastMessage: { 
-    color: '#8e8e93', 
     fontSize: 15, 
     flex: 1 
   },
-  ownMessagePreview: { 
-    color: '#007AFF' 
-  },
+  ownMessagePreview: { },
   unreadMessage: { 
     fontWeight: '600' 
   },
@@ -333,7 +346,7 @@ const styles = StyleSheet.create({
     minWidth: 40
   },
   unreadBadge: { 
-    backgroundColor: '#FF3B30', 
+    backgroundColor: '#d32f2f', // Theme: light.error / error badge
     borderRadius: 12, 
     minWidth: 24, 
     height: 24, 
@@ -341,15 +354,15 @@ const styles = StyleSheet.create({
     alignItems: 'center' 
   },
   unreadText: { 
-    color: 'white', 
+    color: '#f8f9fa', // Theme: light.background 
     fontSize: 12, 
     fontWeight: 'bold',
     textAlign: 'center'
   },
   readStatus: { 
-    color: '#007AFF', 
     fontSize: 15, 
-    marginLeft: 8 
+    marginLeft: 8,
+    color: '#0a7ea4', // Theme: light.info / primary tint
   },
   emptyListContent: { flex: 1 },
   emptyContainer: { 
@@ -369,7 +382,6 @@ const styles = StyleSheet.create({
     textAlign: 'center'
   },
   emptyTextSub: { 
-    color: '#8e8e93', 
     fontSize: 17, 
     textAlign: 'center',
     lineHeight: 24 

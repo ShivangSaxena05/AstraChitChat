@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { ThemedText } from './themed-text';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface Message {
   _id: string;
   sender: {
+    _id: string;
     name: string;
     profilePic: string;
   };
   receiver: {
+    _id: string;
     name: string;
     profilePic: string;
   };
@@ -19,41 +22,74 @@ interface Message {
 
 interface ChatBubbleProps {
   message: Message;
-  isCurrentUser: boolean;
+  currentUserId: string | null;
 }
 
-export default function ChatBubble({ message, isCurrentUser }: ChatBubbleProps) {
+export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) {
+  const colors = useTheme();
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // ✅ FIX 4.2: Proper message direction logic
+  const isCurrentUser = useMemo(() => {
+    return currentUserId && message.sender._id === currentUserId;
+  }, [currentUserId, message.sender._id]);
+
+  const displayName = useMemo(() => {
+    return message.sender?.name || 'Unknown User';
+  }, [message.sender?.name]);
+
+  const timestamp: any = styles.timestamp;
+  const sentTimestamp: any = [
+    styles.sentTimestamp,
+    { color: 'rgba(255, 255, 255, 0.7)' }
+  ];
+  const receivedTimestamp: any = [
+    styles.receivedTimestamp,
+    { color: colors.textTertiary }
+  ];
+
   return (
     <View style={[styles.container, isCurrentUser ? styles.sent : styles.received]}>
       {!isCurrentUser && (
-        <Text style={styles.senderName}>{message.sender.name}</Text>
+        <Text style={[styles.senderName, { color: colors.textSecondary }]}>{displayName}</Text>
       )}
 
-      <View style={[styles.bubble, isCurrentUser ? styles.sentBubble : styles.receivedBubble]}>
+      <View
+        style={[
+          styles.bubble,
+          isCurrentUser
+            ? [styles.sentBubble, { backgroundColor: colors.tint }]
+            : [styles.receivedBubble, { backgroundColor: colors.card }],
+        ]}
+      >
         {message.chatType === 'text' && (
-          <ThemedText style={[styles.messageText, isCurrentUser ? styles.sentText : styles.receivedText]}>
+          <ThemedText
+            style={[
+              styles.messageText,
+              isCurrentUser ? styles.sentText : [styles.receivedText, { color: colors.text }],
+            ]}
+          >
             {message.content}
           </ThemedText>
         )}
 
         {message.chatType === 'image' && (
-          <View style={styles.mediaContainer}>
-            <Text style={styles.mediaPlaceholder}>[Image]</Text>
+          <View style={[styles.mediaContainer, { backgroundColor: colors.backgroundSecondary }]}>
+            <Text style={styles.mediaPlaceholder}>🖼️ Image</Text>
           </View>
         )}
 
         {message.chatType === 'video' && (
-          <View style={styles.mediaContainer}>
-            <Text style={styles.mediaPlaceholder}>[Video]</Text>
+          <View style={[styles.mediaContainer, { backgroundColor: colors.backgroundSecondary }]}>
+            <Text style={styles.mediaPlaceholder}>🎥 Video</Text>
           </View>
         )}
 
-        <Text style={[styles.timestamp, isCurrentUser ? styles.sentTimestamp : styles.receivedTimestamp]}>
+        <Text style={isCurrentUser ? sentTimestamp : receivedTimestamp}>
           {formatTime(message.createdAt)}
         </Text>
       </View>
@@ -63,35 +99,30 @@ export default function ChatBubble({ message, isCurrentUser }: ChatBubbleProps) 
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 4,
-    marginHorizontal: 8,
-    maxWidth: '80%',
+    marginVertical: 8,
+    marginHorizontal: 12,
+    flexDirection: 'row',
   },
   sent: {
-    alignSelf: 'flex-end',
-    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
   },
   received: {
-    alignSelf: 'flex-start',
-    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
   },
   senderName: {
     fontSize: 12,
-    color: '#666',
     marginBottom: 4,
     marginLeft: 12,
   },
   bubble: {
     padding: 12,
     borderRadius: 18,
-    maxWidth: '100%',
+    maxWidth: '80%',
   },
   sentBubble: {
-    backgroundColor: '#007AFF',
     borderBottomRightRadius: 4,
   },
   receivedBubble: {
-    backgroundColor: '#E5E5EA',
     borderBottomLeftRadius: 4,
   },
   messageText: {
@@ -99,32 +130,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sentText: {
-    color: '#fff',
+    // Color will be applied dynamically via inline style
   },
   receivedText: {
-    color: '#000',
+    // Color will be applied dynamically via inline style
   },
   mediaContainer: {
-    padding: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
-    marginBottom: 8,
   },
   mediaPlaceholder: {
-    color: '#666',
     fontSize: 14,
     textAlign: 'center',
   },
   timestamp: {
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: 12,
+    marginTop: 6,
   },
   sentTimestamp: {
-    color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'right',
+    // color will be applied dynamically
   },
   receivedTimestamp: {
-    color: '#666',
-    textAlign: 'left',
+    // color will be applied dynamically
   },
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, View, Text, StyleSheet, Dimensions } from 'react-native';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface SaveToastProps {
   visible: boolean;
@@ -9,6 +10,7 @@ interface SaveToastProps {
 }
 
 export default function SaveToast({ visible, onHide }: SaveToastProps) {
+  const colors = useTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(-50)).current;
 
@@ -62,6 +64,7 @@ export default function SaveToast({ visible, onHide }: SaveToastProps) {
       <Animated.View 
         style={[
           styles.toast,
+          { backgroundColor: colors.success },
           {
             opacity: fadeAnim,
             transform: [{ translateY: slideAnim }],
@@ -84,12 +87,11 @@ const styles = StyleSheet.create({
     pointerEvents: 'none', // Allow touches to pass through
   },
   toast: {
-    backgroundColor: '#4ADDAE',
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 25,
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.3)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -98,7 +100,7 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#fff',
+    // color will be applied via inline style in ThemedText
   },
 });
 

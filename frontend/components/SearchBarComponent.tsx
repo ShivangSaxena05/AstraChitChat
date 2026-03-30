@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface SearchResult {
   _id: string;
@@ -27,17 +28,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#000',
+    // backgroundColor will be applied dynamically
     alignItems: 'center',
   },
   searchIcon: { marginRight: 10 },
   searchInput: {
     flex: 1,
     height: 40,
-    backgroundColor: '#333',
+    // backgroundColor and color will be applied dynamically
     borderRadius: 20,
     paddingHorizontal: 16,
-    color: 'white',
     paddingLeft: 40,
   },
   suggestionsContainer: {
@@ -45,7 +45,7 @@ const styles = StyleSheet.create({
     top: 60,
     left: 16,
     right: 16,
-    backgroundColor: '#333',
+    // backgroundColor will be applied dynamically
     borderRadius: 10,
     maxHeight: 300,
     zIndex: 10,
@@ -55,43 +55,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#444',
+    // borderBottomColor will be applied dynamically
   },
-  suggestionText: { color: 'white', fontSize: 16, marginLeft: 10 },
+  suggestionText: { fontSize: 16, marginLeft: 10 },
   profilePic: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#555',
+    // backgroundColor will be applied dynamically
   },
   loadingContainer: {
     position: 'absolute',
     top: 60,
     left: 16,
     right: 16,
-    backgroundColor: '#333',
+    // backgroundColor will be applied dynamically
     borderRadius: 10,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     zIndex: 10,
   },
-  loadingText: { color: 'white', fontSize: 16, marginLeft: 10 },
+  loadingText: { fontSize: 16, marginLeft: 10 },
   errorContainer: {
     position: 'absolute',
     top: 60,
     left: 16,
     right: 16,
-    backgroundColor: '#d9534f',
+    // backgroundColor will be applied dynamically
     borderRadius: 10,
     padding: 12,
     zIndex: 10,
   },
-  errorText: { color: 'white', fontSize: 16, textAlign: 'center' },
+  errorText: { fontSize: 16, textAlign: 'center' },
 });
 
 export default function SearchBarComponent() {
   const router = require('expo-router').useRouter();
+  const colors = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -181,15 +182,18 @@ export default function SearchBarComponent() {
   };
 
   const renderSuggestion = ({ item }: { item: SearchResult }) => (
-    <TouchableOpacity style={styles.suggestionItem} onPress={() => handleResultPress(item)}>
+    <TouchableOpacity 
+      style={[styles.suggestionItem, { borderBottomColor: colors.border }]} 
+      onPress={() => handleResultPress(item)}
+    >
       {item.type === 'query' ? (
-        <Ionicons name="search-outline" size={20} color="#888" />
+        <Ionicons name="search-outline" size={20} color={colors.textMuted} />
       ) : item.profilePicture ? (
-        <Image source={{ uri: item.profilePicture }} style={styles.profilePic} />
+        <Image source={{ uri: item.profilePicture }} style={[styles.profilePic, { backgroundColor: colors.backgroundTertiary }]} />
       ) : (
-        <Ionicons name="person-circle-outline" size={24} color="#007AFF" />
+        <Ionicons name="person-circle-outline" size={24} color={colors.tint} />
       )}
-      <Text style={styles.suggestionText}>
+      <Text style={[styles.suggestionText, { color: colors.text }]}>
         {item.type === 'query' ? `Search for "${item.username}"` : item.username}
       </Text>
     </TouchableOpacity>
@@ -197,12 +201,12 @@ export default function SearchBarComponent() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
+      <View style={[styles.searchContainer, { backgroundColor: colors.background }]}>
+        <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { backgroundColor: colors.backgroundSecondary, color: colors.text }]}
           placeholder="Search users and chats..."
-          placeholderTextColor="#888"
+          placeholderTextColor={colors.textMuted}
           value={searchQuery}
           onChangeText={setSearchQuery}
           onSubmitEditing={() => handleSearch(searchQuery)}
@@ -211,20 +215,20 @@ export default function SearchBarComponent() {
       </View>
 
       {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#007AFF" />
-          <Text style={styles.loadingText}>Searching...</Text>
+        <View style={[styles.loadingContainer, { backgroundColor: colors.backgroundSecondary }]}>
+          <ActivityIndicator size="small" color={colors.tint} />
+          <Text style={[styles.loadingText, { color: colors.text }]}>Searching...</Text>
         </View>
       )}
 
       {error && !loading && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
+        <View style={[styles.errorContainer, { backgroundColor: colors.error }]}>
+          <Text style={[styles.errorText, { color: colors.background }]}>{error}</Text>
         </View>
       )}
 
       {showSuggestions && !loading && !error && searchResults.length > 0 && (
-        <View style={styles.suggestionsContainer}>
+        <View style={[styles.suggestionsContainer, { backgroundColor: colors.backgroundSecondary }]}>
           <FlatList
             data={searchResults}
             keyExtractor={item => item._id || item.username || Math.random().toString()}

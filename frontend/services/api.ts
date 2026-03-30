@@ -26,13 +26,85 @@ api.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// Add response interceptor for better error handling
+// ✅ FIX 7.1: Comprehensive error handling
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    // Error handling without verbose logging in production
-    return Promise.reject(error);
-  },
+  async (error: AxiosError) => {
+    if (!error.response) {
+      // Network error
+      return Promise.reject({
+        type: 'NETWORK_ERROR',
+        message: 'Network error. Please check your internet connection.',
+        originalError: error,
+      });
+    }
+
+    const status = error.response.status;
+
+    // Handle specific status codes
+    if (status === 401) {
+      // Unauthorized - token expired or invalid
+      try {
+        await AsyncStorage.removeItem('token');
+        await AsyncStorage.removeItem('userId');
+      } catch (e) {
+        console.error('[API] Error clearing auth:', e);
+      }
+
+      return Promise.reject({
+        type: 'AUTH_ERROR',
+        message: 'Your session has expired. Please log in again.',
+        originalError: error,
+      });
+    }
+
+    if (status === 403) {
+      return Promise.reject({
+        type: 'PERMISSION_ERROR',
+        message: 'You do not have permission to perform this action.',
+        originalError: error,
+      });
+    }
+
+    if (status === 404) {
+      console.warn('[API] 404 Not Found:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        originalUrl: error.response?.config?.url,
+      });
+      return Promise.reject({
+        type: 'NOT_FOUND',
+        message: 'Resource not found.',
+        originalError: error,
+      });
+    }
+
+    if (status === 429) {
+      return Promise.reject({
+        type: 'RATE_LIMIT',
+        message: 'Too many requests. Please wait before trying again.',
+        originalError: error,
+      });
+    }
+
+    if (status >= 500) {
+      return Promise.reject({
+        type: 'SERVER_ERROR',
+        message: 'Server error. Please try again later.',
+        originalError: error,
+      });
+    }
+
+    // Generic error response from server
+    const errorMessage =
+      (error.response.data as any)?.message || 'An error occurred';
+
+    return Promise.reject({
+      type: 'API_ERROR',
+      message: errorMessage,
+      originalError: error,
+    });
+  }
 );
 
 // Generic functions for authenticated requests

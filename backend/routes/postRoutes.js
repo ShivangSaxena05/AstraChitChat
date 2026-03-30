@@ -4,7 +4,8 @@ const {
   deletePost,
   getFeedPosts,
   getShortVideos,
-  getUserPosts
+  getUserPosts,
+  getUserPostsById
 } = require('../controllers/postController');
 const { likePost, getPostLikes } = require('../controllers/likeController');
 const { addComment, getPostComments, deleteComment } = require('../controllers/commentController');
@@ -17,6 +18,7 @@ router.post('/upload', protect, createPost);
 router.get('/feed', protect, getFeedPosts);
 router.get('/flicks', protect, getShortVideos);
 router.get('/me', protect, getUserPosts);
+router.get('/user/:userId', protect, getUserPostsById);
 router.delete('/:postId', protect, deletePost);
 
 // Like routes

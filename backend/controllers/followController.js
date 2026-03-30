@@ -1,5 +1,6 @@
 const Follow = require('../models/Follow');
 const User = require('../models/User');
+const { incrementStat, decrementStat } = require('../services/userStatsService');
 
 // @desc    Follow a user
 // @route   POST /api/follow/:userId
@@ -39,23 +40,22 @@ const followUser = async (req, res) => {
 
     await Follow.create({ follower: currentUserId, following: userId });
 
-    const updatedActor = await User.findByIdAndUpdate(
-      currentUserId, { $inc: { followingCount: 1 } }, { new: true }
-    );
-    const updatedTarget = await User.findByIdAndUpdate(
-      userId, { $inc: { followersCount: 1 } }, { new: true }
-    );
+    // Update stats using UserStats service
+    await Promise.all([
+      incrementStat(currentUserId, 'followingCount', 1),
+      incrementStat(userId, 'followersCount', 1),
+    ]);
 
     // FIX: emit only to the affected users, not to everyone
     const io = req.app.get('io');
-    if (io && updatedActor && updatedTarget) {
+    if (io) {
       io.to(userId.toString()).emit('profileStatsUpdated', {
         userId,
-        followersCount: updatedTarget.followersCount,
+        action: 'followersCountIncremented',
       });
       io.to(currentUserId.toString()).emit('profileStatsUpdated', {
         userId: currentUserId,
-        followingCount: updatedActor.followingCount,
+        action: 'followingCountIncremented',
       });
     }
 
@@ -96,23 +96,22 @@ const unfollowUser = async (req, res) => {
       return res.status(400).json({ message: 'Not following this user' });
     }
 
-    const updatedActor = await User.findByIdAndUpdate(
-      currentUserId, { $inc: { followingCount: -1 } }, { new: true }
-    );
-    const updatedTarget = await User.findByIdAndUpdate(
-      userId, { $inc: { followersCount: -1 } }, { new: true }
-    );
+    // Update stats using UserStats service
+    await Promise.all([
+      decrementStat(currentUserId, 'followingCount', 1),
+      decrementStat(userId, 'followersCount', 1),
+    ]);
 
     // FIX: emit only to the affected users, not to everyone
     const io = req.app.get('io');
-    if (io && updatedActor && updatedTarget) {
+    if (io) {
       io.to(userId.toString()).emit('profileStatsUpdated', {
         userId,
-        followersCount: updatedTarget.followersCount,
+        action: 'followersCountDecremented',
       });
       io.to(currentUserId.toString()).emit('profileStatsUpdated', {
         userId: currentUserId,
-        followingCount: updatedActor.followingCount,
+        action: 'followingCountDecremented',
       });
     }
 

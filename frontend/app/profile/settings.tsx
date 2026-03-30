@@ -2,6 +2,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { del, get, post, put } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
+import { useThemeMode } from '@/contexts/ThemeContext';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, Share, StyleSheet, Switch, TouchableOpacity, View, useColorScheme, Modal, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,8 +15,9 @@ interface BlockedUser {
   profilePicture: string;
 }
 
-  // ... existing code ...
 export default function SettingsScreen() {
+  const colors = useTheme();
+  const { themeMode, setThemeMode } = useThemeMode();
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [mutedUsers, setMutedUsers] = useState<BlockedUser[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
@@ -24,6 +27,7 @@ export default function SettingsScreen() {
   const [tokenInput, setTokenInput] = useState('');
   const [show2FAModal, setShow2FAModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showThemeModal, setShowThemeModal] = useState(false);
   const colorScheme = useColorScheme();
   const router = useRouter();
 
@@ -128,6 +132,15 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleThemeModeChange = async (mode: 'light' | 'dark' | 'system') => {
+    try {
+      await setThemeMode(mode);
+      setShowThemeModal(false);
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to change theme');
+    }
+  };
+
   const renderUser = ({ item, isBlocked }: { item: BlockedUser, isBlocked: boolean }) => (
     <View key={item._id} style={styles.userRow}>
       <Image source={{ uri: item.profilePicture || 'https://i.pravatar.cc/150' }} style={styles.avatar} />
@@ -190,23 +203,26 @@ export default function SettingsScreen() {
   const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
+      backgroundColor: colors.background,
     },
     modalContainer: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 24,
+      backgroundColor: colors.background,
     },
     modalTitle: {
       fontSize: 24,
       fontWeight: 'bold',
       marginBottom: 20,
+      color: colors.text,
     },
     modalText: {
       fontSize: 16,
       textAlign: 'center',
       marginBottom: 10,
-      color: colorScheme === 'dark' ? '#ccc' : '#444',
+      color: colors.textSecondary,
     },
     qrCode: {
       width: 200,
@@ -215,14 +231,15 @@ export default function SettingsScreen() {
     },
     input: {
       borderWidth: 1,
-      borderColor: colorScheme === 'dark' ? '#333' : '#ccc',
+      borderColor: colors.border,
       borderRadius: 12,
       padding: 16,
       width: '100%',
       fontSize: 24,
       textAlign: 'center',
       marginBottom: 20,
-      color: colorScheme === 'dark' ? '#fff' : '#000',
+      color: colors.text,
+      backgroundColor: colors.card,
     },
     modalButtons: {
       flexDirection: 'row',
@@ -233,25 +250,27 @@ export default function SettingsScreen() {
       paddingHorizontal: 24,
       paddingVertical: 12,
       borderRadius: 8,
-      backgroundColor: colorScheme === 'dark' ? '#333' : '#eee',
+      backgroundColor: colors.backgroundSecondary,
     },
     loadingContainer: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
+      backgroundColor: colors.background,
     },
     sectionHeader: {
       fontSize: 18,
       fontWeight: 'bold',
       padding: 16,
-      backgroundColor: colorScheme === 'dark' ? '#222' : '#f5f5f5',
+      backgroundColor: colors.backgroundSecondary,
+      color: colors.text,
     },
     userRow: {
       flexDirection: 'row',
       alignItems: 'center',
       padding: 16,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colorScheme === 'dark' ? '#333' : '#ccc',
+      borderBottomColor: colors.border,
     },
     avatar: {
       width: 50,
@@ -265,26 +284,55 @@ export default function SettingsScreen() {
     username: {
       fontWeight: 'bold',
       fontSize: 16,
+      color: colors.text,
     },
     name: {
       fontSize: 14,
-      color: 'gray',
+      color: colors.textSecondary,
     },
     actionButton: {
-      backgroundColor: colorScheme === 'dark' ? '#444' : '#efefef',
+      backgroundColor: colors.backgroundSecondary,
       paddingHorizontal: 16,
       paddingVertical: 8,
       borderRadius: 8,
     },
     actionButtonText: {
       fontWeight: 'bold',
+      color: colors.text,
     },
     emptyText: {
       padding: 16,
       fontStyle: 'italic',
-      color: 'gray',
-    }
-  }), [colorScheme]);
+      color: colors.textSecondary,
+    },
+    themeOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+      marginVertical: 8,
+      marginHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    themeOptionText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      flex: 1,
+    },
+    themeOptionDescription: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 4,
+      flex: 1,
+    },
+    themeOptionCheck: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginLeft: 12,
+    },
+  }), [colors]);
 
   if (loading) {
     return (
@@ -297,6 +345,17 @@ export default function SettingsScreen() {
   return (
     <ThemedView style={styles.container}>
       <ScrollView>
+        <ThemedText style={styles.sectionHeader}>Display</ThemedText>
+        <TouchableOpacity style={styles.userRow} onPress={() => setShowThemeModal(true)}>
+          <View style={styles.userInfo}>
+            <ThemedText style={styles.username}>Theme</ThemedText>
+            <ThemedText style={styles.name}>
+              {themeMode === 'system' ? 'System' : themeMode === 'light' ? 'Light' : 'Dark'}
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.username, { color: colors.textSecondary }]}>›</ThemedText>
+        </TouchableOpacity>
+
         <ThemedText style={styles.sectionHeader}>Account Privacy</ThemedText>
         <View style={styles.userRow}>
           <View style={styles.userInfo}>
@@ -323,17 +382,17 @@ export default function SettingsScreen() {
           <Switch value={is2FAEnabled} onValueChange={toggle2FA} />
         </View>
         <TouchableOpacity style={styles.userRow} onPress={handleExportData}>
-          <ThemedText style={[styles.username, { color: '#4ADDAE' }]}>Export My Data</ThemedText>
+          <ThemedText style={[styles.username, { color: colors.tint }]}>Export My Data</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity style={styles.userRow} onPress={handleDeleteAccount}>
-          <ThemedText style={[styles.username, { color: '#ff4444' }]}>Delete Account</ThemedText>
+          <ThemedText style={[styles.username, { color: colors.error }]}>Delete Account</ThemedText>
         </TouchableOpacity>
 
         {isAdmin && (
           <>
             <ThemedText style={styles.sectionHeader}>Administration</ThemedText>
             <TouchableOpacity style={styles.userRow} onPress={() => router.push('/profile/admin' as any)}>
-              <ThemedText style={[styles.username, { color: '#ffbd2e' }]}>Admin Dashboard</ThemedText>
+              <ThemedText style={[styles.username, { color: colors.warning }]}>Admin Dashboard</ThemedText>
             </TouchableOpacity>
           </>
         )}
@@ -380,10 +439,54 @@ export default function SettingsScreen() {
             <TouchableOpacity style={styles.modalButton} onPress={() => setShow2FAModal(false)}>
               <ThemedText>Cancel</ThemedText>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#4ADDAE' }]} onPress={handleVerify2FA}>
-              <ThemedText style={{ color: '#fff', fontWeight: 'bold' }}>Verify</ThemedText>
+            <TouchableOpacity style={[styles.modalButton, { backgroundColor: colors.tint }]} onPress={handleVerify2FA}>
+              <ThemedText style={{ color: colors.background, fontWeight: 'bold' }}>Verify</ThemedText>
             </TouchableOpacity>
           </View>
+        </ThemedView>
+      </Modal>
+
+      {/* Theme Selection Modal */}
+      <Modal visible={showThemeModal} animationType="slide" presentationStyle="formSheet" onRequestClose={() => setShowThemeModal(false)}>
+        <ThemedView style={styles.modalContainer}>
+          <ThemedText style={styles.modalTitle}>Select Theme</ThemedText>
+          
+          <TouchableOpacity 
+            style={[styles.themeOption, themeMode === 'system' && { backgroundColor: colors.backgroundSecondary, borderColor: colors.tint }]} 
+            onPress={() => handleThemeModeChange('system')}
+          >
+            <View style={styles.userInfo}>
+              <ThemedText style={styles.themeOptionText}>🌐 System</ThemedText>
+              <ThemedText style={styles.themeOptionDescription}>Follow device settings</ThemedText>
+            </View>
+            {themeMode === 'system' && <ThemedText style={[styles.themeOptionCheck, { color: colors.tint }]}>✓</ThemedText>}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.themeOption, themeMode === 'light' && { backgroundColor: colors.backgroundSecondary, borderColor: colors.tint }]} 
+            onPress={() => handleThemeModeChange('light')}
+          >
+            <View style={styles.userInfo}>
+              <ThemedText style={styles.themeOptionText}>☀️ Light</ThemedText>
+              <ThemedText style={styles.themeOptionDescription}>Always use light theme</ThemedText>
+            </View>
+            {themeMode === 'light' && <ThemedText style={[styles.themeOptionCheck, { color: colors.tint }]}>✓</ThemedText>}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.themeOption, themeMode === 'dark' && { backgroundColor: colors.backgroundSecondary, borderColor: colors.tint }]} 
+            onPress={() => handleThemeModeChange('dark')}
+          >
+            <View style={styles.userInfo}>
+              <ThemedText style={styles.themeOptionText}>🌙 Dark</ThemedText>
+              <ThemedText style={styles.themeOptionDescription}>Always use dark theme</ThemedText>
+            </View>
+            {themeMode === 'dark' && <ThemedText style={[styles.themeOptionCheck, { color: colors.tint }]}>✓</ThemedText>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.modalButton, { backgroundColor: colors.tint, marginTop: 30 }]} onPress={() => setShowThemeModal(false)}>
+            <ThemedText style={{ color: colors.background, fontWeight: 'bold' }}>Done</ThemedText>
+          </TouchableOpacity>
         </ThemedView>
       </Modal>
     </ThemedView>

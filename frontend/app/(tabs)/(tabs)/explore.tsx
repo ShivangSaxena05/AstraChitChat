@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, TouchableOpacity, Image, useColorScheme } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { Ionicons } from '@expo/vector-icons';
 import * as api from '@/services/api';
 import PostCard from '@/components/PostCard';
 import TopHeaderComponent from '@/components/TopHeaderComponent';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function ExploreScreen() {
   const router = require('expo-router').useRouter();
@@ -14,6 +15,7 @@ export default function ExploreScreen() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const colors = useTheme();
 
   const performSearch = async (query: string) => {
     if (!query.trim()) {
@@ -58,18 +60,18 @@ export default function ExploreScreen() {
 
   const renderUserCard = (user: any) => (
     <TouchableOpacity 
-      style={styles.userCard}
-      onPress={() => router.push({ pathname: '/', params: { showProfile: user._id } })}
+      style={[styles.userCard, { backgroundColor: colors.cardSecondary, borderBottomColor: colors.border }]}
+      onPress={() => router.push(`/profile/${user._id}`)}
     >
       <Image 
         source={{ uri: user.profilePicture || 'https://via.placeholder.com/50' }} 
         style={styles.userAvatar} 
       />
       <View style={styles.userInfo}>
-        <ThemedText style={styles.userName}>{user.name || user.username}</ThemedText>
-        <Text style={styles.userUsername}>@{user.username}</Text>
+        <ThemedText style={[styles.userName, { color: colors.text }]}>{user.name || user.username}</ThemedText>
+        <Text style={[styles.userUsername, { color: colors.textTertiary }]}>@{user.username}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color="#888" />
+      <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
     </TouchableOpacity>
   );
 
@@ -88,13 +90,13 @@ export default function ExploreScreen() {
       <View style={styles.topHeader}>
         <TopHeaderComponent />
       </View>
-      <View style={styles.searchHeader}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
+      <View style={[styles.searchHeader, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+        <View style={[styles.searchContainer, { backgroundColor: colors.backgroundSecondary }]}>
+          <Ionicons name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search users, videos, and posts..."
-            placeholderTextColor="#888"
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoCapitalize="none"
@@ -102,7 +104,7 @@ export default function ExploreScreen() {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
-              <Ionicons name="close-circle" size={20} color="#888" />
+              <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
             </TouchableOpacity>
           )}
         </View>
@@ -110,7 +112,7 @@ export default function ExploreScreen() {
 
       {loading ? (
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color={colors.tint} />
         </View>
       ) : results.length > 0 ? (
         <FlatList
@@ -126,9 +128,9 @@ export default function ExploreScreen() {
         </View>
       ) : (
         <View style={styles.centerContainer}>
-          <Ionicons name="search-outline" size={64} color="#555" style={styles.placeholderIcon} />
-          <ThemedText style={styles.placeholderTitle}>Discover More</ThemedText>
-          <Text style={styles.placeholderText}>Search for users, videos, and interesting posts.</Text>
+          <Ionicons name="search-outline" size={64} color={colors.textTertiary} style={styles.placeholderIcon} />
+          <ThemedText style={[styles.placeholderTitle, { color: colors.text }]}>Discover More</ThemedText>
+          <Text style={[styles.placeholderText, { color: colors.textTertiary }]}>Search for users, videos, and interesting posts.</Text>
         </View>
       )}
     </ThemedView>
@@ -138,7 +140,6 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
   },
   topHeader: {
     backgroundColor: 'transparent',
@@ -146,15 +147,12 @@ const styles = StyleSheet.create({
   searchHeader: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#000',
     borderBottomWidth: 1,
-    borderBottomColor: '#222',
     zIndex: 10,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
     borderRadius: 20,
     paddingHorizontal: 16,
     height: 40,
@@ -167,7 +165,6 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: '#fff',
     fontSize: 16,
     height: '100%',
   },
@@ -184,16 +181,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
-    color: '#fff',
   },
   placeholderText: {
     fontSize: 16,
-    color: '#888',
     textAlign: 'center',
   },
   noResultsText: {
     fontSize: 16,
-    color: '#888',
     textAlign: 'center',
   },
   listContent: {
@@ -204,15 +198,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#222',
-    backgroundColor: '#111',
   },
   userAvatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
     marginRight: 12,
-    backgroundColor: '#333',
   },
   userInfo: {
     flex: 1,
@@ -220,11 +211,9 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#fff',
   },
   userUsername: {
     fontSize: 14,
-    color: '#888',
     marginTop: 2,
   },
 });

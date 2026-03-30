@@ -4,9 +4,11 @@ import React, { useEffect, useRef } from 'react';
 import { StyleSheet, AppState, AppStateStatus } from 'react-native';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const router = useRouter();
   const appState = useRef(AppState.currentState);
 
@@ -67,15 +69,15 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.3)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 8,
     borderWidth: 3,
-    borderColor: '#007AFF',
+    // borderColor will be set dynamically
   },
 });

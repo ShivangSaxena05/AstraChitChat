@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   ScrollView,
@@ -10,6 +10,10 @@ import {
   Image,
   RefreshControl,
   Platform,
+  FlatList,
+  Pressable,
+  StatusBar,
+  useColorScheme,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,9 +23,10 @@ import { get, post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
 import { useCall } from '@/contexts/CallContext';
 import ProfileSkeleton from '@/components/ProfileSkeleton';
+import { useTheme } from '@/hooks/use-theme-color';
 import { Dimensions } from 'react-native';
 
-const { height: screenHeight } = Dimensions.get('window');
+const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
 interface ChatInfoData {
   otherUser: {
@@ -43,6 +48,8 @@ interface ChatInfoData {
 }
 
 export default function ChatInfoScreen() {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [data, setData] = useState<ChatInfoData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -146,7 +153,7 @@ export default function ChatInfoScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: async () => {
           try {
-            await post(`/chats/${chatId}/clear`);
+            await post(`/chats/${chatId}/clear`, {});
             Alert.alert('Cleared', 'Chat history cleared');
           } catch (error) {
             Alert.alert('Error', 'Failed to clear chat');
@@ -158,7 +165,7 @@ export default function ChatInfoScreen() {
 
   const handlePinToggle = async () => {
     try {
-      await post(`/chats/${chatId}/pin`);
+      await post(`/chats/${chatId}/pin`, {});
       setData(prev => prev ? { ...prev, isPinned: !prev.isPinned } : null);
     } catch (error) {
       Alert.alert('Error', 'Failed to update pin');
@@ -171,12 +178,26 @@ export default function ChatInfoScreen() {
       'Block this user? They won\'t be able to message or call you.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Block', style: 'destructive', onPress: () => {
-          router.push(`/profile/${otherUserId}`);
+        { text: 'Block', style: 'destructive', onPress: async () => {
+          try {
+            await post(`/users/${otherUserId}/block`, {});
+            Alert.alert('Success', 'User blocked successfully');
+            router.back();
+          } catch (error) {
+            Alert.alert('Error', 'Failed to block user');
+          }
         } },
       ]
     );
   };
+
+  const navigateToUserProfile = useCallback(() => {
+    if (!otherUserId) return;
+    router.push({
+      pathname: '/profile/[userId]',
+      params: { userId: otherUserId }
+    });
+  }, [otherUserId, router]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -273,7 +294,7 @@ export default function ChatInfoScreen() {
         {/* Profile Header */}
         <TouchableOpacity 
           style={styles.profileHeader}
-          onPress={() => setProfileModalVisible(true)}
+          onPress={navigateToUserProfile}
           activeOpacity={0.7}
         >
           <View style={styles.avatarContainer}>
@@ -289,21 +310,34 @@ export default function ChatInfoScreen() {
               {data.otherUser.isOnline ? 'Online' : `Last seen ${formatLastSeen(data.otherUser.lastSeen)}`}
             </ThemedText>
           </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
         </TouchableOpacity>
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => initiateCall([otherUserId], chatId)}>
-            <Ionicons name="call-outline" size={24} color="#10b981" />
-            <ThemedText>Audio Call</ThemedText>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={() => initiateCall([otherUserId], chatId, otherUserId, { username: data.otherUser.username, profilePicture: data.otherUser.profilePicture || '' }, false)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="call-outline" size={24} color={colors.success} />
+            <ThemedText style={styles.actionButtonText}>Call</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => initiateCall([otherUserId], chatId)}>
-            <Ionicons name="videocam-outline" size={24} color="#3b82f6" />
-            <ThemedText>Video Call</ThemedText>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="search-outline" size={24} color={colors.info} />
+            <ThemedText style={styles.actionButtonText}>Search</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => router.back()}>
-            <Ionicons name="search-outline" size={24} color="#6b7280" />
-            <ThemedText>Search</ThemedText>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={navigateToUserProfile}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="person-outline" size={24} color={colors.accent} />
+            <ThemedText style={styles.actionButtonText}>Profile</ThemedText>
           </TouchableOpacity>
         </View>
 
@@ -318,29 +352,29 @@ export default function ChatInfoScreen() {
           <ThemedText type="subtitle" style={styles.sectionTitle}>Chat settings</ThemedText>
           
           <TouchableOpacity style={styles.settingItem} onPress={handleMuteToggle}>
-            <Ionicons name={data.isMuted ? "notifications-off" : "notifications"} size={24} color="#f59e0b" />
+            <Ionicons name={data.isMuted ? "notifications-off" : "notifications"} size={24} color={colors.warning} />
             <View style={styles.settingText}>
               <ThemedText style={styles.settingLabel}>Mute notifications</ThemedText>
               <ThemedText style={styles.settingSubtext}>
                 {data.isMuted ? `Muted ${formatMuteUntil(data.mutedUntil)}` : 'Turn off notifications'}
               </ThemedText>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.settingItem} onPress={handlePinToggle}>
-            <Ionicons name={data.isPinned ? "bookmark" : "bookmark-outline"} size={24} color="#10b981" />
+            <Ionicons name={data.isPinned ? "bookmark" : "bookmark-outline"} size={24} color={colors.success} />
             <View style={styles.settingText}>
               <ThemedText style={styles.settingLabel}>Pin chat</ThemedText>
               <ThemedText style={styles.settingSubtext}>
                 {data.isPinned ? 'Unpin from top' : 'Pin to top'}
               </ThemedText>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, styles.destructive]} onPress={clearChat}>
-            <Ionicons name="trash-outline" size={24} color="#ef4444" />
+            <Ionicons name="trash-outline" size={24} color={colors.error} />
             <View style={styles.settingText}>
               <ThemedText style={styles.settingLabel}>Clear chat</ThemedText>
               <ThemedText style={styles.settingSubtext}>Clear all messages</ThemedText>
@@ -348,7 +382,7 @@ export default function ChatInfoScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, styles.destructive]} onPress={blockUser}>
-            <Ionicons name="block" size={24} color="#ef4444" />
+            <Ionicons name="ban" size={24} color={colors.error} />
             <View style={styles.settingText}>
               <ThemedText style={styles.settingLabel}>Block {data.otherUser.username}</ThemedText>
               <ThemedText style={styles.settingSubtext}>Stop receiving messages and calls</ThemedText>
@@ -381,10 +415,10 @@ export default function ChatInfoScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
   },
   scrollView: {
     flex: 1,
@@ -392,69 +426,82 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'white',
-    margin: 16,
-    marginBottom: 8,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginHorizontal: 12,
+    marginTop: 12,
+    marginBottom: 16,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   avatarContainer: {
     position: 'relative',
-    marginRight: 16,
+    marginRight: 12,
   },
   avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#e5e7eb',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.backgroundSecondary,
   },
   onlineIndicator: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#10b981',
-    borderWidth: 3,
-    borderColor: 'white',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: colors.success,
+    borderWidth: 2,
+    borderColor: colors.card,
   },
   profileInfo: {
     flex: 1,
   },
   username: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    marginBottom: 4,
+    color: colors.text,
+    marginBottom: 2,
   },
   statusText: {
-    fontSize: 15,
-    color: '#6b7280',
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   quickActions: {
     flexDirection: 'row',
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 12,
+    backgroundColor: colors.card,
+    marginHorizontal: 12,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   actionButton: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  actionButtonText: {
+    fontSize: 12,
+    color: colors.text,
+    marginTop: 6,
+    fontWeight: '500',
   },
   mediaSection: {
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginVertical: 4,
+    backgroundColor: colors.card,
+    marginHorizontal: 12,
+    marginVertical: 6,
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   mediaHeader: {
     flexDirection: 'row',
@@ -463,46 +510,53 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   viewAllText: {
-    fontSize: 14,
-    color: '#007AFF',
+    fontSize: 13,
+    color: colors.accent,
+    fontWeight: '500',
   },
   settingsSection: {
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    borderRadius: 16,
-    paddingVertical: 8,
-    marginBottom: 20,
+    backgroundColor: colors.card,
+    marginHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
   },
   sectionTitle: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
     fontWeight: '600',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+    color: colors.text,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   settingText: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: 12,
   },
   settingLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
+    color: colors.text,
   },
   settingSubtext: {
-    fontSize: 14,
-    color: '#6b7280',
+    fontSize: 13,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   destructive: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#fee2e2',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
   },
   errorContainer: {
     flex: 1,
@@ -511,3 +565,5 @@ const styles = StyleSheet.create({
     padding: 40,
   },
 });
+
+const styles = createStyles({} as any);

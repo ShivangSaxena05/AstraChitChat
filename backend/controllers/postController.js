@@ -1,6 +1,8 @@
+const mongoose = require('mongoose');
 const Post = require('../models/Post');
 const User = require('../models/User');
 const { deleteS3Object } = require('../services/mediaService');
+const { incrementStat, decrementStat } = require('../services/userStatsService');
 
 // @desc    Create a new post
 // @route   POST /api/posts/upload
@@ -21,8 +23,8 @@ const createPost = async (req, res) => {
             caption,
         });
 
-        // Atomically increment user's post count
-        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: 1 } });
+        // Update stats using UserStats service (atomically)
+        await incrementStat(req.user._id, 'postsCount', 1);
 
         res.status(201).json({
             message: 'Post created successfully',
@@ -61,8 +63,8 @@ const deletePost = async (req, res) => {
 
         await post.deleteOne();
 
-        // Atomically decrement user's post count
-        await User.findByIdAndUpdate(req.user._id, { $inc: { postsCount: -1 } });
+        // Update stats using UserStats service (atomically)
+        await decrementStat(req.user._id, 'postsCount', 1);
 
         res.json({ message: 'Post deleted successfully.' });
     } catch (error) {
@@ -112,6 +114,28 @@ const getShortVideos = async (req, res) => {
     }
 };
 
+// @desc    Get posts for a specific user by ID
+// @route   GET /api/posts/user/:userId
+// @access  Private
+const getUserPostsById = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Validate userId is a valid MongoDB ObjectId
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ message: 'Invalid user ID format.' });
+        }
+
+        const posts = await Post.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .populate('user', 'name username profilePicture');
+
+        res.json({ posts });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error: could not fetch user posts', error: error.message });
+    }
+};
+
 // @desc    Get posts for the current user
 // @route   GET /api/posts/me
 // @access  Private
@@ -133,4 +157,5 @@ module.exports = {
     getFeedPosts,
     getShortVideos,
     getUserPosts,
+    getUserPostsById,
 };

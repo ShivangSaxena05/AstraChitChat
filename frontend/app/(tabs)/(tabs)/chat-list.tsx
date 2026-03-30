@@ -19,6 +19,7 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { useSocket } from "@/contexts/SocketContext";
 import { get } from "@/services/api";
+import { useTheme } from "@/hooks/use-theme-color";
 
 // Import all required UI components for the header structure
 import SearchBarComponent from "@/components/SearchBarComponent";
@@ -85,13 +86,15 @@ export default function ChatListScreen() {
     return 0;
   };
 
+  const colors = useTheme();
+
   const {
     conversations,
     setConversations,
     currentUserId: socketUserId,
     isConnected,
   } = useSocket();
-  const chats = conversations as Chat[];
+  const chats = conversations as unknown as Chat[];
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -196,7 +199,7 @@ export default function ChatListScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.chatItem}
+        style={[styles.chatItem, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
         onPress={() =>
           router.push({
             pathname: "/chat/detail",
@@ -214,8 +217,9 @@ export default function ChatListScreen() {
           <Text
             style={[
               styles.lastMessage,
+              { color: colors.textTertiary },
               getUnreadCount(item.unreadCount, currentUserId) > 0 && {
-                color: "#fff",
+                color: colors.text,
                 fontWeight: "bold",
               },
             ]}
@@ -225,8 +229,8 @@ export default function ChatListScreen() {
           </Text>
         </View>
         {getUnreadCount(item.unreadCount, currentUserId) > 0 && (
-          <View style={styles.unreadBadge}>
-            <Text style={styles.unreadText}>
+          <View style={[styles.unreadBadge, { backgroundColor: colors.tint }]}>
+            <Text style={[styles.unreadText, { color: colors.background }]}>
               {getUnreadCount(item.unreadCount, currentUserId)}
             </Text>
           </View>
@@ -237,13 +241,13 @@ export default function ChatListScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
         <TopHeaderComponent />
         <SearchBarComponent />
         <StoriesReelsComponent />
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading chats...</Text>
-          <Text style={styles.connectionStatus}>
+          <Text style={[styles.loadingText, { color: colors.text }]}>Loading chats...</Text>
+          <Text style={[styles.connectionStatus, { color: colors.tint }]}>
             {isConnected ? "🟢 Connected" : "🔴 Connecting..."}
           </Text>
         </View>
@@ -253,20 +257,20 @@ export default function ChatListScreen() {
 
   if (error && chats.length === 0) {
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
         <TopHeaderComponent />
         <SearchBarComponent />
         <StoriesReelsComponent />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>⚠️ Error: {error}</Text>
+          <Text style={[styles.errorText, { color: colors.error }]}>⚠️ Error: {error}</Text>
           <TouchableOpacity
-            style={styles.retryButton}
+            style={[styles.retryButton, { backgroundColor: colors.tint }]}
             onPress={() => {
               setLoading(true);
               fetchChats();
             }}
           >
-            <Text style={styles.retryButtonText}>Retry</Text>
+            <Text style={[styles.retryButtonText, { color: colors.background }]}>Retry</Text>
           </TouchableOpacity>
         </View>
       </ThemedView>
@@ -305,7 +309,7 @@ export default function ChatListScreen() {
 
   // --- MAIN RENDER ---
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Top Header - now includes username switcher */}
       <TopHeaderComponent />
       <SearchBarComponent />
@@ -313,14 +317,14 @@ export default function ChatListScreen() {
 
       {chats.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
             No chats yet. Start your first chat!
           </Text>
           <TouchableOpacity
-            style={styles.plusButtonCenter}
+            style={[styles.plusButtonCenter, { backgroundColor: colors.background, borderColor: colors.tint }]}
             onPress={handlePlusPress}
           >
-            <Ionicons name="add" size={48} color="#4ADDAE" />
+            <Ionicons name="add" size={48} color={colors.tint} />
           </TouchableOpacity>
         </View>
       ) : (
@@ -332,10 +336,10 @@ export default function ChatListScreen() {
             showsVerticalScrollIndicator={false}
           />
           <TouchableOpacity
-            style={styles.plusButtonBottom}
+            style={[styles.plusButtonBottom, { backgroundColor: colors.tint }]}
             onPress={handlePlusPress}
           >
-            <Ionicons name="add" size={24} color="white" />
+            <Ionicons name="add" size={24} color={colors.background} />
           </TouchableOpacity>
         </View>
       )}
@@ -346,12 +350,12 @@ export default function ChatListScreen() {
         animationType="slide"
         onRequestClose={() => setProfileModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
           <TouchableOpacity
             style={styles.closeButton}
             onPress={() => setProfileModalVisible(false)}
           >
-            <Ionicons name="close" size={24} color="white" />
+            <Ionicons name="close" size={24} color={colors.text} />
           </TouchableOpacity>
           {selectedUserId && (
             <OtherProfileScreen
@@ -369,7 +373,6 @@ export default function ChatListScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000", // Assuming a dark background
   },
   loadingContainer: {
     flex: 1,
@@ -377,11 +380,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   loadingText: {
-    color: "white",
     fontSize: 16,
   },
   connectionStatus: {
-    color: "#4ADDAE",
     fontSize: 14,
     marginTop: 8,
   },
@@ -392,19 +393,16 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: "#FF6B6B",
     fontSize: 14,
     textAlign: "center",
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: "#4ADDAE",
     paddingHorizontal: 32,
     paddingVertical: 12,
     borderRadius: 8,
   },
   retryButtonText: {
-    color: "#000",
     fontSize: 16,
     fontWeight: "bold",
   },
@@ -413,30 +411,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#333",
   },
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
     marginRight: 12,
-    backgroundColor: "#333", // placeholder color
   },
   chatContent: {
     flex: 1,
   },
   lastMessage: {
-    color: "#666",
     marginTop: 4,
   },
   unreadBadge: {
-    backgroundColor: "#4ADDAE",
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   unreadText: {
-    color: "#000",
     fontSize: 12,
     fontWeight: "bold",
   },
@@ -448,17 +441,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: "#666",
     textAlign: "center",
     marginBottom: 20,
   },
   plusButtonCenter: {
     alignSelf: "center",
-    backgroundColor: "#000",
     borderRadius: 50,
     padding: 20,
     borderWidth: 2,
-    borderColor: "#4ADDAE",
   },
   chatsContainer: {
     flex: 1,
@@ -467,21 +457,19 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 20,
     right: 20,
-    backgroundColor: "#4ADDAE",
     borderRadius: 50,
     width: 56,
     height: 56,
     justifyContent: "center",
     alignItems: "center",
     elevation: 5,
-    shadowColor: '#000',
+    shadowColor: 'rgba(0,0,0,0.3)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: "#000",
   },
   closeButton: {
     position: "absolute",

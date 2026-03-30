@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { get, post } from '@/services/api';
 import { useFocusEffect } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme } from 'react-native';
 
@@ -13,6 +14,7 @@ interface FollowRequest {
 }
 
 export default function FollowRequestsScreen() {
+  const colors = useTheme();
   const [requests, setRequests] = useState<FollowRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const colorScheme = useColorScheme();
@@ -75,18 +77,20 @@ export default function FollowRequestsScreen() {
   const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
+      backgroundColor: colors.background,
     },
     loadingContainer: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
+      backgroundColor: colors.background,
     },
     userRow: {
       flexDirection: 'row',
       alignItems: 'center',
       padding: 16,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colorScheme === 'dark' ? '#333' : '#ccc',
+      borderBottomColor: colors.border,
     },
     avatar: {
       width: 50,
@@ -100,10 +104,11 @@ export default function FollowRequestsScreen() {
     username: {
       fontWeight: 'bold',
       fontSize: 16,
+      color: colors.text,
     },
     name: {
       fontSize: 14,
-      color: 'gray',
+      color: colors.textSecondary,
     },
     buttonContainer: {
       flexDirection: 'row',
@@ -115,24 +120,25 @@ export default function FollowRequestsScreen() {
       borderRadius: 8,
     },
     acceptButton: {
-      backgroundColor: '#4ADDAE',
+      backgroundColor: colors.tint,
     },
     rejectButton: {
-      backgroundColor: colorScheme === 'dark' ? '#444' : '#efefef',
+      backgroundColor: colors.backgroundSecondary,
     },
     acceptText: {
       fontWeight: 'bold',
-      color: '#fff',
+      color: colors.background,
     },
     rejectText: {
       fontWeight: 'bold',
+      color: colors.text,
     },
     emptyText: {
       padding: 16,
       textAlign: 'center',
-      color: 'gray',
+      color: colors.textSecondary,
     }
-  }), [colorScheme]);
+  }), [colors]);
 
   if (loading && requests.length === 0) {
     return (

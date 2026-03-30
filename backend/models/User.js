@@ -26,8 +26,10 @@ const userSchema = new mongoose.Schema(
         unique: true,
         lowercase: true,
         trim: true,
+        // FIX: More permissive regex that accepts modern email formats
+        // Supports: plus addressing, multiple digits, TLDs of any length
         match: [
-            /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+            /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
             'Please add a valid email'
         ]
     },

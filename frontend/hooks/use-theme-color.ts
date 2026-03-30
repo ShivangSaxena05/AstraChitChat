@@ -19,3 +19,13 @@ export function useThemeColor(
     return Colors[theme][colorName];
   }
 }
+
+/**
+ * Get theme colors based on current color scheme
+ * Usage: const colors = useTheme();
+ */
+export function useTheme() {
+  const theme = useColorScheme() ?? 'light';
+  return Colors[theme];
+}
+

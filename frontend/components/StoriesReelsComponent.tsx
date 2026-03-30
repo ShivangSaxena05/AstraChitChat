@@ -1,39 +1,87 @@
-import React from 'react';
-import { View, ScrollView, TouchableOpacity, Text, Image, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, ScrollView, TouchableOpacity, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { get } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme-color';
 
-const mockStories = [
-  { id: 'add', username: 'Your Story', image: null },
-  { id: '1', username: 'User1', image: 'https://via.placeholder.com/50' },
-  { id: '2', username: 'User2', image: 'https://via.placeholder.com/50' },
-  { id: '3', username: 'User3', image: 'https://via.placeholder.com/50' },
-  { id: '4', username: 'User4', image: 'https://via.placeholder.com/50' },
-  { id: '5', username: 'User5', image: 'https://via.placeholder.com/50' },
+interface Story {
+  id: string;
+  userId?: string;
+  username: string;
+  profilePicture: string;
+  isUserStory?: boolean;
+}
+
+const mockStories: Story[] = [
+  { id: 'add', username: 'Your Story', profilePicture: '', isUserStory: true },
 ];
 
 export default function StoriesReelsComponent() {
-  const handleStoryPress = (storyId: string) => {
-    console.log('Story pressed:', storyId);
+  const colors = useTheme();
+  const [stories, setStories] = useState<Story[]>(mockStories);
+  const [loading, setLoading] = useState(true);
+
+  // MEDIUM FIX: Fetch real stories from API
+  useEffect(() => {
+    fetchStories();
+  }, []);
+
+  const fetchStories = async () => {
+    try {
+      // Attempt to fetch stories from API
+      const data = await get('/stories/active');
+      if (data?.stories && Array.isArray(data.stories)) {
+        // Prepend "Your Story" button
+        setStories([mockStories[0], ...data.stories.map((s: any) => ({
+          id: s._id || s.id,
+          userId: s.userId,
+          username: s.username || s.user?.username || 'Unknown',
+          profilePicture: s.profilePicture || s.user?.profilePicture || '',
+        }))]);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch stories, using default:', error);
+      // Fallback to mock data
+      setStories(mockStories);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const handleStoryPress = (storyId: string) => {
+    if (storyId === 'add') {
+      console.log('Create story tapped');
+    } else {
+      console.log('Story pressed:', storyId);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="small" color={colors.tint} />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
-        {mockStories.map((story) => (
+        {stories.map((story) => (
           <TouchableOpacity
             key={story.id}
             style={styles.storyContainer}
             onPress={() => handleStoryPress(story.id)}
           >
-            <View style={[styles.storyCircle, story.id === 'add' && styles.addStoryCircle]}>
-              {story.image ? (
-                <Image source={{ uri: story.image }} style={styles.storyImage} />
+            <View style={[styles.storyCircle, { borderColor: colors.tint }, story.isUserStory && styles.addStoryCircle]}>
+              {story.profilePicture && !story.isUserStory ? (
+                <Image source={{ uri: story.profilePicture }} style={styles.storyImage} />
               ) : (
                 <View style={styles.addIcon}>
-                  <Text style={styles.addText}>+</Text>
+                  <Text style={[styles.addText, { color: colors.tint }]}>+</Text>
                 </View>
               )}
             </View>
-            <Text style={styles.username} numberOfLines={1}>
+            <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>
               {story.username}
             </Text>
           </TouchableOpacity>
@@ -46,7 +94,7 @@ export default function StoriesReelsComponent() {
 const styles = StyleSheet.create({
   container: {
     paddingVertical: 10,
-    backgroundColor: '#000',
+    // backgroundColor will be applied dynamically
   },
   scrollView: {
     paddingHorizontal: 16,
@@ -60,7 +108,7 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    // borderColor will be applied dynamically
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
@@ -79,13 +127,13 @@ const styles = StyleSheet.create({
   },
   addText: {
     fontSize: 24,
-    color: '#007AFF',
     fontWeight: 'bold',
+    // color will be applied dynamically
   },
   username: {
     fontSize: 12,
-    color: 'white',
     textAlign: 'center',
     maxWidth: 60,
+    // color will be applied dynamically
   },
 });

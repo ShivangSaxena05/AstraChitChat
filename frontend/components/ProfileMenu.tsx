@@ -6,6 +6,8 @@ import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSocket } from '@/contexts/SocketContext';
+import { post } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme-color';
 
 interface ProfileMenuProps {
   visible: boolean;
@@ -13,24 +15,26 @@ interface ProfileMenuProps {
 }
 
 export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const colors = useTheme();
   const { disconnect } = useSocket();
-  const iconColor = colorScheme === 'dark' ? '#fff' : '#000';
+  const iconColor = colors.icon;
 
   const handleSettings = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handlePrivacySecurity = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handleBlockedContacts = () => {
     onClose();
-    router.push('/profile/settings');
+    router.push('/profile/settings' as any);
   };
 
   const handleLogout = () => {
@@ -43,27 +47,52 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
           text: 'Log Out',
           style: 'destructive',
           onPress: async () => {
+            setIsLoggingOut(true);
             try {
-              // Disconnect socket first
+              // Step 1: Call backend logout endpoint
+              const token = await AsyncStorage.getItem('token');
+              if (token) {
+                try {
+                  await post('/auth/logout', {});
+                } catch (error) {
+                  console.warn('[Logout] Backend logout failed, proceeding with local logout:', error);
+                }
+              }
+
+              // Step 2: Disconnect socket
               disconnect();
-              // Clear stored credentials
+
+              // Step 3: Clear stored credentials
               await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('userId');
+              await AsyncStorage.removeItem('userName');
+
+              // Step 4: Close menu
               onClose();
-              // Navigate to login screen
-              router.replace('/auth/login' as any);
+
+              // ✅ FIX 4.4: Correct navigation path and handle errors
+              setTimeout(() => {
+                try {
+                  router.replace('/auth/login' as any);
+                } catch (navError) {
+                  console.error('[Logout] Navigation error:', navError);
+                  // Fallback: try push if replace fails
+                  router.push('/auth/login' as any);
+                }
+              }, 300);
             } catch (error) {
-              Alert.alert('Error', 'Failed to log out');
+              console.error('[Logout] Logout error:', error);
+              Alert.alert('Error', 'Failed to log out. Please try again.');
+              setIsLoggingOut(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
   const handleOption = (title: string) => {
     onClose();
-    // Placeholder - extend with real nav/data
     console.log(`${title} tapped`);
   };
 
@@ -75,58 +104,58 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
       onRequestClose={onClose}
     >
       <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={[styles.menuContainer, { backgroundColor: colorScheme === 'dark' ? '#1c1c1e' : '#fff' }]} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.menuContainer, { backgroundColor: colors.card }]} onPress={(e) => e.stopPropagation()}>
 
           {/* Handle bar */}
-          <View style={styles.handleBar} />
+          <View style={[styles.handleBar, { backgroundColor: colors.border }]} />
 
           <TouchableOpacity style={styles.menuItem} onPress={handleSettings}>
             <Ionicons name="settings-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Settings</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={handlePrivacySecurity}>
             <Ionicons name="shield-checkmark-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Privacy & Security</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={handleBlockedContacts}>
             <Ionicons name="ban-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Blocked Contacts</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => handleOption('Archive')}>
             <Ionicons name="archive-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Archive</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => handleOption('Saved')}>
             <Ionicons name="bookmark-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Saved</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => handleOption('Close Friends')}>
             <Ionicons name="people-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Close Friends</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => handleOption('Activity Log')}>
             <Ionicons name="time-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Activity Log</ThemedText>
-            <Ionicons name="chevron-forward" size={20} color={colorScheme === 'dark' ? '#666' : '#999'} style={styles.chevron} />
+            <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
 
           <View style={styles.separator} />
 
           <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={24} color="#ff3b30" />
-            <ThemedText style={[styles.menuText, { color: '#ff3b30' }]}>Log Out</ThemedText>
+            <Ionicons name="log-out-outline" size={24} color={colors.error} />
+            <ThemedText style={[styles.menuText, { color: colors.error }]}>Log Out</ThemedText>
           </TouchableOpacity>
 
         </Pressable>

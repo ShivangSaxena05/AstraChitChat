@@ -1,5 +1,5 @@
 // FINAL PRODUCTION++ VERSION (Shimmer + Better UX)
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -11,6 +11,7 @@ import {
   Text,
   Alert,
   Animated,
+  useColorScheme,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -18,8 +19,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { get, put } from '@/services/api';
 import { uploadMedia } from '@/services/mediaService';
 import SaveToast from '@/components/SaveToast';
+import { useTheme } from '@/hooks/use-theme-color';
 
 export default function EditProfileScreen() {
+  const colors = useTheme();
+  const colorScheme = useColorScheme();
   const [name, setName] = useState<string>('');
   const [username, setUsername] = useState<string>('');
   const [bio, setBio] = useState<string>('');
@@ -43,6 +47,7 @@ export default function EditProfileScreen() {
   const shimmer = useRef(new Animated.Value(0)).current;
 
   const router = useRouter();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const PRONOUN_OPTIONS = ['He/Him', 'She/Her', 'They/Them', 'Prefer not to say'];
 
@@ -103,7 +108,8 @@ export default function EditProfileScreen() {
       setUploading(true);
       setUploadError(null);
       try {
-        const res = await uploadMedia(uri);
+        const fileName = `${type}_${Date.now()}.${uri.split('.').pop()}`;
+        const res = await uploadMedia(uri, fileName);
         if (type === 'avatar') {
           setNewProfilePictureUrl(res.url);
         } else {
@@ -155,12 +161,12 @@ export default function EditProfileScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f8f9fb' }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.container}>
 
         <TouchableOpacity onPress={() => pickImage('cover')} style={styles.coverContainer}>
           {(newCoverPhotoUri || coverPhoto) && (
-            <Image source={{ uri: newCoverPhotoUri || coverPhoto }} style={styles.cover} />
+            <Image source={{ uri: (newCoverPhotoUri || coverPhoto) as string }} style={styles.cover} />
           )}
           {uploading && <ActivityIndicator style={styles.loader} />}
         </TouchableOpacity>
@@ -168,10 +174,10 @@ export default function EditProfileScreen() {
         <View style={styles.avatarWrapper}>
           <TouchableOpacity onPress={() => pickImage('avatar')}>
             {(newProfilePictureUri || profilePicture) ? (
-              <Image source={{ uri: newProfilePictureUri || profilePicture }} style={styles.avatar} />
+              <Image source={{ uri: (newProfilePictureUri || profilePicture) as string }} style={styles.avatar} />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Ionicons name="person" size={40} color="#888" />
+                <Ionicons name="person" size={40} color={colors.iconSecondary} />
               </View>
             )}
             {uploading && <ActivityIndicator style={styles.avatarLoader} />}
@@ -207,7 +213,7 @@ export default function EditProfileScreen() {
       </ScrollView>
 
       <TouchableOpacity style={styles.saveBtn} onPress={handleSaveChanges} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save Changes</Text>}
+        {saving ? <ActivityIndicator color={colors.card} /> : <Text style={styles.saveText}>Save Changes</Text>}
       </TouchableOpacity>
 
       <SaveToast visible={showToast} onHide={() => setShowToast(false)} />
@@ -215,40 +221,42 @@ export default function EditProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: { padding: 16, paddingBottom: 120 },
-  coverContainer: { height: 160, borderRadius: 20, backgroundColor: '#ddd', overflow: 'hidden' },
+  coverContainer: { height: 160, borderRadius: 20, backgroundColor: colors.backgroundSecondary, overflow: 'hidden' },
   cover: { width: '100%', height: '100%' },
 
   avatarWrapper: { alignItems: 'center', marginTop: -50, marginBottom: 10 },
-  avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 4, borderColor: 'blue' },
-  avatarPlaceholder: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#eee',borderColor:"blue", borderWidth:1, justifyContent: 'center', alignItems: 'center' },
+  avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 4, borderColor: colors.tint },
+  avatarPlaceholder: { width: 110, height: 110, borderRadius: 55, backgroundColor: colors.backgroundSecondary, borderColor: colors.tint, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
 
-  card: { backgroundColor: '#fff', padding: 16, borderRadius: 18, marginBottom: 20 },
-  section: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
+  card: { backgroundColor: colors.card, padding: 16, borderRadius: 18, marginBottom: 20 },
+  section: { fontSize: 18, fontWeight: '600', marginBottom: 12, color: colors.text },
 
-  input: { backgroundColor: '#f1f3f5', borderRadius: 14, padding: 14, marginBottom: 12 },
+  input: { backgroundColor: colors.backgroundSecondary, borderRadius: 14, padding: 14, marginBottom: 12, color: colors.text },
 
   chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, backgroundColor: '#f1f3f5' },
-  chipActive: { backgroundColor: '#007AFF' },
-  chipText: { color: '#333' },
-  chipTextActive: { color: '#fff', fontWeight: 'bold' },
+  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, backgroundColor: colors.backgroundSecondary },
+  chipActive: { backgroundColor: colors.accent },
+  chipText: { color: colors.text },
+  chipTextActive: { color: colors.background, fontWeight: 'bold' },
 
-  saveBtn: { position: 'absolute', bottom: 20, left: 20, right: 20, backgroundColor: '#007AFF', padding: 14, borderRadius: 14, alignItems: 'center' },
-  saveText: { color: '#fff', fontWeight: 'bold' },
+  saveBtn: { position: 'absolute', bottom: 20, left: 20, right: 20, backgroundColor: colors.tint, padding: 14, borderRadius: 14, alignItems: 'center' },
+  saveText: { color: colors.background, fontWeight: 'bold' },
 
   loader: { position: 'absolute', top: '50%', left: '50%' },
   avatarLoader: { position: 'absolute', top: '40%', left: '40%' },
 
   errorText: {
-    color: 'red',
+    color: colors.error,
     textAlign: 'center',
     marginBottom: 10,
   },
 
   skeletonContainer: { flex: 1, padding: 16 },
-  skeletonBlock: { height: 160, backgroundColor: '#e0e0e0', borderRadius: 20, marginBottom: 20 },
-  skeletonCircle: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#e0e0e0', alignSelf: 'center', marginTop: -50, marginBottom: 20 },
-  skeletonCard: { height: 120, backgroundColor: '#e0e0e0', borderRadius: 16, marginBottom: 20 },
+  skeletonBlock: { height: 160, backgroundColor: colors.backgroundSecondary, borderRadius: 20, marginBottom: 20 },
+  skeletonCircle: { width: 110, height: 110, borderRadius: 55, backgroundColor: colors.backgroundSecondary, alignSelf: 'center', marginTop: -50, marginBottom: 20 },
+  skeletonCard: { height: 120, backgroundColor: colors.backgroundSecondary, borderRadius: 16, marginBottom: 20 },
 });
+
+const styles = createStyles({} as any); // Placeholder

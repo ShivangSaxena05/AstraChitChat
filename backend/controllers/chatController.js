@@ -3,6 +3,7 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const mongoose = require('mongoose');
 const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../services/mediaService');
+const { applyUserDefaults } = require('../utils/lazyDefaults');
 
 // Get all chats for current user
 async function getChats(req, res) {
@@ -15,7 +16,19 @@ async function getChats(req, res) {
       .limit(20)
       .lean();
 
-    res.json(chats);
+    // Apply lazy defaults to participant users
+    const chatsWithDefaults = chats.map(chat => ({
+      ...chat,
+      participants: chat.participants?.map(p => ({
+        ...p,
+        user: p.user ? applyUserDefaults(p.user) : null,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+      })) || [],
+      lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
+    }));
+
+    res.json(chatsWithDefaults);
   } catch (error) {
     console.error('getChats error:', error);
     res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
@@ -99,9 +112,13 @@ async function findChat(req, res) {
     const { userId } = req.params;
     const currentUser = req.user._id;
 
+    // FIX: Handle both participant orders to find existing direct chat
     const chat = await Chat.findOne({
       convoType: 'direct',
-      'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
+      $or: [
+        { 'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] } },
+        { participants: { $size: 2, $elemMatch: { user: currentUser }, $elemMatch: { user: new mongoose.Types.ObjectId(userId) } } }
+      ]
     }).populate('participants.user', 'name username profilePicture');
 
     if (!chat) {
@@ -124,24 +141,42 @@ async function createChat(req, res) {
       return res.status(400).json({ message: 'Cannot chat with self' });
     }
 
+    // FIX: Sort participant IDs to ensure consistent ordering and prevent duplicates
+    const userIds = [currentUser.toString(), userId].sort();
+    
     let chat = await Chat.findOne({
       convoType: 'direct',
-      'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] }
+      'participants.user': { $all: [new mongoose.Types.ObjectId(userIds[0]), new mongoose.Types.ObjectId(userIds[1])] },
+      participants: { $size: 2 }
     });
 
     if (!chat) {
+      const now = new Date();
       chat = new Chat({
         convoType: 'direct',
         participants: [
-          { user: currentUser, role: 'member' },
-          { user: new mongoose.Types.ObjectId(userId), role: 'member' }
-        ]
+          { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
+          { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now }
+        ],
+        lastActivityTimestamp: now
       });
       await chat.save();
     }
 
-    chat = await chat.populate('participants.user', 'name username profilePicture');
-    res.json(chat);
+    chat = await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen');
+    
+    // Apply lazy defaults to participants
+    const chatWithDefaults = {
+      ...chat.toObject(),
+      participants: chat.participants?.map(p => ({
+        ...p,
+        user: p.user ? applyUserDefaults(p.user) : null,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+      })) || [],
+    };
+    
+    res.json(chatWithDefaults);
   } catch (error) {
     res.status(500).json({ message: 'Failed to create chat', error: error.message });
   }
@@ -190,31 +225,42 @@ async function sendMessage(req, res) {
       );
     });
 
+    // FIX: Sort participant IDs to ensure consistent ordering and prevent duplicates
+    const userIds = [senderId.toString(), receiverId].sort();
+
     let chat = await Chat.findOne({
       convoType: 'direct',
-      'participants.user': { $all: [senderId, new mongoose.Types.ObjectId(receiverId)] }
+      'participants.user': { $all: [new mongoose.Types.ObjectId(userIds[0]), new mongoose.Types.ObjectId(userIds[1])] },
+      participants: { $size: 2 }
     });
 
     if (!chat) {
+      const now = new Date();
       chat = new Chat({
         convoType: 'direct',
         participants: [
-          { user: senderId, role: 'member' },
-          { user: new mongoose.Types.ObjectId(receiverId), role: 'member' },
+          { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
+          { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now },
         ],
+        lastActivityTimestamp: now
       });
       await chat.save();
     }
 
+    const now = new Date();
     const message = new Message({
       sender: senderId,
       receiver: new mongoose.Types.ObjectId(receiverId),
       chat: chat._id,
       bodyText: bodyText || '',
       msgType,
+      status: 'sent',
       attachments: validatedAttachments,
       quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
-      readBy: [{ user: senderId, readAt: new Date() }],
+      readBy: [{ user: senderId, readAt: now }],
+      deliveredTo: [],
+      reactions: [],
+      content: bodyText || '',
     });
 
     await message.save();

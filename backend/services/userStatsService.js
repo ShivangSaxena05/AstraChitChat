@@ -100,13 +100,37 @@ const setStat = async (userId, statField, value) => {
 
 /**
  * Get all stats for a user
+ * If UserStats document doesn't exist, compute stats from database
  */
 const getUserStats = async (userId) => {
   try {
     let userStats = await UserStats.findOne({ userId });
     
     if (!userStats) {
-      userStats = await initializeUserStats(userId);
+      // Calculate stats from database if UserStats doesn't exist
+      const Post = require('../models/Post');
+      const Follow = require('../models/Follow');
+      const Like = require('../models/Like');
+      
+      const [postsCount, followersCount, followingCount, likesCount] = await Promise.all([
+        Post.countDocuments({ user: userId }),
+        Follow.countDocuments({ following: userId }),
+        Follow.countDocuments({ follower: userId }),
+        Like.countDocuments({ user: userId }),
+      ]);
+      
+      // Create the UserStats document with computed values
+      userStats = await UserStats.create({
+        userId,
+        postsCount,
+        followersCount,
+        followingCount,
+        totalLikesCount: likesCount,
+        commentsCount: 0,
+        engagementScore: 0,
+      });
+      
+      console.log(`✅ Created UserStats for user ${userId} with computed values`);
     }
     
     return userStats;

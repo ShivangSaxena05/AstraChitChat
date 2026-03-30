@@ -26,6 +26,7 @@ import TopHeaderComponent from '@/components/TopHeaderComponent';
 import SearchBarComponent from '@/components/SearchBarComponent';
 import { useSocket } from '@/contexts/SocketContext';
 import { useTheme } from '@/hooks/use-theme-color';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
@@ -68,6 +69,7 @@ interface SavedAccount {
 export default function HomeScreen() {
   const router = useRouter();
   const { connect } = useSocket();
+  const colorScheme = useColorScheme();
 
   // Tab state & User state
   const [activeTab, setActiveTab] = useState<'flicks' | 'explore'>('flicks');
@@ -321,12 +323,53 @@ export default function HomeScreen() {
   // --- RENDER POST ITEM (YouTube style) ---
   const renderPost = ({ item }: { item: Post }) => (
     <View style={styles.postCardContainer}>
-      <PostCard
-        post={item}
-        onLike={handlePostLike}
-        onComment={handlePostComment}
-        onShare={handlePostShare}
-      />
+      <View style={[styles.postContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <Image
+          source={{
+            uri: item.mediaUrl || 'https://via.placeholder.com/400x300',
+          }}
+          style={styles.postThumbnail}
+          resizeMode="cover"
+        />
+        <View style={styles.postContent}>
+          <View style={styles.postHeader}>
+            <Image
+              source={{
+                uri: item.user.profilePicture || 'https://via.placeholder.com/40',
+              }}
+              style={styles.postAvatar}
+            />
+            <View style={styles.postUserInfo}>
+              <ThemedText type="subtitle" style={{ fontSize: 14 }}>
+                {item.user.username}
+              </ThemedText>
+              <Text style={[styles.postDate, { color: colors.textTertiary }]}>
+                {new Date(item.createdAt).toLocaleDateString()}
+              </Text>
+            </View>
+          </View>
+          <ThemedText style={styles.postCaption} numberOfLines={2}>
+            {item.caption}
+          </ThemedText>
+        </View>
+        <View style={styles.postActions}>
+          <TouchableOpacity style={styles.actionItem}>
+            <Text style={styles.actionItemIcon}>❤️</Text>
+            <Text style={[styles.actionItemCount, { color: colors.textSecondary }]}>
+              {item.likes || 0}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionItem}>
+            <Text style={styles.actionItemIcon}>💬</Text>
+            <Text style={[styles.actionItemCount, { color: colors.textSecondary }]}>
+              {item.comments || 0}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionItem}>
+            <Text style={styles.actionItemIcon}>📤</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 
@@ -376,9 +419,17 @@ export default function HomeScreen() {
             onPress={() => handleTabChange('flicks')}
             activeOpacity={0.8}
           >
-            <View style={[styles.tabTrapezoid, activeTab === 'flicks' ? styles.activeTabTrapezoid : styles.inactiveTabTrapezoid]} />
-            {activeTab === 'flicks' && <View style={styles.activeTabGlowLine} />}
-            <Text style={[styles.tabText, activeTab === 'flicks' && styles.activeTabText]}>
+            <View style={[
+              styles.tabTrapezoid, 
+              activeTab === 'flicks' 
+                ? (colorScheme === 'light' ? styles.activeTabTrapezoidLight : styles.activeTabTrapezoid)
+                : (colorScheme === 'light' ? styles.inactiveTabTrapezoidLight : styles.inactiveTabTrapezoid)
+            ]} />
+            {activeTab === 'flicks' && <View style={colorScheme === 'light' ? styles.activeTabGlowLineLight : styles.activeTabGlowLine} />}
+            <Text style={[
+              colorScheme === 'light' ? styles.tabTextLight : styles.tabText,
+              activeTab === 'flicks' && (colorScheme === 'light' ? styles.activeTabTextLight : styles.activeTabText)
+            ]}>
               Flicks
             </Text>
           </TouchableOpacity>
@@ -387,9 +438,17 @@ export default function HomeScreen() {
             onPress={() => handleTabChange('explore')}
             activeOpacity={0.8}
           >
-            <View style={[styles.tabTrapezoid, activeTab === 'explore' ? styles.activeTabTrapezoid : styles.inactiveTabTrapezoid]} />
-            {activeTab === 'explore' && <View style={styles.activeTabGlowLine} />}
-            <Text style={[styles.tabText, activeTab === 'explore' && styles.activeTabText]}>
+            <View style={[
+              styles.tabTrapezoid, 
+              activeTab === 'explore' 
+                ? (colorScheme === 'light' ? styles.activeTabTrapezoidLight : styles.activeTabTrapezoid)
+                : (colorScheme === 'light' ? styles.inactiveTabTrapezoidLight : styles.inactiveTabTrapezoid)
+            ]} />
+            {activeTab === 'explore' && <View style={colorScheme === 'light' ? styles.activeTabGlowLineLight : styles.activeTabGlowLine} />}
+            <Text style={[
+              colorScheme === 'light' ? styles.tabTextLight : styles.tabText,
+              activeTab === 'explore' && (colorScheme === 'light' ? styles.activeTabTextLight : styles.activeTabText)
+            ]}>
               Explore
             </Text>
           </TouchableOpacity>
@@ -535,8 +594,18 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   
+  inactiveTabTrapezoidLight: {
+    borderBottomColor: 'rgba(10, 126, 164, 0.08)',
+    zIndex: 1,
+  },
+  
   activeTabTrapezoid: {
     borderBottomColor: 'rgba(255, 255, 255, 0.15)', // Glassy bright filling
+    zIndex: 2,
+  },
+
+  activeTabTrapezoidLight: {
+    borderBottomColor: 'rgba(10, 126, 164, 0.15)',
     zIndex: 2,
   },
   
@@ -556,6 +625,21 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
 
+  activeTabGlowLineLight: {
+    position: 'absolute',
+    top: 0,
+    left: 15,
+    right: 15,
+    height: 2,
+    backgroundColor: '#0a7ea4',
+    shadowColor: '#0a7ea4',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 5,
+    elevation: 4,
+    zIndex: 3,
+  },
+
   tabText: {
     fontSize: 12,
     fontWeight: '500',
@@ -565,8 +649,25 @@ const styles = StyleSheet.create({
     zIndex: 4, 
     marginTop: 8, // Push text down a bit into the wider part of the trapezoid
   },
+  
+  tabTextLight: {
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: '#aaaaaa',
+    zIndex: 4, 
+    marginTop: 8,
+  },
+
   activeTabText: {
     color: '#ffffff', // Theme: dark.text / white
+    fontWeight: 'bold',
+    zIndex: 4,
+  },
+
+  activeTabTextLight: {
+    color: '#1a1a1a',
     fontWeight: 'bold',
     zIndex: 4,
   },
@@ -636,6 +737,62 @@ const styles = StyleSheet.create({
   // Explore Styles
   postCardContainer: {
     marginBottom: 8,
+  },
+  postContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    padding: 12,
+    alignItems: 'center',
+  },
+  postThumbnail: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#f0f0f0',
+  },
+  postContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  postHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  postAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  postUserInfo: {
+    flex: 1,
+  },
+  postDate: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  postCaption: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  postActions: {
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionItem: {
+    alignItems: 'center',
+  },
+  actionItemIcon: {
+    fontSize: 20,
+    marginBottom: 2,
+  },
+  actionItemCount: {
+    fontSize: 12,
   },
   exploreItem: {
     flex: 1,

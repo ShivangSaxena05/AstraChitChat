@@ -221,8 +221,12 @@ const acceptFollowRequest = async (req, res) => {
     await currentUser.save();
 
     await Follow.create({ follower: userId, following: currentUserId });
-    await User.findByIdAndUpdate(userId, { $inc: { followingCount: 1 } });
-    await User.findByIdAndUpdate(currentUserId, { $inc: { followersCount: 1 } });
+    
+    // Update stats using UserStats service (consistent with followUser)
+    await Promise.all([
+      incrementStat(userId, 'followingCount', 1),
+      incrementStat(currentUserId, 'followersCount', 1),
+    ]);
 
     res.json({ message: 'Follow request accepted' });
   } catch (error) {

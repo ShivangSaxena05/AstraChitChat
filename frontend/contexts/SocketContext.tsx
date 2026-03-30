@@ -376,7 +376,12 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         try {
           const data = await get("/chats");
           if (data && Array.isArray(data)) {
-            setConversations(data.sort((a: any, b: any) => {
+            // FIX: Deduplicate chats by ID before sorting
+            const uniqueChats = Array.from(
+              new Map(data.map(chat => [chat._id, chat])).values()
+            );
+            
+            setConversations(uniqueChats.sort((a: any, b: any) => {
               const aTime = a.lastMessage?.createdAt
                 ? new Date(a.lastMessage.createdAt).getTime()
                 : new Date(a.updatedAt || 0).getTime();

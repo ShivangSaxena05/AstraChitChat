@@ -13,7 +13,7 @@ export default function FlicksScreen() {
         <Text style={styles.icon}>🎬</Text>
         <ThemedText type="title" style={styles.title}>Flicks</ThemedText>
         <ThemedText style={[styles.subtitle, { color: colors.tint }]}>Coming Soon!</ThemedText>
-        <Text style={[styles.description, { color: colors.textTertiary }]}>
+        <Text style={[styles.description, { color: colors.textSecondary }]}>
           Short video content is on its way. Stay tuned for an amazing experience!
         </Text>
       </View>

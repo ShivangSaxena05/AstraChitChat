@@ -91,12 +91,12 @@ export default function ExploreScreen() {
         <TopHeaderComponent />
       </View>
       <View style={[styles.searchHeader, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
-        <View style={[styles.searchContainer, { backgroundColor: colors.backgroundSecondary }]}>
-          <Ionicons name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
+        <View style={[styles.searchContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Ionicons name="search" size={20} color={colors.textSecondary} style={styles.searchIcon} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search users, videos, and posts..."
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoCapitalize="none"
@@ -104,7 +104,7 @@ export default function ExploreScreen() {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
-              <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+              <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
         </View>
@@ -156,6 +156,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 16,
     height: 40,
+    borderWidth: 1,
   },
   searchIcon: {
     marginRight: 8,

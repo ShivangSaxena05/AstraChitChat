@@ -164,8 +164,13 @@ export default function ChatListScreen() {
       
       const data = await get('/chats');
       if (data) {
+        // FIX: Deduplicate chats by ID before sorting
+        const uniqueChats = Array.from(
+          new Map(data.map((chat: Chat) => [chat._id, chat])).values()
+        ) as Chat[];
+
         // Sort chats by most recent message (lastMessage.createdAt or updatedAt)
-        const sorted = data.sort((a: Chat, b: Chat) => {
+        const sorted = uniqueChats.sort((a: Chat, b: Chat) => {
           const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
           const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
           return bTime - aTime;

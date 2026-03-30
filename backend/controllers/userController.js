@@ -5,6 +5,7 @@ const Like = require('../models/Like');
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../services/mediaService');
+const { applyUserDefaults } = require('../utils/lazyDefaults');
 
 // @desc    Search users by username or name
 // @route   GET /api/users/search?q=query
@@ -18,7 +19,7 @@ const searchUsers = async (req, res) => {
     }
 
     const currentUser = await User.findById(req.user._id).select('blockedUsers');
-    const blockedUsers = currentUser.blockedUsers || [];
+    const blockedUsers = currentUser?.blockedUsers || [];
 
     const usersWhoBlockedMe = await User.find({ blockedUsers: req.user._id }).select('_id');
     const blockedByIds = usersWhoBlockedMe.map(u => u._id);
@@ -32,10 +33,13 @@ const searchUsers = async (req, res) => {
         { name: { $regex: q, $options: 'i' } },
       ],
     })
-      .select('username name profilePicture')
+      .select('username name profilePicture isOnline lastSeen')
       .limit(20);
 
-    res.json({ users });
+    // Apply lazy defaults to all returned users
+    const usersWithDefaults = users.map(user => applyUserDefaults(user));
+
+    res.json({ users: usersWithDefaults });
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({ 
@@ -57,9 +61,17 @@ const toggleBlockUser = async (req, res) => {
       return res.status(400).json({ message: 'You cannot block yourself' });
     }
 
-    const currentUser = await User.findById(currentUserId);
-    const targetUser = await User.findById(targetUserId);
+    const [currentUser, targetUser] = await Promise.all([
+      User.findById(currentUserId),
+      User.findById(targetUserId),
+    ]);
+
     if (!targetUser) return res.status(404).json({ message: 'User not found' });
+
+    // Ensure blockedUsers array exists
+    if (!currentUser.blockedUsers) {
+      currentUser.blockedUsers = [];
+    }
 
     const isBlocked = currentUser.blockedUsers.some(
       id => id.toString() === targetUserId

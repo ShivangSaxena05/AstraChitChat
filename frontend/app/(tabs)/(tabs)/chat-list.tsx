@@ -86,6 +86,37 @@ export default function ChatListScreen() {
     return 0;
   };
 
+  // Helper function to safely get participant info with fallbacks
+  const getParticipantInfo = (participant: Chat['participants'][0] | undefined) => {
+    if (!participant) {
+      return {
+        userId: null,
+        username: "Unknown User",
+        profilePicture: "https://i.pravatar.cc/150?img=default",
+        isValid: false,
+      };
+    }
+
+    const userId = participant.user?._id;
+    const username = participant.user?.username;
+    const profilePicture = participant.user?.profilePicture;
+
+    // Log warning if any critical field is missing
+    if (!userId || !username) {
+      console.warn(
+        `[Chat List] Incomplete participant data - ID: ${userId}, Username: ${username}`,
+        { participantId: participant._id, participant }
+      );
+    }
+
+    return {
+      userId: userId || null,
+      username: username || "Unknown User",
+      profilePicture: profilePicture || "https://i.pravatar.cc/150?img=default",
+      isValid: !!(userId && username),
+    };
+  };
+
   const colors = useTheme();
 
   const {
@@ -94,7 +125,13 @@ export default function ChatListScreen() {
     currentUserId: socketUserId,
     isConnected,
   } = useSocket();
-  const chats = conversations as unknown as Chat[];
+  
+  // ✅ PRODUCTION FIX: Filter out chats without messages on frontend as safety layer
+  // Backend should handle this, but this prevents edge cases from breaking the UI
+  const chats = (conversations as unknown as Chat[]).filter(
+    (chat) => chat.lastMessage?.text || chat.lastMessage?.createdAt
+  );
+  
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -135,8 +172,29 @@ export default function ChatListScreen() {
           new Map(data.map(chat => [chat._id, chat])).values()
         );
 
+        // Validate and filter chats
+        const validatedChats = uniqueChats.filter((chat: Chat) => {
+          // Always allow group chats
+          if (chat.convoType === "group") {
+            return true;
+          }
+
+          // For direct messages, ensure we have valid participant data
+          const hasValidParticipants =
+            chat.participants &&
+            Array.isArray(chat.participants) &&
+            chat.participants.length > 0 &&
+            chat.participants.some(p => p.user?._id && p.user?.username);
+
+          if (!hasValidParticipants) {
+            console.warn(`[Chat List] Skipping invalid chat: ${chat._id}`, chat);
+          }
+
+          return hasValidParticipants;
+        });
+
         // Sort chats by most recent message
-        const sorted = uniqueChats.sort((a: Chat, b: Chat) => {
+        const sorted = validatedChats.sort((a: Chat, b: Chat) => {
           const aTime = a.lastMessage?.createdAt
             ? new Date(a.lastMessage.createdAt).getTime()
             : 0;
@@ -177,9 +235,10 @@ export default function ChatListScreen() {
 
   const renderChat = ({ item }: { item: Chat }) => {
     const otherParticipant = item.participants.find(
-      (p) => p._id !== currentUserId,
+      (p) => p.user?._id !== currentUserId,
     );
 
+    const participantInfo = getParticipantInfo(otherParticipant);
     const isFromMe =
       String(item.lastMessage?.sender?._id) === String(currentUserId);
     const isGroup = item.convoType === "group";
@@ -188,37 +247,54 @@ export default function ChatListScreen() {
       if (!item.lastMessage?.text) return "No messages yet";
       if (!isFromMe && item.lastMessage?.sender && isGroup) {
         // Prefix with sender's username in group chats
-        return `${item.lastMessage.sender.username}: ${item.lastMessage.text}`;
+        return `${item.lastMessage.sender.username || "Unknown"}: ${item.lastMessage.text}`;
       }
       return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
     };
 
-    // Determine Chat Title - Access user data from nested structure
+    // Determine Chat Title - Use helper function
     const chatTitle =
       isGroup && item.title
         ? item.title
-        : otherParticipant?.user?.username || "Unknown";
-    const avatarUri = isGroup
-      ? "https://cdn-icons-png.flaticon.com/512/681/681494.png" // Reliable PNG group placeholder
-      : otherParticipant?.user?.profilePicture || "https://i.pravatar.cc/150";
+        : participantInfo.username;
+
+    // Add visual indicator for invalid/incomplete data
+    const hasInvalidData = !participantInfo.isValid && !isGroup;
 
     return (
       <TouchableOpacity
-        style={[styles.chatItem, { borderBottomColor: colors.border, backgroundColor: colors.card }]}
-        onPress={() =>
+        style={[
+          styles.chatItem,
+          {
+            borderBottomColor: colors.border,
+            backgroundColor: hasInvalidData ? colors.card : colors.card,
+            opacity: hasInvalidData ? 0.6 : 1,
+          },
+        ]}
+        onPress={() => {
+          if (!participantInfo.userId && !isGroup) {
+            Alert.alert(
+              "Unable to Open Chat",
+              "This chat has incomplete participant data. Please try again or contact support."
+            );
+            return;
+          }
           router.push({
             pathname: "/chat/detail",
             params: {
               chatId: item._id,
-              otherUserId: otherParticipant?.user?._id || "",
-              otherUsername: otherParticipant?.user?.username || "",
+              otherUserId: participantInfo.userId || "",
+              otherUsername: participantInfo.username || "",
             },
-          })
-        }
+          });
+        }}
       >
-        <Image source={{ uri: avatarUri }} style={styles.avatar} />
+        <Image source={{ uri: participantInfo.profilePicture }} style={styles.avatar} />
         <View style={styles.chatContent}>
-          <ThemedText type="subtitle">{chatTitle}</ThemedText>
+          <ThemedText type="subtitle">
+            {chatTitle}
+            {hasInvalidData && " ⚠️"}
+          </ThemedText>
           <Text
             style={[
               styles.lastMessage,

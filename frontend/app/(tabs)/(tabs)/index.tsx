@@ -150,6 +150,16 @@ export default function HomeScreen() {
 
   // Handle tab change
   const handleTabChange = (tab: 'flicks' | 'explore') => {
+    // Cleanup videos when leaving flicks tab
+    if (activeTab === 'flicks' && tab !== 'flicks') {
+      Object.values(videoRefs.current).forEach(ref => {
+        if (ref) {
+          ref.pauseAsync().catch(() => {});
+        }
+      });
+      videoRefs.current = {};
+    }
+
     setActiveTab(tab);
     if (tab === 'explore' && posts.length === 0) {
       setExploreLoading(true);

@@ -9,10 +9,15 @@ const { applyUserDefaults } = require('../utils/lazyDefaults');
 async function getChats(req, res) {
   try {
     const userId = req.user._id;
-    const chats = await Chat.find({ 'participants.user': userId })
+    // ✅ PRODUCTION FIX: Only return chats that have messages (lastMessage exists)
+    // This prevents empty/unstarted conversations from appearing in the chat list
+    const chats = await Chat.find({ 
+      'participants.user': userId,
+      'lastMessage': { $exists: true }  // Only chats with at least one message
+    })
       .populate('participants.user', 'name username profilePicture isOnline lastSeen')
       .populate('lastMessage.sender', 'name username profilePicture')
-      .sort({ updatedAt: -1 })
+      .sort({ 'lastMessage.createdAt': -1 })  // Sort by last message time
       .limit(20)
       .lean();
 
@@ -152,13 +157,16 @@ async function createChat(req, res) {
 
     if (!chat) {
       const now = new Date();
+      // ✅ PRODUCTION FIX: Mark that this chat was created (but will only appear after first message)
+      // Empty chats are filtered out in getChats() - they require at least one message to appear
       chat = new Chat({
         convoType: 'direct',
         participants: [
           { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
           { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now }
         ],
-        lastActivityTimestamp: now
+        lastActivityTimestamp: now,
+        // Note: lastMessage is NOT set - chat only appears in list after first message
       });
       await chat.save();
     }

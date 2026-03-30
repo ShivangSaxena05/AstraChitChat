@@ -75,6 +75,8 @@ chatSchema.index({ participants: 1 }, { unique: true, partialFilterExpression: {
 // ✅ PRODUCTION INDEXES - Chat list performance
 chatSchema.index({ 'participants.user': 1, lastActivityTimestamp: -1 });  // User chat lists
 chatSchema.index({ 'unreadCount': 1 });                                  // Unread queries
+chatSchema.index({ 'lastMessage': 1 });                                  // Filter out empty chats efficiently
+chatSchema.index({ 'participants.user': 1, 'lastMessage': 1 });         // Combined filter for chat list query
 
 module.exports = mongoose.model('Chat', chatSchema);
 

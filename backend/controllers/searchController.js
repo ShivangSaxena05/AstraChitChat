@@ -56,9 +56,33 @@ const searchAll = async (req, res) => {
     })
       .populate('user', 'username name profilePicture')
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(20)
+      .lean();
 
-    res.json({ users: sortedUsers, posts });
+    // Sanitize posts response to match feed endpoint format
+    const sanitizedPosts = posts.map(post => ({
+      _id: post._id || '',
+      mediaUrl: post.mediaUrl || '',
+      mediaType: post.mediaType || 'post',
+      caption: post.caption || '',
+      type: post.mediaType === 'flick' ? 'video' : (post.mediaUrl ? 'photo' : 'text'),
+      user: {
+        _id: post.user?._id || '',
+        username: post.user?.username || 'unknown',
+        profilePicture: post.user?.profilePicture || ''
+      },
+      createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
+      likes: Array.isArray(post.likes) ? post.likes.length : 0,
+      comments: Array.isArray(post.comments) ? post.comments.length : 0,
+      hashtags: Array.isArray(post.hashtags) ? post.hashtags : []
+    }));
+
+    res.json({ 
+      users: sortedUsers, 
+      posts: sanitizedPosts,
+      page: 1,
+      hasMore: false
+    });
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({ message: 'Server Error', error: error.message });

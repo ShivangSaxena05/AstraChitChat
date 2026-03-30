@@ -5,13 +5,17 @@ const {
   getFeedPosts,
   getShortVideos,
   getUserPosts,
-  getUserPostsById
+  getUserPostsById,
+  searchPosts
 } = require('../controllers/postController');
 const { likePost, getPostLikes } = require('../controllers/likeController');
 const { addComment, getPostComments, deleteComment } = require('../controllers/commentController');
 const { protect } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Search routes
+router.get('/search', protect, searchPosts);
 
 // Post CRUD routes
 router.post('/upload', protect, createPost);

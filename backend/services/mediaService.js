@@ -1,19 +1,33 @@
 /**
- * mediaService.js
+ * mediaService.js (v2.0)
  * ---------------
  * Centralised helpers for all Cloudinary / S3 media operations.
  *
- * Cloudinary folder structure:
- *   Astra/profile/{userId}      — profile pictures
- *   Astra/cover/{userId}        — cover photos
- *   Astra/posts/{userId}        — post images/videos
- *   Astra/chat/{chatId}         — chat media files
+ * Cloudinary folder structure (myapp/):
+ *   myapp/images/posts/original/{userId}       — post images
+ *   myapp/profile/current/{userId}             — active profile pictures
+ *   myapp/profile/history/{userId}             — old profile pictures (90 days)
+ *   myapp/stories/images/{userId}              — story images (24-hour expiry)
+ *   myapp/stories/videos/{userId}              — story videos (24-hour expiry)
+ *   myapp/videos/original/{userId}             — original long videos
+ *   myapp/videos/hls/{quality}/{userId}        — HLS processed (360p, 720p, 1080p, 4k)
+ *   myapp/videos/thumbnails/{userId}           — video previews
+ *   myapp/flick/original/{userId}              — raw short videos
+ *   myapp/flick/processed/{quality}/{userId}   — optimized (480p, 720p, 1080p)
+ *   myapp/flick/covers/{userId}                — flick thumbnails
  *
  * S3 folder structure (backup):
- *   profile/{userId}/{timestamp}-{filename}   — profile pictures
- *   cover/{userId}/{timestamp}-{filename}     — cover photos
- *   posts/{userId}/{timestamp}-{filename}     — post images/videos
- *   chat/{chatId}/{timestamp}-{filename}      — chat media files
+ *   images/posts/original/{userId}/{timestamp}-{filename}
+ *   profile/current/{userId}/{timestamp}-{filename}
+ *   profile/history/{userId}/{timestamp}-{filename}
+ *   stories/images/{userId}/{timestamp}-{filename}
+ *   stories/videos/{userId}/{timestamp}-{filename}
+ *   videos/original/{userId}/{timestamp}-{filename}
+ *   videos/hls/{quality}/{userId}/{timestamp}-{filename}
+ *   videos/thumbnails/{userId}/{timestamp}-{filename}
+ *   flick/original/{userId}/{timestamp}-{filename}
+ *   flick/processed/{quality}/{userId}/{timestamp}-{filename}
+ *   flick/covers/{userId}/{timestamp}-{filename}
  *
  * Exports:
  *   uploadToCloudinary(fileBuffer, options)
@@ -38,9 +52,36 @@ const streamifier = require('streamifier');
 const STORAGE_TYPE = process.env.STORAGE_TYPE || 'cloudinary';
 
 const MEDIA_FOLDERS = {
-    profile: 'profile',
-    cover: 'cover',
-    post: 'posts',
+    // Images
+    postImage: 'images/posts/original',
+    
+    // Profile
+    profileCurrent: 'profile/current',
+    profileHistory: 'profile/history',
+    
+    // Stories (24-hour expiry)
+    storyImage: 'stories/images',
+    storyVideo: 'stories/videos',
+    
+    // Videos (long-form)
+    videoOriginal: 'videos/original',
+    videoHLS360p: 'videos/hls/360p',
+    videoHLS720p: 'videos/hls/720p',
+    videoHLS1080p: 'videos/hls/1080p',
+    videoHLS4K: 'videos/hls/4k',
+    videoThumbnail: 'videos/thumbnails',
+    
+    // Flick (short vertical videos)
+    flickOriginal: 'flick/original',
+    flickProcessed480p: 'flick/processed/480p',
+    flickProcessed720p: 'flick/processed/720p',
+    flickProcessed1080p: 'flick/processed/1080p',
+    flickCover: 'flick/covers',
+    
+    // Legacy support (for backward compatibility)
+    post: 'images/posts/original',
+    profile: 'profile/current',
+    cover: 'profile/current', // Maps to profile/current (old cover logic)
     chat: 'chat',
 };
 
@@ -48,10 +89,20 @@ const uploadToCloudinary = (fileBuffer, options) => {
     return new Promise((resolve, reject) => {
         const { folder, ownerId, fileName, resourceType = 'auto' } = options;
         
+        // Validate folder path
+        if (!MEDIA_FOLDERS[folder]) {
+            return reject(new Error(`Invalid media folder: "${folder}". Must be one of: ${Object.keys(MEDIA_FOLDERS).join(', ')}`));
+        }
+
+        const folderPath = MEDIA_FOLDERS[folder];
+        const timestamp = Date.now();
+        const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
+        
         const uploadStream = cloudinary.uploader.upload_stream(
             {
-                folder: `Astra/${folder}/${ownerId}`,
-                public_id: fileName.replace(/\.[^/.]+$/, ''),
+                folder: `myapp/${folderPath}/${ownerId}`,
+                public_id: `${timestamp}-${safeFileName}`,
                 resource_type: resourceType,
                 transformation: [{ quality: 'auto', fetch_format: 'auto' }]
             },
@@ -76,10 +127,15 @@ const uploadToCloudinary = (fileBuffer, options) => {
     });
 };
 
-const uploadFileToCloudinary = (file) => {
+const uploadFileToCloudinary = (file, folder = 'postImage') => {
     return new Promise((resolve, reject) => {
+        const folderPath = MEDIA_FOLDERS[folder] || MEDIA_FOLDERS.postImage;
+        const timestamp = Date.now();
+        const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+        
         cloudinary.uploader.upload(file.path, {
-            folder: `Astra/posts`,
+            folder: `myapp/${folderPath}`,
+            public_id: `${timestamp}-${safeFileName}`,
             resource_type: 'auto',
             transformation: [{ quality: 'auto', fetch_format: 'auto' }]
         }, (error, result) => {
@@ -113,13 +169,20 @@ const deleteFromCloudinary = async (publicId) => {
 const getCloudinaryUploadUrl = async (options) => {
     const { folder, ownerId, fileName, resourceType = 'auto' } = options;
     
+    // Validate folder
+    if (!MEDIA_FOLDERS[folder]) {
+        throw new Error(`Invalid media folder: "${folder}". Must be one of: ${Object.keys(MEDIA_FOLDERS).join(', ')}`);
+    }
+
+    const folderPath = MEDIA_FOLDERS[folder];
     const timestamp = Date.now();
-    const publicId = `Astra/${folder}/${ownerId}/${timestamp}-${fileName.replace(/\.[^/.]+$/, '')}`;
+    const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
     
     const signedUpload = cloudinary.utils.api_sign_request({
         timestamp: timestamp,
-        folder: `Astra/${folder}/${ownerId}`,
-        public_id: publicId,
+        folder: `myapp/${folderPath}/${ownerId}`,
+        public_id: `${timestamp}-${safeFileName}`,
         resource_type: resourceType
     }, process.env.CLOUDINARY_API_SECRET);
 
@@ -133,7 +196,7 @@ const getCloudinaryUploadUrl = async (options) => {
         timestamp,
         publicId,
         signature: signedUpload,
-        folder: `Astra/${folder}/${ownerId}`
+        folder: `myapp/${folderPath}/${ownerId}`
     };
 };
 
@@ -141,7 +204,7 @@ const getCloudinaryUploadUrl = async (options) => {
 // 1. Presigned upload URL — client uploads directly to S3
 //
 //    options: {
-//      folder:    'profile' | 'cover' | 'post' | 'chat'  (required)
+//      folder:    'postImage' | 'profileCurrent' | 'storyImage' | 'videoOriginal' | 'flickOriginal' | 'videoHLS720p' etc (required)
 //      ownerId:   userId or chatId — used as subfolder    (required)
 //      fileName:  original file name                      (required)
 //      fileType:  MIME type (e.g. 'image/jpeg')          (required)
@@ -157,7 +220,7 @@ const getPresignedUploadUrl = async (options) => {
         fileName  = arguments[1];
         fileType  = arguments[2];
         expiresIn = arguments[3] || 300;
-        folder    = 'posts'; // default folder for legacy calls
+        folder    = 'postImage'; // default folder for legacy calls
     } else {
         ({ folder, ownerId, fileName, fileType, fileSize, expiresIn = 300 } = options);
     }
@@ -167,8 +230,8 @@ const getPresignedUploadUrl = async (options) => {
     }
 
     const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const prefix = MEDIA_FOLDERS[folder];
-    const key = `${prefix}/${ownerId}/${Date.now()}-${safeFileName}`;
+    const folderPath = MEDIA_FOLDERS[folder];
+    const key = `${folderPath}/${ownerId}/${Date.now()}-${safeFileName}`;
     const bucket = process.env.AWS_BUCKET_NAME;
     const cloudfrontBase = process.env.CLOUDFRONT_URL.replace(/\/$/, '');
 

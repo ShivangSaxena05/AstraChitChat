@@ -3,6 +3,7 @@ const UserStats = require('../models/UserStats');
 const Follow = require('../models/Follow');
 const { getPresignedUploadUrl } = require('../services/mediaService');
 const { getUserStats } = require('../services/userStatsService');
+const { applyUserDefaults, serializeUser } = require('../utils/lazyDefaults');
 
 // @desc    Get current user's profile
 // @route   GET /api/profile/me
@@ -14,31 +15,34 @@ const getUserProfile = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Apply lazy defaults asynchronously (fire-and-forget)
+    const userWithDefaults = applyUserDefaults(user);
+
     // Fetch stats from UserStats model
     const userStats = await getUserStats(req.user._id);
 
     res.json({
-      _id: user._id,
-      displayName: user.name,
-      name: user.name,
-      username: user.username,
-      profilePictureUrl: user.profilePicture,
-      profilePicture: user.profilePicture,
-      coverPhoto: user.coverPhoto || '',
-      bio: user.bio || '',
-      location: user.location || '',
-      website: user.website || '',
-      pronouns: user.pronouns || '',
-      encryptionPublicKey: user.encryptionPublicKey || null,
+      _id: userWithDefaults._id,
+      displayName: userWithDefaults.name,
+      name: userWithDefaults.name,
+      username: userWithDefaults.username,
+      profilePictureUrl: userWithDefaults.profilePicture,
+      profilePicture: userWithDefaults.profilePicture,
+      coverPhoto: userWithDefaults.coverPhoto || '',
+      bio: userWithDefaults.bio || '',
+      location: userWithDefaults.location || '',
+      website: userWithDefaults.website || '',
+      pronouns: userWithDefaults.pronouns || '',
+      encryptionPublicKey: userWithDefaults.encryptionPublicKey || null,
       stats: {
-        posts: userStats?.postsCount || 0,
-        followers: userStats?.followersCount || 0,
-        following: userStats?.followingCount || 0,
-        likes: userStats?.totalLikesCount || 0,
+        posts: userStats?.postsCount || userWithDefaults.postsCount || 0,
+        followers: userStats?.followersCount || userWithDefaults.followersCount || 0,
+        following: userStats?.followingCount || userWithDefaults.followingCount || 0,
+        likes: userStats?.totalLikesCount || userWithDefaults.totalLikesCount || 0,
       },
-      isPrivate: user.isPrivate,
-      isOnline: user.isOnline,
-      lastSeen: user.lastSeen,
+      isPrivate: userWithDefaults.isPrivate || false,
+      isOnline: userWithDefaults.isOnline ?? false,
+      lastSeen: userWithDefaults.lastSeen,
     });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
@@ -62,6 +66,9 @@ const getUserProfileById = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Apply lazy defaults asynchronously (fire-and-forget)
+    const userWithDefaults = applyUserDefaults(user);
+
     let isBlocked = false;
     let isMuted = false;
     let isFollowing = false;
@@ -76,29 +83,29 @@ const getUserProfileById = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
-      displayName: user.name,
-      name: user.name,
-      username: user.username,
-      profilePictureUrl: user.profilePicture,
-      profilePicture: user.profilePicture,
-      coverPhoto: user.coverPhoto || '',
-      bio: user.bio || '',
-      encryptionPublicKey: user.encryptionPublicKey || null,
+      _id: userWithDefaults._id,
+      displayName: userWithDefaults.name,
+      name: userWithDefaults.name,
+      username: userWithDefaults.username,
+      profilePictureUrl: userWithDefaults.profilePicture,
+      profilePicture: userWithDefaults.profilePicture,
+      coverPhoto: userWithDefaults.coverPhoto || '',
+      bio: userWithDefaults.bio || '',
+      encryptionPublicKey: userWithDefaults.encryptionPublicKey || null,
       stats: {
-        posts: userStats?.postsCount || 0,
-        followers: userStats?.followersCount || 0,
-        following: userStats?.followingCount || 0,
-        likes: userStats?.totalLikesCount || 0,
+        posts: userStats?.postsCount || userWithDefaults.postsCount || 0,
+        followers: userStats?.followersCount || userWithDefaults.followersCount || 0,
+        following: userStats?.followingCount || userWithDefaults.followingCount || 0,
+        likes: userStats?.totalLikesCount || userWithDefaults.totalLikesCount || 0,
       },
-      isPrivate: user.isPrivate,
-      isTwoFactorEnabled: user.isTwoFactorEnabled,
-      role: user.role,
+      isPrivate: userWithDefaults.isPrivate || false,
+      isTwoFactorEnabled: userWithDefaults.isTwoFactorEnabled || false,
+      role: userWithDefaults.role || 'user',
       isBlocked,
       isMuted,
       isFollowing,
-      isOnline: user.isOnline,
-      lastSeen: user.lastSeen,
+      isOnline: userWithDefaults.isOnline ?? false,
+      lastSeen: userWithDefaults.lastSeen,
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);

@@ -6,22 +6,22 @@ const messageReceiptSchema = new mongoose.Schema({
         ref: 'Message',
         required: true
     },
-    recipient: {
+    user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
     },
     deliveredAt: {
-        type: Date
+        type: Date,
+        default: null
     },
     readAt: {
-        type: Date
+        type: Date,
+        default: null
     }
-}, {
-    timestamps: true
 });
 
-// Compound index for efficient queries
-messageReceiptSchema.index({ message: 1, recipient: 1 }, { unique: true });
+// Ensure one receipt per user per message
+messageReceiptSchema.index({ message: 1, user: 1 }, { unique: true });
 
 module.exports = mongoose.model('MessageReceipt', messageReceiptSchema);

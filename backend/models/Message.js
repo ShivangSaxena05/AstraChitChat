@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
+    chat: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Chat',
+        required: true
+    },
     sender: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -8,143 +13,148 @@ const messageSchema = new mongoose.Schema({
     },
     receiver: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    chat: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Chat',
-        required: true
-    },
-    msgType: {
-        type: String,
-        enum: ['text', 'image', 'audio', 'video', 'file', 'system'],
-        default: 'text'
+        ref: 'User'
     },
     bodyText: {
         type: String
     },
-    mediaUrl: {
-        type: String
-    },
-    // S3 object key — needed to delete the file from S3 when the message is removed
-    mediaKey: {
-        type: String
-    },
-    mediaMime: {
-        type: String
-    },
-    mediaSizeBytes: {
-        type: Number
-    },
-    quotedMsgId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Message'
-    },
-    editedAt: {
-        type: Date
-    },
-    unsentAt: {
-        type: Date
-    },
-    unsentBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    // Legacy fields for backward compatibility
     content: {
         type: String
     },
-    chatType: {
+    msgType: {
         type: String,
-        enum: ['text', 'image', 'voice note'],
+        enum: ['text', 'image', 'video', 'file', 'audio'],
         default: 'text'
     },
-    read: {
+    // Media attachments (replaces mediaUrl for flexibility)
+    attachments: [
+        {
+            public_id: String,
+            secure_url: String,
+            resource_type: String,
+            format: String,
+            size: Number,
+            original_name: String
+        }
+    ],
+    // For message reactions - Fixed to match controller usage: { emoji, user, reactedAt }
+    reactions: [
+        {
+            emoji: String,
+            user: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User'
+            },
+            reactedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }
+    ],
+    // Message read receipts
+    readBy: [
+        {
+            user: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User'
+            },
+            readAt: {
+                type: Date,
+                default: Date.now
+            }
+        }
+    ],
+    // Message delivery receipts
+    deliveredTo: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }
+    ],
+    // Quote/Reply functionality
+    quotedMsgId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Message',
+        default: null
+    },
+    quotedMessage: {
+        type: {
+            _id: mongoose.Schema.Types.ObjectId,
+            bodyText: String,
+            msgType: String,
+            sender: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User'
+            }
+        },
+        default: null
+    },
+    replyTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Message',
+        default: null
+    },
+    replyPreview: {
+        type: {
+            bodyText: String,
+            msgType: String,
+            sender: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'User'
+            }
+        },
+        default: null
+    },
+    // Message editing
+    editedAt: {
+        type: Date,
+        default: null
+    },
+    // Message unsending
+    unsentAt: {
+        type: Date,
+        default: null
+    },
+    unsentBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    // Soft delete
+    isDeleted: {
         type: Boolean,
         default: false
     },
-    readBy: [{
-        user: {
+    deletedFor: [
+        {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User'
-        },
-        readAt: {
-            type: Date,
-            default: Date.now
         }
-    }],
-    deliveredTo: [{
-        user: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        },
-        deliveredAt: {
-            type: Date,
-            default: Date.now
-        }
-    }],
-    status: {
-        type: String,
-        enum: ['sending', 'sent', 'failed'],
-        default: 'sent'
-    },
-    reactions: [{
-        user: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        },
-        emoji: {
-            type: String,
-            required: true
-        },
-        reactedAt: {
-            type: Date,
-            default: Date.now
-        }
-    }],
-    attachments: [{
-        type: {
-            type: String,
-            enum: ['image', 'video', 'audio', 'file'],
-            required: true
-        },
-        url: {
-            type: String,
-            required: true
-        },
-        // S3 object key for this attachment — enables targeted deletion
-        key: {
-            type: String
-        },
-        filename: {
-            type: String
-        },
-        size: {
-            type: Number
-        },
-        mimeType: {
-            type: String
-        }
-    }],
-    // E2EE Fields
+    ],
+    // Encrypted message fields for end-to-end encryption
     encryptedBody: {
-        type: String  // base64 encrypted message
+        type: String,
+        default: null
     },
     nonce: {
-        type: String  // base64 nonce (24 bytes)
+        type: String,
+        default: null
+    },
+    // Message status (sending, sent, delivered, read, failed)
+    status: {
+        type: String,
+        enum: ['sending', 'sent', 'delivered', 'read', 'failed'],
+        default: 'sent'
     }
 }, {
-
     timestamps: true
 });
 
 // ✅ PRODUCTION INDEXES - Critical for chat pagination performance
-messageSchema.index({ chat: 1, createdAt: -1 });           // Primary chat timeline (chatId)
-messageSchema.index({ chatId: 1, createdAt: -1 });           // Additional chat timeline index
-messageSchema.index({ sender: 1, createdAt: -1 });         // User message history  
-messageSchema.index({ chat: 1, 'readBy.user': 1 });        // Read receipts queries
-messageSchema.index({ chat: 1, quotedMsgId: 1 });          // Quote lookups
-messageSchema.index({ unsentAt: 1 });                      // Cleanup unsent msgs
+messageSchema.index({ chat: 1, createdAt: -1 });
+messageSchema.index({ sender: 1, createdAt: -1 });
+messageSchema.index({ chat: 1, quotedMsgId: 1 });
+messageSchema.index({ 'readBy.user': 1 });
+messageSchema.index({ isDeleted: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Message', messageSchema);

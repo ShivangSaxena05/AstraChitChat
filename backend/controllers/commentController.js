@@ -82,8 +82,74 @@ const deleteComment = async (req, res) => {
   }
 };
 
+// @desc    Mark a comment as viewed (pot-like functionality)
+// @route   POST /api/posts/:postId/comments/:commentId/view
+// @access  Private
+const markCommentAsViewed = async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const userId = req.user._id;
+
+    // Find the comment
+    const comment = await Comment.findById(commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    // Check if user already viewed this comment
+    const alreadyViewed = comment.viewers.some(
+      (viewer) => viewer.userId.toString() === userId.toString()
+    );
+
+    if (!alreadyViewed) {
+      // Add user to viewers array and increment view count
+      comment.viewers.push({
+        userId,
+        viewedAt: new Date()
+      });
+      comment.viewCount += 1;
+      await comment.save();
+    }
+
+    res.json({
+      message: 'Comment view recorded',
+      viewCount: comment.viewCount,
+      viewers: comment.viewers.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error: could not record view', error: error.message });
+  }
+};
+
+// @desc    Get comment view count and viewers
+// @route   GET /api/posts/:postId/comments/:commentId/views
+// @access  Private
+const getCommentViews = async (req, res) => {
+  try {
+    const { commentId } = req.params;
+
+    const comment = await Comment.findById(commentId)
+      .populate('viewers.userId', 'name username profilePicture');
+
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    res.json({
+      commentId,
+      viewCount: comment.viewCount,
+      viewers: comment.viewers,
+      totalViewers: comment.viewers.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error: could not fetch views', error: error.message });
+  }
+};
+
 module.exports = {
   addComment,
   getPostComments,
-  deleteComment
+  deleteComment,
+  markCommentAsViewed,
+  getCommentViews
 };

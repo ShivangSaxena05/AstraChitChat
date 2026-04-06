@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getUserProfile, getUserProfileById, updateUserProfile, getAvatarUploadUrl, getCoverUploadUrl } = require('../controllers/profileController');
+const { getUserProfile, getUserProfileById, updateUserProfile, getUploadSignature } = require('../controllers/profileController');
 const { protect } = require('../middleware/auth');
 
 // Routes for /api/profile/me
@@ -8,14 +8,13 @@ router.route('/me')
     .get(protect, getUserProfile)
     .put(protect, updateUserProfile);
 
-// Presigned URL for avatar upload to S3 → profile/{userId}/...
-router.get('/avatar-upload-url', protect, getAvatarUploadUrl);
-
-// Presigned URL for cover photo upload to S3 → cover/{userId}/...
-router.get('/cover-upload-url', protect, getCoverUploadUrl);
-
-// Route for /api/profile/:userId
+// Route for /api/profile/:userId must come after more specific routes
+// to avoid conflicts with /me and /upload-signature
 router.route('/:userId')
     .get(protect, getUserProfileById);
+
+// Upload signature for Cloudinary (avatar or cover) based on query param uploadType
+// This must be defined after /:userId route to avoid being matched as userId
+router.get('/upload-signature', protect, getUploadSignature);
 
 module.exports = router;

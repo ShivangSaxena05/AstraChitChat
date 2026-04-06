@@ -1,20 +1,31 @@
-import { get, post } from './api';
+import { post } from './api';
 import { Platform } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// SIMPLIFIED UPLOAD SERVICE (Backend-Centric)
+// 
+// All uploads are handled by the backend:
+// - Frontend sends FormData with the file
+// - Backend handles Cloudinary/S3 logic
+// - Frontend receives URL and publicId
+//
+// This eliminates duplicate code, improves maintainability, and reduces
+// client-side complexity.
 // ─────────────────────────────────────────────────────────────────────────────
-export type MediaFolder = 'profile' | 'cover' | 'post' | 'chat';
 
-interface PresignedUrlResponse {
-  presignedUrl: string;   // PUT to this URL to upload directly to S3
-  key: string;            // S3 object key — save as mediaKey in MongoDB
-  cloudfrontUrl: string;  // CloudFront URL — save as mediaUrl in MongoDB
-}
+export type MediaFolder = 
+  | 'profile'
+  | 'cover'
+  | 'post'
+  | 'chat';
 
 interface UploadResult {
-  url: string;   // CloudFront URL
-  key: string;   // S3 object key
+  success: boolean;
+  message: string;
+  url: string;       // Cloudinary/CloudFront URL
+  publicId: string;  // Cloudinary public_id or S3 key
+  secureUrl?: string;
+  resourceType?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,177 +100,251 @@ async function uriToFile(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. Presigned URL Upload (recommended — direct to S3, bypasses server)
-//
-//    Use this for ALL media types: profile pics, cover photos, posts, chat.
-//
-//    Flow:
-//      1. getPresignedUrl()    → get a presigned S3 PUT URL from the backend
-//      2. uploadToS3()         → PUT the file directly to S3 using that URL
-//      3. confirmUpload()      → tell the backend to persist the CloudFront URL
-//                                 (auto-updates User doc for profile/cover)
-//
-//    Quick usage:
-//      const result = await uploadMediaDirect(fileUri, fileName, 'post');
-//      // result.url  = CloudFront URL to store in MongoDB
-//      // result.key  = S3 key for future deletion
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Step 1: Get a presigned S3 upload URL from the backend.
- *
- * @param fileName  Original file name (e.g. "photo.jpg")
- * @param fileType  MIME type (e.g. "image/jpeg")
- * @param folder    Media category: 'profile' | 'cover' | 'post' | 'chat'
- * @param ownerId   Optional override (e.g. chatId for chat media)
+ * Get file size from a local URI.
+ * Returns size in bytes.
  */
-export const getPresignedUrl = async (
-  fileName: string,
-  fileType: string,
-  fileSize: number,
-  folder: MediaFolder = 'post',
-  ownerId?: string
-): Promise<PresignedUrlResponse> => {
-  const params = new URLSearchParams({ fileName, fileType, fileSize: fileSize.toString(), folder });
-  if (ownerId) params.append('ownerId', ownerId);
-
-  return get(`/media/presigned-url?${params.toString()}`);
-};
-
-/**
- * Step 2: Upload a file directly to S3 using a presigned PUT URL.
- *
- * @param presignedUrl  The presigned URL from getPresignedUrl()
- * @param fileUri       Local file URI (from image/video picker)
- * @param fileType      MIME type (must match what was used for presigned URL)
- */
-export const uploadToS3 = async (
-  presignedUrl: string,
-  fileUri: string,
-  fileType: string
-): Promise<void> => {
-  // Fetch the local file as a blob for the PUT request
-  const response = await fetch(fileUri);
-  const blob = await response.blob();
-
-  const uploadResponse = await fetch(presignedUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': fileType },
-    body: blob,
-  });
-
-  if (!uploadResponse.ok) {
-    throw new Error(`S3 upload failed with status ${uploadResponse.status}`);
+export const getFileSizeFromUri = async (fileUri: string): Promise<number> => {
+  try {
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+    return blob.size;
+  } catch (error) {
+    console.error('Error getting file size:', error);
+    throw new Error('Could not determine file size');
   }
 };
 
 /**
- * Step 3: Confirm upload with the backend.
- * For profile/cover, this auto-updates the User document in MongoDB.
- *
- * @param folder        Media category
- * @param key           S3 object key
- * @param cloudfrontUrl CloudFront URL
- * @param fileType      MIME type
+ * Validate file size against limit.
+ * Returns { valid: boolean, message?: string }
  */
-export const confirmUpload = async (
-  folder: MediaFolder,
-  key: string,
-  cloudfrontUrl: string,
-  fileType: string
-): Promise<any> => {
-  return post('/media/confirm-upload', { folder, key, cloudfrontUrl, fileType });
+export const validateFileSize = (
+  fileSize: number,
+  maxSizeMB: number = 100
+): { valid: boolean; message?: string } => {
+  const maxBytes = maxSizeMB * 1024 * 1024;
+  if (fileSize > maxBytes) {
+    return {
+      valid: false,
+      message: `File size (${(fileSize / 1024 / 1024).toFixed(2)}MB) exceeds limit of ${maxSizeMB}MB. Please choose a smaller file.`,
+    };
+  }
+  return { valid: true };
 };
 
 /**
- * All-in-one: Upload a file directly to S3 via presigned URL.
- * This is the recommended function for all media uploads.
- *
- * @param fileUri   Local file URI from image/video picker
- * @param fileName  Original file name (e.g. "photo.jpg")
- * @param folder    Media category: 'profile' | 'cover' | 'post' | 'chat'
- * @param ownerId   Optional override (e.g. chatId for chat media)
- * @returns         { url: CloudFront URL, key: S3 object key }
- *
- * @example
- *  // Upload a profile picture
- *  const { url, key } = await uploadMediaDirect(imageUri, 'avatar.jpg', 'profile');
- *
- *  // Upload a post image
- *  const { url, key } = await uploadMediaDirect(imageUri, 'sunset.jpg', 'post');
- *
- *  // Upload chat media
- *  const { url, key } = await uploadMediaDirect(fileUri, 'photo.png', 'chat', chatId);
+ * Detect media type based on aspect ratio and duration.
+ * 
+ * Rules:
+ * - Image: width/height ratio close to 1:1 or 3:2
+ * - Flick: 9:16 aspect ratio (or close to it) AND duration <= 60 seconds
+ * - Video: 16:9 aspect ratio (or close to it) AND any duration > 60s allowed
+ * - Default: Use MIME type if aspect ratio unclear
+ * 
+ * @returns 'image' | 'video' | 'flick'
  */
-export const uploadMediaDirect = async (
-  fileUri: string,
-  fileName: string,
-  folder: MediaFolder = 'post',
-  ownerId?: string
-): Promise<UploadResult> => {
-  const fileType = getMimeType(fileUri);
+export const detectMediaTypeByAspectRatio = (
+  mediaType: 'image' | 'video' | 'flick',
+  width: number,
+  height: number,
+  duration?: number
+): 'image' | 'video' | 'flick' => {
+  // If already determined as image, keep it as image
+  if (mediaType === 'image') return 'image';
 
-  // Get file size for validation
-  const blob = await (await fetch(fileUri)).blob();
-  const fileSize = blob.size;
+  // For videos, check aspect ratio
+  const aspectRatio = width / height;
+  const tolerance = 0.15; // Allow ±15% deviation from ideal ratio
 
-  // 1. Get presigned URL from backend
-  const { presignedUrl, key, cloudfrontUrl } = await getPresignedUrl(
-    fileName,
-    fileType,
-    fileSize,
-    folder,
-    ownerId
-  );
+  // Flick detection: 9:16 = 0.5625 aspect ratio (tall/portrait)
+  const flickRatio = 9 / 16; // 0.5625
+  const isFlickAspect = Math.abs(aspectRatio - flickRatio) < tolerance;
 
-  // 2. Upload directly to S3
-  await uploadToS3(presignedUrl, fileUri, fileType);
+  // Video detection: 16:9 = 1.777... (wide/landscape)
+  const videoRatio = 16 / 9; // 1.777...
+  const isVideoAspect = Math.abs(aspectRatio - videoRatio) < tolerance;
 
-  // 3. Confirm with backend (auto-updates User doc for profile/cover)
-  await confirmUpload(folder, key, cloudfrontUrl, fileType);
+  // If duration is provided, use it as primary indicator for videos
+  if (duration !== undefined) {
+    const durationSeconds = duration / 1000; // Convert ms to seconds
+    if (durationSeconds <= 60) {
+      // Short video -> check aspect ratio
+      return isFlickAspect ? 'flick' : 'video';
+    } else {
+      // Long video -> classify as video regardless of aspect ratio
+      return 'video';
+    }
+  }
 
-  return { url: cloudfrontUrl, key };
+  // Aspect ratio-based detection (for cases without duration)
+  if (isFlickAspect) return 'flick';
+  if (isVideoAspect) return 'video';
+
+  // Default: portrait aspect ratio (~0.5-0.75) -> flick, landscape -> video
+  return aspectRatio < 1 ? 'flick' : 'video';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Server-Proxied Upload (legacy — routes file through the backend)
-//    Kept for backward compatibility with existing code that uses uploadMedia().
+// MAIN UPLOAD FUNCTIONS (Backend-Centric)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Uploads a media file through the backend (multer-s3 → S3 → CloudFront URL).
- * For new code, prefer uploadMediaDirect() which uploads straight to S3.
- *
- * On web: Converts URI to File object for proper FormData serialization
- * On native: Uses native { uri, type, name } format
- *
- * @param fileUri  Local URI from image/video picker
- * @param fileName File name (e.g. "photo.jpg")
- * @returns `{ url, key }` — CloudFront URL and S3 object key
+ * Upload a video to the backend.
+ * Backend handles Cloudinary upload and returns the URL.
+ * 
+ * @param fileUri  Local file URI from video picker
+ * @param fileName Original file name (e.g. "my-video.mp4")
+ * @returns        { url, publicId }
  */
-export const uploadMedia = async (
+export const uploadVideo = async (
   fileUri: string,
   fileName: string
 ): Promise<UploadResult> => {
   try {
-    // Convert URI to proper format for FormData
-    // On web: Creates a File object for multipart/form-data serialization
-    // On native: Returns native { uri, type, name } object
     const fileData = await uriToFile(fileUri, fileName);
-
     const formData = new FormData();
-    formData.append('media', fileData as any);
+    formData.append('file', fileData as any);
 
-    // POST to multer-s3 upload endpoint
-    const response = await post('/media/upload', formData);
-
-    return {
-      url: response.url,   // CloudFront URL — save as mediaUrl in DB
-      key: response.key,   // S3 object key  — save as mediaKey in DB
-    };
+    const response = await post('/media/upload/video', formData);
+    return response;
   } catch (error) {
-    console.error('Error uploading media:', error);
+    console.error('Error uploading video:', error);
     throw error;
   }
+};
+
+/**
+ * Upload an image to the backend.
+ * Backend handles Cloudinary upload and returns the URL.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "photo.jpg")
+ * @returns        { url, publicId }
+ */
+export const uploadImage = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    const response = await post('/media/upload/image', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload an audio file to the backend.
+ * Backend handles Cloudinary upload and returns the URL.
+ * 
+ * @param fileUri  Local file URI from audio picker
+ * @param fileName Original file name (e.g. "recording.mp3")
+ * @returns        { url, publicId }
+ */
+export const uploadAudio = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    const response = await post('/media/upload/audio', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading audio:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a profile picture to the backend.
+ * Backend handles Cloudinary upload AND updates the User model.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "avatar.jpg")
+ * @returns        { url, publicId }
+ */
+export const uploadProfilePicture = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    const response = await post('/media/upload/profile-picture', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading profile picture:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a cover photo to the backend.
+ * Backend handles Cloudinary upload AND updates the User model.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "cover.jpg")
+ * @returns        { url, publicId }
+ */
+export const uploadCoverPhoto = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    const response = await post('/media/upload/cover-photo', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading cover photo:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete an uploaded file from Cloudinary.
+ * 
+ * @param publicId Cloudinary public_id of the file to delete
+ */
+export const deleteUploadedFile = async (publicId: string): Promise<void> => {
+  try {
+    await post(`/media/${publicId}`, {});
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    throw error;
+  }
+};
+
+/**
+ * Backward compatibility alias for uploadImage.
+ * Use uploadImage() instead.
+ */
+export const uploadMediaDirect = uploadImage;
+
+/**
+ * Backward compatibility wrapper.
+ * For components that still use the old uploadMedia() function.
+ */
+export const uploadMedia = async (
+  fileUri: string,
+  fileName: string
+): Promise<{ url: string; key: string }> => {
+  const result = await uploadImage(fileUri, fileName);
+  return {
+    url: result.url,
+    key: result.publicId,
+  };
 };

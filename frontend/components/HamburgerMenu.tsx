@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { useSocket } from '@/contexts/SocketContext';
 import { post } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme-color';
+import secureTokenManager from '@/services/secureTokenManager';
 
 export default function HamburgerMenu() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export default function HamburgerMenu() {
           onPress: async () => {
             try {
               // Step 1: Call backend logout endpoint to invalidate session
-              const token = await AsyncStorage.getItem('token');
+              const token = await secureTokenManager.getToken();
               if (token) {
                 try {
                   await post('/auth/logout', {});
@@ -63,11 +64,9 @@ export default function HamburgerMenu() {
                 disconnect();
               }
               
-              // Step 3: Clear local credentials
-              await AsyncStorage.removeItem('token');
-              await AsyncStorage.removeItem('userId');
-              await AsyncStorage.removeItem('userName');
-              console.log('✅ Local storage cleared');
+              // Step 3: Clear local credentials from secure storage ✅ SECURE
+              await secureTokenManager.clearAll();
+              console.log('✅ Secure storage cleared');
               
               // Step 4: Navigate to login screen
               setTimeout(() => {
@@ -92,40 +91,28 @@ export default function HamburgerMenu() {
     setModalVisible(false);
     
     try {
-      // Validate account data before switching
-      if (!acc.token || !acc.userId) {
-        Alert.alert('Error', 'Invalid account data');
-        return;
-      }
-
-      // CRITICAL FIX: Disconnect first, then switch credentials, then reconnect
-      if (disconnect) {
-        disconnect();
-      }
-
-      // Update credentials
-      await AsyncStorage.setItem('token', acc.token);
-      await AsyncStorage.setItem('userId', acc.userId);
-      
-      // CRITICAL FIX: Wait for socket connection and validate it succeeded
-      try {
-        if (connect) {
-          await connect(true);
-        }
-      } catch (socketError) {
-        console.error('Socket connection failed after account switch:', socketError);
-        throw new Error('Failed to reconnect socket for new account');
-      }
-      
-      // Navigation after successful socket connection
-      router.replace('/(tabs)' as any);
-      
+      // ⚠️ SECURITY: Cannot retrieve token from saved_accounts (it's not stored there)
+      // For account switching, require user to log in again
+      Alert.alert(
+        'Re-authentication Required',
+        'For security reasons, please log in again to switch to this account.',
+        [
+          {
+            text: 'Cancel',
+            onPress: () => setModalVisible(false),
+          },
+          {
+            text: 'OK',
+            onPress: () => {
+              setModalVisible(false);
+              router.replace('/auth/login' as any);
+            },
+          },
+        ]
+      );
     } catch (error: any) {
       console.error('Account switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch account');
-      // Rollback on error
-      await AsyncStorage.removeItem('token');
-      await AsyncStorage.removeItem('userId');
     }
   };
 

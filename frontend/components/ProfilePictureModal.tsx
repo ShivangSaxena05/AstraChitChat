@@ -3,8 +3,7 @@ import { Modal, View, Image, StyleSheet, TouchableOpacity, ActivityIndicator, Al
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { ThemedText } from '@/components/themed-text';
-import { uploadMedia } from '@/services/mediaService';
-import { put } from '@/services/api';
+import { uploadProfilePicture } from '@/services/mediaService';
 
 interface ProfilePictureModalProps {
   visible: boolean;
@@ -40,13 +39,11 @@ export default function ProfilePictureModal({ visible, uri, isEditable, onClose,
     setUploading(true);
     try {
       const fileName = fileUri.split('/').pop() || 'profile.jpg';
-      const uploadResult = await uploadMedia(fileUri, fileName);
-      
-      // Update backend profile
-      await put('/profile/me', { profilePicture: uploadResult.url });
+      // Backend now handles Cloudinary upload and User model update
+      const { url } = await uploadProfilePicture(fileUri, fileName);
       
       if (onUpdate) {
-        onUpdate(uploadResult.url);
+        onUpdate(url);
       }
       Alert.alert('Success', 'Profile photo updated successfully!');
     } catch (error: any) {

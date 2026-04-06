@@ -275,7 +275,7 @@ export default function CallScreen(props: CallScreenProps) {
         )}
 
         {/* Foreground Controls Layer */}
-        <SafeAreaView style={styles.videoOverlay} pointerEvents="box-none">
+        <SafeAreaView style={[styles.videoOverlay, { pointerEvents: 'box-none' }]}>
           <View style={styles.header}>
             <Image
               source={{ uri: props.otherUser?.profilePicture || 'https://i.pravatar.cc/300' }}

@@ -16,14 +16,32 @@ const protect = async (req, res, next) => {
             // This allows subsequent controller functions to know who the user is via req.user
             req.user = await User.findById(decoded.id).select('-password');
 
+            if (!req.user) {
+                console.error('[Auth] User not found for ID:', decoded.id);
+                return res.status(401).json({ message: 'User not found' });
+            }
+
             return next(); // Move to the next middleware or controller function
         } catch (error) {
-            console.error(error);
+            // Check if it's a token expiration error
+            if (error.name === 'TokenExpiredError') {
+                console.error('[Auth] Token expired');
+                return res.status(401).json({ 
+                    message: 'Access token expired',
+                    code: 'TOKEN_EXPIRED'
+                });
+            }
+            if (error.name === 'JsonWebTokenError') {
+                console.error('[Auth] Invalid token:', error.message);
+                return res.status(401).json({ message: 'Invalid token format' });
+            }
+            console.error('[Auth] Token verification failed:', error);
             return res.status(401).json({ message: 'Not authorized, token failed' });
         }
     }
 
     if (!token) {
+        console.error('[Auth] No token provided in Authorization header');
         return res.status(401).json({ message: 'Not authorized, no token' });
     }
 };

@@ -14,6 +14,11 @@ import { ThemedView } from '@/components/themed-view';
 import ChatBubble from '@/components/ChatBubble';
 import { useSocket } from '@/contexts/SocketContext';
 import { useTheme } from '@/hooks/use-theme-color';
+import {
+  sanitizeMessage,
+  validateIncomingMessage,
+  logSecurityEvent,
+} from '@/utils/xss';
 
 interface Message {
   _id: string;
@@ -66,7 +71,22 @@ export default function ChatScreen() {
           socket.removeAllListeners('connect');
 
           const handleMessageReceived = (message: Message) => {
-            setMessages((prev) => [...prev, message]);
+            // ✅ STEP 4: Validate incoming message (defense-in-depth)
+            if (!validateIncomingMessage(message)) {
+              logSecurityEvent('validation_failure', {
+                messageId: message._id,
+                reason: 'Message failed security validation in chat list',
+              }, 'high');
+              return; // Silently drop malicious messages
+            }
+
+            // ✅ STEP 3: Sanitize message content before rendering
+            const sanitizedMessage: Message = {
+              ...message,
+              content: sanitizeMessage(message.content || ''),
+            };
+
+            setMessages((prev) => [...prev, sanitizedMessage]);
             // Auto-scroll to bottom
             setTimeout(() => {
               flatListRef.current?.scrollToEnd({ animated: true });

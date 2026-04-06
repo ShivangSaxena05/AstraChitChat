@@ -5,13 +5,16 @@ import { Alert, Modal, TouchableOpacity, View, Text, FlatList, Image, StyleSheet
 import { Ionicons } from '@expo/vector-icons';
 import { get } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
+import { useCall } from '@/contexts/CallContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/use-theme-color';
+import secureTokenManager from '@/services/secureTokenManager';
 
 export interface SavedAccount {
   userId: string;
-  token: string;
   username: string;
   profilePicture: string;
+  // ⚠️ REMOVED: token - tokens are now stored securely in SecureStore only
 }
 
 export function useAccountSwitcher() {
@@ -19,7 +22,9 @@ export function useAccountSwitcher() {
   const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
   const router = useRouter();
-  const { connect } = useSocket();
+  const { connect, disconnect, setConversations } = useSocket();
+  const { endCall } = useCall();
+  const { handleAuthError } = useAuth();
 
   // Fetch current username on mount
   useEffect(() => {
@@ -28,14 +33,46 @@ export function useAccountSwitcher() {
 
   const fetchUserProfile = async () => {
     try {
+      console.log('[useAccountSwitcher] 🔄 Fetching user profile...');
       const data = await get('/profile/me');
       if (data?.user?.username) {
+        console.log('[useAccountSwitcher] ✅ Profile fetched:', data.user.username);
         setCurrentUsername(data.user.username);
       } else if (data?.username) {
+        console.log('[useAccountSwitcher] ✅ Profile fetched:', data.username);
         setCurrentUsername(data.username);
+      } else {
+        console.warn('[useAccountSwitcher] ⚠️ No username in profile data:', data);
       }
-    } catch (error) {
-      console.log('Error fetching user profile:', error);
+    } catch (error: any) {
+      // Network error = server not reachable (ERR_CONNECTION_REFUSED)
+      // Don't redirect to login — the server may just be starting up or the user is offline
+      if (error?.type === 'NETWORK_ERROR' || error?.originalError?.code === 'ERR_NETWORK') {
+        console.warn('[useAccountSwitcher] ⚠️ Server unreachable — will show cached username');
+        // Try to show saved username from AsyncStorage as fallback
+        try {
+          const accountsStr = await AsyncStorage.getItem('saved_accounts');
+          if (accountsStr) {
+            const accounts = JSON.parse(accountsStr);
+            if (Array.isArray(accounts) && accounts.length > 0) {
+              const savedUserId = await secureTokenManager.getUserId();
+              const current = accounts.find((a: any) => a.userId === savedUserId) || accounts[0];
+              if (current?.username) setCurrentUsername(current.username);
+            }
+          }
+        } catch (_) { /* ignore fallback errors */ }
+        return;
+      }
+
+      // Auth error = token expired/invalid → redirect to login
+      if (error?.isAuthError || error?.type === 'AUTH_ERROR') {
+        console.log('[useAccountSwitcher] 🔐 Auth error — redirecting to login');
+        await handleAuthError(error?.message || 'Your session has expired. Please log in again.');
+        return;
+      }
+
+      // Any other error — log cleanly with message only
+      console.error('[useAccountSwitcher] ❌ Error fetching user profile:', error?.message || 'Unknown error');
     }
   };
 
@@ -55,43 +92,95 @@ export function useAccountSwitcher() {
     setIsAccountModalVisible(true);
   }, []);
 
+  // ✅ FIX: Reset all account state before switching
+  const resetAccountState = async () => {
+    console.log('[AccountSwitcher] Resetting account state for all systems');
+    
+    try {
+      // 1. End any active calls
+      try {
+        endCall();
+        console.log('[AccountSwitcher] Active call ended');
+      } catch (error) {
+        console.warn('[AccountSwitcher] Error ending call:', error);
+      }
+      
+      // 2. Disconnect socket (will clear conversations and online status)
+      try {
+        disconnect();
+        console.log('[AccountSwitcher] Socket disconnected');
+      } catch (error) {
+        console.warn('[AccountSwitcher] Error disconnecting socket:', error);
+      }
+      
+      // 3. Clear conversations state
+      try {
+        setConversations([]);
+        console.log('[AccountSwitcher] Conversations cleared');
+      } catch (error) {
+        console.warn('[AccountSwitcher] Error clearing conversations:', error);
+      }
+      
+      // 4. Wait a moment for all state resets to settle
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      
+      console.log('[AccountSwitcher] Account state reset complete');
+    } catch (error) {
+      console.error('[AccountSwitcher] Error during state reset:', error);
+      throw error;
+    }
+  };
+
   const switchAccount = async (account: SavedAccount) => {
     try {
-      const currentUserId = await AsyncStorage.getItem('userId');
+      const currentUserId = await secureTokenManager.getUserId();
       if (currentUserId === account.userId) {
+        console.log('[AccountSwitcher] Already on this account');
         setIsAccountModalVisible(false);
         return;
       }
 
-      // CRITICAL FIX: Validate token before switching
-      if (!account.token || !account.userId) {
-        throw new Error('Invalid account data: missing token or userId');
-      }
+      console.log('[AccountSwitcher] Switching from', currentUserId, 'to', account.userId);
 
-      await AsyncStorage.setItem('token', account.token);
-      await AsyncStorage.setItem('userId', account.userId);
-      setCurrentUsername(account.username);
-      setIsAccountModalVisible(false);
-      
-      // CRITICAL FIX: Validate socket connection result
-      try {
-        await connect(true);
-      } catch (socketError) {
-        console.error('Socket connection failed after account switch:', socketError);
-        throw new Error('Failed to establish socket connection for new account');
-      }
-      
+      // ⚠️ SECURITY: Cannot retrieve token from saved_accounts (it's not stored there)
+      // For account switching, require user to log in again
       Alert.alert(
-        "Account Switched",
-        `Switched to ${account.username}`,
-        [{ text: "OK", onPress: () => router.replace('/(tabs)' as any) }]
+        'Re-authentication Required',
+        `For security reasons, please log in again to switch to ${account.username}.`,
+        [
+          {
+            text: 'Cancel',
+            onPress: () => setIsAccountModalVisible(false),
+          },
+          {
+            text: 'OK',
+            onPress: async () => {
+              try {
+                // 1. Reset state FIRST (before navigation)
+                await resetAccountState();
+                
+                // 2. Clear tokens to force re-login
+                await secureTokenManager.clearAll();
+                console.log('[AccountSwitcher] Tokens cleared, navigating to login');
+                
+                // 3. Close modal
+                setIsAccountModalVisible(false);
+                
+                // 4. Navigate to login (with account info pre-filled if backend supports it)
+                router.replace('/auth/login' as any);
+              } catch (error: any) {
+                console.error('[AccountSwitcher] Error during switch:', error);
+                Alert.alert('Error', 'Failed to switch accounts. Please try again.');
+                setIsAccountModalVisible(false);
+              }
+            },
+          },
+        ]
       );
     } catch (error: any) {
-      console.error('Account switch error:', error);
+      console.error('[AccountSwitcher] Account switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch accounts');
-      // Rollback on error
-      await AsyncStorage.removeItem('token');
-      await AsyncStorage.removeItem('userId');
+      setIsAccountModalVisible(false);
     }
   };
 

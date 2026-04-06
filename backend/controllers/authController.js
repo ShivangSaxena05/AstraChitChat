@@ -4,47 +4,32 @@ const mongoose = require('mongoose');
 const asyncHandler = require('./asyncHandler');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const bcrypt = require('bcryptjs');
 const { initializeUserStats } = require('../services/userStatsService');
 
-// Helper function to generate a JWT token
+// Helper function to generate a short-lived access token (15 minutes)
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '30d',
+    expiresIn: '15m',
+  });
+};
+
+// Helper function to generate a refresh token (7 days)
+const generateRefreshToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    expiresIn: '7d',
   });
 };
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Public
+// @validation Uses Joi validation middleware for input sanitization
 exports.registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, deviceId } = req.body;
 
-  // FIX: Better validation with specific error messages
-  if (!name || !email || !password) {
-    res.status(400);
-    throw new Error('Name, email and password are required');
-  }
-
-  // Validate name length
-  if (name.trim().length < 2) {
-    res.status(400);
-    throw new Error('Name must be at least 2 characters');
-  }
-
-  // Validate email format (basic check)
-  if (!email.includes('@') || !email.includes('.')) {
-    res.status(400);
-    throw new Error('Please provide a valid email address');
-  }
-
-  // Validate password length
-  if (password.length < 8) {
-    res.status(400);
-    throw new Error('Password must be at least 8 characters');
-  }
-
-  // Check if user exists
-  const userExists = await User.findOne({ email: email.toLowerCase() });
+  // Check if user exists (data already validated by Joi middleware)
+  const userExists = await User.findOne({ email });
   if (userExists) {
     res.status(400);
     throw new Error('User with this email already exists');
@@ -63,10 +48,10 @@ exports.registerUser = asyncHandler(async (req, res) => {
     throw new Error('Could not generate unique username, please try again');
   }
 
-  // Create user
+  // Create user with pre-validated and sanitized data
   const user = await User.create({
-    name: name.trim(),
-    email: email.toLowerCase(),
+    name,
+    email,
     password,
     username,
   });
@@ -80,14 +65,32 @@ exports.registerUser = asyncHandler(async (req, res) => {
       // Don't fail registration if stats initialization fails
     }
 
-    // Return user data with token
+    // Generate tokens
+    const accessToken = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+    
+    // Hash and store refresh token in DB
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    
+    user.refreshTokens.push({
+      token: hashedRefreshToken,
+      expiresAt,
+      deviceId: req.body.deviceId || 'unknown',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    await user.save();
+
+    // Return user data with tokens
     res.status(201).json({
       _id: user._id,
       name: user.name,
       username: user.username,
       email: user.email,
       profilePicture: user.profilePicture,
-      token: generateToken(user._id),
+      accessToken,
+      refreshToken,
     });
   } else {
     res.status(400);
@@ -98,32 +101,58 @@ exports.registerUser = asyncHandler(async (req, res) => {
 // @desc    Authenticate user & get token
 // @route   POST /api/auth/login
 // @access  Public
+// @validation Uses Joi validation middleware for input sanitization
 exports.loginUser = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, deviceId } = req.body;
+  // Email and password already validated by Joi middleware
 
   const user = await User.findOne({ email }).select('+password');
 
-  if (user && (await user.matchPassword(password))) {
-    if (user.isTwoFactorEnabled && user.twoFactorSecret) {
-      return res.json({
-        requires2FA: true,
-        userId: user._id,
-      });
-    }
-
-    // FIX: include username in login response to match registration response
-    return res.json({
-      _id: user._id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      profilePicture: user.profilePicture,
-      token: generateToken(user._id),
-    });
-  } else {
+  if (!user) {
     res.status(401);
     throw new Error('Invalid email or password');
   }
+
+  // Check password match
+  const passwordMatches = await user.matchPassword(password);
+  if (!passwordMatches) {
+    res.status(401);
+    throw new Error('Invalid email or password');
+  }
+
+  if (user.isTwoFactorEnabled && user.twoFactorSecret) {
+    return res.json({
+      requires2FA: true,
+      userId: user._id,
+    });
+  }
+
+  // Generate tokens
+  const accessToken = generateToken(user._id);
+  const refreshToken = generateRefreshToken(user._id);
+  
+  // Hash and store refresh token in DB
+  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  
+  user.refreshTokens.push({
+    token: hashedRefreshToken,
+    expiresAt,
+    deviceId: deviceId || 'unknown',
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+  });
+  await user.save();
+
+  return res.json({
+    _id: user._id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    profilePicture: user.profilePicture,
+    accessToken,
+    refreshToken,
+  });
 });
 
 // @desc    Setup 2FA
@@ -147,8 +176,10 @@ exports.setup2FA = asyncHandler(async (req, res) => {
 // @desc    Verify 2FA setup
 // @route   POST /api/auth/2fa/verify-setup
 // @access  Private
+// @validation Uses Joi validation middleware for token format validation
 exports.verify2FASetup = asyncHandler(async (req, res) => {
   const { token } = req.body;
+  // Token format already validated by Joi middleware (6 digits)
   const user = await User.findById(req.user._id);
 
   const verified = speakeasy.totp.verify({
@@ -170,38 +201,32 @@ exports.verify2FASetup = asyncHandler(async (req, res) => {
 // @desc    Disable 2FA
 // @route   POST /api/auth/2fa/disable
 // @access  Private
+// @validation Uses Joi validation middleware for password validation
 exports.disable2FA = asyncHandler(async (req, res) => {
-  const { token } = req.body;
-  const user = await User.findById(req.user._id);
+  const { password } = req.body;
+  // Password already validated by Joi middleware
+  const user = await User.findById(req.user._id).select('+password');
 
-  const verified = speakeasy.totp.verify({
-    secret: user.twoFactorSecret,
-    encoding: 'base32',
-    token,
-  });
-
-  if (verified) {
-    user.isTwoFactorEnabled = false;
-    user.twoFactorSecret = undefined;
-    await user.save();
-    res.json({ message: '2FA disabled successfully' });
-  } else {
-    res.status(400);
-    throw new Error('Invalid 2FA token');
+  // Verify password for security
+  const passwordMatches = await user.matchPassword(password);
+  if (!passwordMatches) {
+    res.status(401);
+    throw new Error('Invalid password');
   }
+
+  user.isTwoFactorEnabled = false;
+  user.twoFactorSecret = undefined;
+  await user.save();
+  res.json({ message: '2FA disabled successfully' });
 });
 
 // @desc    Verify 2FA during login
 // @route   POST /api/auth/2fa/login
 // @access  Public
+// @validation Uses Joi validation middleware for input sanitization
 exports.verifyLogin2FA = asyncHandler(async (req, res) => {
-  const { userId, token } = req.body;
-
-  // FIX: validate userId before hitting the DB to prevent Mongoose cast errors
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-    res.status(400);
-    throw new Error('Invalid user ID');
-  }
+  const { userId, token, deviceId } = req.body;
+  // All inputs already validated by Joi middleware
 
   const user = await User.findById(userId);
   if (!user) {
@@ -216,13 +241,31 @@ exports.verifyLogin2FA = asyncHandler(async (req, res) => {
   });
 
   if (verified) {
+    // Generate tokens
+    const accessToken = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+    
+    // Hash and store refresh token in DB
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    
+    user.refreshTokens.push({
+      token: hashedRefreshToken,
+      expiresAt,
+      deviceId: deviceId || 'unknown',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    await user.save();
+
     res.json({
       _id: user._id,
       name: user.name,
       username: user.username,
       email: user.email,
       profilePicture: user.profilePicture,
-      token: generateToken(user._id),
+      accessToken,
+      refreshToken,
     });
   } else {
     res.status(400);
@@ -234,18 +277,126 @@ exports.verifyLogin2FA = asyncHandler(async (req, res) => {
 // @route   POST /api/auth/logout
 // @access  Private
 exports.logoutUser = asyncHandler(async (req, res) => {
-  // For JWT-based authentication, logout is primarily a client-side operation
-  // The token is removed from the client's AsyncStorage
-  // This endpoint serves as a confirmation point and can be used for:
-  // - Future token blacklisting implementation
-  // - Server-side session tracking
-  // - Audit logging of logout events
-  
+  const { refreshToken } = req.body;
   const userId = req.user._id;
-  console.log(`✅ User ${userId} logged out`);
+
+  if (refreshToken) {
+    // Find the refresh token in the user's array and delete it
+    const user = await User.findById(userId);
+    
+    // Find the matching refresh token
+    const tokenIndex = user.refreshTokens.findIndex(async (rt) => {
+      return await bcrypt.compare(refreshToken, rt.token);
+    });
+
+    if (tokenIndex > -1) {
+      user.refreshTokens.splice(tokenIndex, 1);
+      await user.save();
+      console.log(`✅ User ${userId} logged out from device`);
+    }
+  }
   
   res.json({ 
     message: 'Logged out successfully',
+    userId: userId
+  });
+});
+
+// @desc    Refresh access token using refresh token
+// @route   POST /api/auth/refresh-token
+// @access  Public
+// @validation Uses Joi validation middleware for input sanitization
+exports.refreshAccessToken = asyncHandler(async (req, res) => {
+  const { refreshToken } = req.body;
+  // Refresh token already validated as required by Joi middleware
+
+  try {
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found');
+    }
+
+    // Find matching refresh token in DB
+    let foundToken = null;
+    let foundTokenIndex = -1;
+
+    for (let i = 0; i < user.refreshTokens.length; i++) {
+      const isMatch = await bcrypt.compare(refreshToken, user.refreshTokens[i].token);
+      if (isMatch) {
+        foundToken = user.refreshTokens[i];
+        foundTokenIndex = i;
+        break;
+      }
+    }
+
+    if (!foundToken) {
+      res.status(401);
+      throw new Error('Refresh token not found or invalid');
+    }
+
+    // Check if refresh token has expired
+    if (new Date() > foundToken.expiresAt) {
+      // Remove expired token
+      user.refreshTokens.splice(foundTokenIndex, 1);
+      await user.save();
+      res.status(401);
+      throw new Error('Refresh token has expired');
+    }
+
+    // Update lastUsedAt
+    foundToken.lastUsedAt = new Date();
+    
+    // Generate new tokens
+    const newAccessToken = generateToken(user._id);
+    const newRefreshToken = generateRefreshToken(user._id);
+
+    // Hash and replace the old refresh token with the new one (token rotation)
+    const hashedNewRefreshToken = await bcrypt.hash(newRefreshToken, 10);
+    user.refreshTokens[foundTokenIndex] = {
+      token: hashedNewRefreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      deviceId: foundToken.deviceId,
+      ipAddress: foundToken.ipAddress,
+      userAgent: foundToken.userAgent,
+    };
+    
+    await user.save();
+
+    res.json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      res.status(401);
+      throw new Error('Refresh token has expired');
+    }
+    throw error;
+  }
+});
+
+// @desc    Logout from all devices
+// @route   POST /api/auth/logout-all-devices
+// @access  Private
+exports.logoutAllDevices = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  
+  const user = await User.findById(userId);
+  
+  // Clear all refresh tokens
+  user.refreshTokens = [];
+  await user.save();
+
+  console.log(`✅ User ${userId} logged out from all devices`);
+  
+  res.json({ 
+    message: 'Logged out from all devices successfully',
     userId: userId
   });
 });

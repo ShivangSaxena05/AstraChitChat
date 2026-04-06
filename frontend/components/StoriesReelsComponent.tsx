@@ -27,15 +27,15 @@ export default function StoriesReelsComponent() {
 
   const fetchStories = async () => {
     try {
-      // Attempt to fetch stories from API
-      const data = await get('/stories/active');
-      if (data?.stories && Array.isArray(data.stories)) {
+      // Attempt to fetch stories from API - use /feed endpoint
+      const data = await get('/stories/feed');
+      if (data?.data && Array.isArray(data.data)) {
         // Prepend "Your Story" button
-        setStories([mockStories[0], ...data.stories.map((s: any) => ({
+        setStories([mockStories[0], ...data.data.map((s: any) => ({
           id: s._id || s.id,
-          userId: s.userId,
-          username: s.username || s.user?.username || 'Unknown',
-          profilePicture: s.profilePicture || s.user?.profilePicture || '',
+          userId: s.author?._id || s.userId,
+          username: s.author?.username || s.username || 'Unknown',
+          profilePicture: s.author?.profilePicture || s.profilePicture || '',
         }))]);
       }
     } catch (error) {

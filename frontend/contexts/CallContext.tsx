@@ -139,6 +139,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
   const incomingCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  // ✅ FIX BUG 10: Move disconnectTimeoutRef to component level (was incorrectly in setupMediaAndPC)
+  const disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  // ✅ FIX BUG 11 & 13: Create refs to track call state and avoid stale closures in socket listeners
+  const callStateRef = useRef(callState);
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
 
   // ✅ FIX #2: Setup connection timeout handler
   const setupConnectionTimeout = () => {
@@ -334,7 +344,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      if (peerConnectionRef.current || callState.isCalling) {
+      if (peerConnectionRef.current || callStateRef.current.isCalling) {
         console.log(
           '[Signaling] Busy, rejecting incoming call with "busy" signal to:',
           callerId,
@@ -509,7 +519,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
           targetId: activeCallTargetIdRef.current,
           offer,
           callerId: currentUserId,
-          chatId: callState.activeChatId,
+          chatId: callStateRef.current.activeChatId,
           isVideo: true,
         });
         console.log("[WebRTC] Sent renegotiation offer for video upgrade");
@@ -533,7 +543,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
       socket.off("accept-video-upgrade");
       socket.off("decline-video-upgrade");
     };
-  }, [socket, currentUserId, callState.isCalling]);
+    // ✅ FIX BUG 11: Remove callState.isCalling from dependencies
+    // Listeners are registered ONCE at effect mount and torn down at unmount
+    // They capture refs (peerConnectionRef, activeCallTargetIdRef) which are always updated
+    // State closures use callState which is current due to stale-closure refs being used
+    // This prevents listener re-registration on every state change, which would drop signaling messages
+  }, [socket, currentUserId]);
 
   const setupMediaAndPC = async (
     targetId: string,
@@ -573,9 +588,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
 
     peerConnectionRef.current = pc;
     activeCallTargetIdRef.current = targetId;
-    
-    // ✅ FIX #5: ICE disconnection recovery with timeout
-    let disconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     
     pc.oniceconnectionstatechange = () => {
       console.log("ICE State:", pc.iceConnectionState);

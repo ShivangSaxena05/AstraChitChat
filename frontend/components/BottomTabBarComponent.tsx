@@ -46,7 +46,7 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
 
   const handleCreatePress = () => {
     // Navigate to upload screen
-    navigation.navigate('upload');
+    router.push('/(tabs)/upload');
   };
 
   return (

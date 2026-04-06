@@ -2,14 +2,21 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('./cloudinary');
 
-const createCloudinaryStorage = (folder, ownerId = '{userId}') => {
+const createCloudinaryStorage = (folder) => {
     return new CloudinaryStorage({
         cloudinary: cloudinary,
-        params: {
-            folder: `myapp/${folder}/${ownerId}`,
-            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'm4a', 'wav', 'ogg'],
-            resource_type: 'auto',
-            transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+        params: async (req, file, cb) => {
+            const userId = req.user?._id?.toString() || 'anonymous';
+            const timestamp = Date.now();
+            const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+            
+            cb(null, {
+                folder: `myapp/${folder}/${userId}`,
+                allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'm4a', 'wav', 'ogg'],
+                resource_type: 'auto',
+                public_id: `${timestamp}-${safeFileName}`,
+                transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+            });
         }
     });
 };

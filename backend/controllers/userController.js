@@ -4,7 +4,7 @@ const Follow = require('../models/Follow');
 const Like = require('../models/Like');
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
-const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../services/mediaService');
+const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { applyUserDefaults } = require('../utils/lazyDefaults');
 
 // @desc    Search users by username or name
@@ -217,16 +217,12 @@ const deleteAccount = async (req, res) => {
     const userId = req.user._id;
 
     // Best-effort: clean up media files for all posts before deleting DB records
-    const posts = await Post.find({ user: userId }).select('mediaKey mediaUrl').lean();
+    const posts = await Post.find({ user: userId }).select('mediaPublicId mediaType').lean();
     for (const post of posts) {
-      if (post.mediaKey) {
+      if (post.mediaPublicId) {
         try {
-          if (STORAGE_TYPE === 'cloudinary') {
-            const publicId = post.mediaUrl?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
-            if (publicId) await deleteFromCloudinary(publicId);
-          } else {
-            await deleteS3Object(post.mediaKey);
-          }
+          const resourceType = post.mediaType === 'video' ? 'video' : 'image';
+          await deleteCloudinaryAsset(post.mediaPublicId, resourceType);
         } catch (err) {
           console.warn('Post media cleanup failed:', err.message);
         }
@@ -234,30 +230,15 @@ const deleteAccount = async (req, res) => {
     }
 
     // Best-effort: clean up media for messages sent by this user
-    const messages = await Message.find({ sender: userId, mediaKey: { $exists: true } })
-      .select('mediaKey mediaUrl attachments')
-      .lean();
+    const messages = await Message.find({ sender: userId }).select('attachments').lean();
 
     for (const msg of messages) {
-      if (msg.mediaKey) {
-        try {
-          if (STORAGE_TYPE === 'cloudinary') {
-            const publicId = msg.mediaUrl?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
-            if (publicId) await deleteFromCloudinary(publicId);
-          } else {
-            await deleteS3Object(msg.mediaKey);
-          }
-        } catch (err) {
-          console.warn('Message media cleanup failed:', err.message);
-        }
-      }
+      // Delete any message attachments
       for (const att of msg.attachments || []) {
         try {
-          if (STORAGE_TYPE === 'cloudinary') {
-            const publicId = att.url?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
-            if (publicId) await deleteFromCloudinary(publicId);
-          } else if (att.key) {
-            await deleteS3Object(att.key);
+          if (att.publicId) {
+            const resourceType = att.type === 'video' ? 'video' : 'image';
+            await deleteCloudinaryAsset(att.publicId, resourceType);
           }
         } catch (err) {
           console.warn('Attachment cleanup failed:', err.message);

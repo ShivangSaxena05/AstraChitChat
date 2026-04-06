@@ -1,4 +1,4 @@
-const Follow = require('../models/Follow');
+const Follower = require('../models/Follower');
 const User = require('../models/User');
 const { incrementStat, decrementStat } = require('../services/userStatsService');
 
@@ -16,7 +16,7 @@ const followUser = async (req, res) => {
     }
 
     // Check if already following
-    const existingFollow = await Follow.findOne({
+    const existingFollow = await Follower.findOne({
       follower: currentUserId,
       following: userId,
     });
@@ -25,20 +25,30 @@ const followUser = async (req, res) => {
       return res.status(400).json({ message: 'Already following this user' });
     }
 
-    // Private account: send or acknowledge pending follow request
+    // Private account: create pending follow request
     if (userToFollow.isPrivate) {
-      const alreadyRequested = userToFollow.followRequests.some(
-        id => id.toString() === currentUserId.toString()
-      );
+      const alreadyRequested = await Follower.findOne({
+        follower: currentUserId,
+        following: userId,
+        status: 'pending'
+      });
+      
       if (!alreadyRequested) {
-        userToFollow.followRequests.push(currentUserId);
-        await userToFollow.save();
+        await Follower.create({
+          follower: currentUserId,
+          following: userId,
+          status: 'pending'
+        });
       }
       // Return consistent response whether request is new or already pending
       return res.status(200).json({ message: 'Follow request sent', isRequested: true });
     }
 
-    await Follow.create({ follower: currentUserId, following: userId });
+    await Follower.create({
+      follower: currentUserId,
+      following: userId,
+      status: 'accepted'
+    });
 
     // Update stats using UserStats service
     await Promise.all([
@@ -73,26 +83,12 @@ const unfollowUser = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
 
-    const follow = await Follow.findOneAndDelete({
+    const follow = await Follower.findOneAndDelete({
       follower: currentUserId,
       following: userId,
     });
 
     if (!follow) {
-      // Cancel pending follow request if one exists
-      const userToUnfollow = await User.findById(userId);
-      if (
-        userToUnfollow &&
-        userToUnfollow.followRequests &&
-        userToUnfollow.followRequests.some(id => id.toString() === currentUserId.toString())
-      ) {
-        userToUnfollow.followRequests = userToUnfollow.followRequests.filter(
-          id => id.toString() !== currentUserId.toString()
-        );
-        await userToUnfollow.save();
-        return res.json({ message: 'Follow request cancelled', isRequested: false });
-      }
-
       return res.status(400).json({ message: 'Not following this user' });
     }
 

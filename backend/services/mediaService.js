@@ -154,6 +154,18 @@ const uploadFileToCloudinary = (file, folder = 'postImage') => {
     });
 };
 
+const deleteCloudinaryAsset = async (publicId, resourceType = 'image') => {
+    return new Promise((resolve, reject) => {
+        cloudinary.uploader.destroy(publicId, { resource_type: resourceType }, (error, result) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve(result);
+            }
+        });
+    });
+};
+
 const deleteFromCloudinary = async (publicId) => {
     return new Promise((resolve, reject) => {
         cloudinary.uploader.destroy(publicId, (error, result) => {
@@ -175,28 +187,48 @@ const getCloudinaryUploadUrl = async (options) => {
     }
 
     const folderPath = MEDIA_FOLDERS[folder];
-    const timestamp = Date.now();
+    // ⚠️ IMPORTANT: Cloudinary expects timestamp in SECONDS, not milliseconds
+    const timestamp = Math.floor(Date.now() / 1000);
     const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
     const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
     
-    const signedUpload = cloudinary.utils.api_sign_request({
-        timestamp: timestamp,
-        folder: `myapp/${folderPath}/${ownerId}`,
-        public_id: `${timestamp}-${safeFileName}`,
-        resource_type: resourceType
-    }, process.env.CLOUDINARY_API_SECRET);
-
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const uploadPreset = process.env.CLOUDINARY_UNSIGNED_PRESET;
 
+    // Check if unsigned preset is configured
+    if (!uploadPreset) {
+        console.warn('[getCloudinaryUploadUrl] CLOUDINARY_UNSIGNED_PRESET not configured. Falling back to signed upload.');
+        
+        // Fallback to signed upload (secure but requires API key/secret management)
+        const apiKey = process.env.CLOUDINARY_API_KEY;
+        const signedUpload = cloudinary.utils.api_sign_request({
+            timestamp: timestamp,
+            folder: `myapp/${folderPath}/${ownerId}`,
+            public_id: `${timestamp}-${safeFileName}`,
+            resource_type: resourceType
+        }, process.env.CLOUDINARY_API_SECRET);
+
+        return {
+            uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+            cloudName,
+            apiKey,
+            timestamp,
+            publicId,
+            signature: signedUpload,
+            folder: `myapp/${folderPath}/${ownerId}`,
+            uploadType: 'signed'
+        };
+    }
+
+    // Use unsigned upload (recommended for frontend apps)
+    // This requires configuring an unsigned preset in Cloudinary dashboard
     return {
         uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
         cloudName,
-        apiKey,
-        timestamp,
+        uploadPreset,
+        folder: `myapp/${folderPath}/${ownerId}`,
         publicId,
-        signature: signedUpload,
-        folder: `myapp/${folderPath}/${ownerId}`
+        uploadType: 'unsigned'
     };
 };
 
@@ -299,6 +331,7 @@ const getSignedCloudfrontUrl = (s3Key, expiresInSeconds = 3600) => {
 module.exports = { 
     uploadToCloudinary,
     uploadFileToCloudinary,
+    deleteCloudinaryAsset,
     deleteFromCloudinary,
     getCloudinaryUploadUrl,
     getPresignedUploadUrl, 

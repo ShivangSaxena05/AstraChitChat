@@ -1,219 +1,206 @@
 const User = require('../models/User');
-const UserStats = require('../models/UserStats');
 const Follow = require('../models/Follow');
-const { getPresignedUploadUrl } = require('../services/mediaService');
+const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { getUserStats } = require('../services/userStatsService');
-const { applyUserDefaults, serializeUser } = require('../utils/lazyDefaults');
+const { applyUserDefaults } = require('../utils/lazyDefaults');
 
-// @desc    Get current user's profile
+const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'astrachat';
+
+// ─── Helper: build Cloudinary URL with transformations ────────────────────────
+// Instead of presigned S3 URLs, we just store the public_id and build URLs here
+function buildCloudinaryUrl(publicId, opts = {}) {
+    if (!publicId) return '';
+    const { width, height, crop = 'fill', gravity, radius, quality = 'auto', format = 'auto' } = opts;
+    const transforms = [
+        width    && `w_${width}`,
+        height   && `h_${height}`,
+        crop     && `c_${crop}`,
+        gravity  && `g_${gravity}`,
+        radius   && `r_${radius}`,
+        `q_${quality}`,
+        `f_${format}`,
+    ].filter(Boolean).join(',');
+
+    return `https://res.cloudinary.com/${CLOUDINARY_CLOUD}/image/upload/${transforms}/${publicId}`;
+}
+
+// ─── Get own profile ──────────────────────────────────────────────────────────
 // @route   GET /api/profile/me
 // @access  Private
 const getUserProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    try {
+        const user = await User.findById(req.user._id).select('-password');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const userWithDefaults = applyUserDefaults(user);
+        const userStats = await getUserStats(req.user._id);
+
+        res.json(serializeProfile(userWithDefaults, userStats));
+    } catch (error) {
+        console.error('[getUserProfile]', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
-
-    // Apply lazy defaults asynchronously (fire-and-forget)
-    const userWithDefaults = applyUserDefaults(user);
-
-    // Fetch stats from UserStats model
-    const userStats = await getUserStats(req.user._id);
-
-    res.json({
-      _id: userWithDefaults._id,
-      displayName: userWithDefaults.name,
-      name: userWithDefaults.name,
-      username: userWithDefaults.username,
-      profilePictureUrl: userWithDefaults.profilePicture,
-      profilePicture: userWithDefaults.profilePicture,
-      coverPhoto: userWithDefaults.coverPhoto || '',
-      bio: userWithDefaults.bio || '',
-      location: userWithDefaults.location || '',
-      website: userWithDefaults.website || '',
-      pronouns: userWithDefaults.pronouns || '',
-      encryptionPublicKey: userWithDefaults.encryptionPublicKey || null,
-      stats: {
-        posts: userStats?.postsCount || userWithDefaults.postsCount || 0,
-        followers: userStats?.followersCount || userWithDefaults.followersCount || 0,
-        following: userStats?.followingCount || userWithDefaults.followingCount || 0,
-        likes: userStats?.totalLikesCount || userWithDefaults.totalLikesCount || 0,
-      },
-      isPrivate: userWithDefaults.isPrivate || false,
-      isOnline: userWithDefaults.isOnline ?? false,
-      lastSeen: userWithDefaults.lastSeen,
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
-  }
 };
 
-// @desc    Get another user's profile by ID
+// ─── Get another user's profile ───────────────────────────────────────────────
 // @route   GET /api/profile/:userId
 // @access  Private
 const getUserProfileById = async (req, res) => {
-  try {
-    const { userId } = req.params;
+    try {
+        const { userId } = req.params;
 
-    // Fetch user info and stats in parallel
-    const [user, userStats] = await Promise.all([
-      User.findById(userId).select('-password'),
-      getUserStats(userId),
-    ]);
+        const [user, userStats] = await Promise.all([
+            User.findById(userId).select('-password'),
+            getUserStats(userId),
+        ]);
 
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const userWithDefaults = applyUserDefaults(user);
+
+        // Social relationship checks (run in parallel)
+        const currentUser = await User.findById(req.user._id).select('blockedUsers mutedUsers');
+        const [isFollowing] = await Promise.all([
+            Follow.findOne({ follower: req.user._id, following: userId }).lean(),
+        ]);
+
+        const isBlocked  = currentUser?.blockedUsers?.some(id => id.toString() === userId) ?? false;
+        const isMuted    = currentUser?.mutedUsers?.some(id => id.toString() === userId)   ?? false;
+
+        res.json({
+            ...serializeProfile(userWithDefaults, userStats),
+            isBlocked,
+            isMuted,
+            isFollowing:        !!isFollowing,
+            isTwoFactorEnabled: userWithDefaults.isTwoFactorEnabled || false,
+            role:               userWithDefaults.role || 'user',
+        });
+    } catch (error) {
+        console.error('[getUserProfileById]', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
-
-    // Apply lazy defaults asynchronously (fire-and-forget)
-    const userWithDefaults = applyUserDefaults(user);
-
-    let isBlocked = false;
-    let isMuted = false;
-    let isFollowing = false;
-
-    if (req.user) {
-      const currentUser = await User.findById(req.user._id).select('blockedUsers mutedUsers');
-      if (currentUser) {
-        isBlocked = currentUser.blockedUsers?.some(id => id.toString() === userId) ?? false;
-        isMuted = currentUser.mutedUsers?.some(id => id.toString() === userId) ?? false;
-        isFollowing = !!(await Follow.findOne({ follower: req.user._id, following: userId }));
-      }
-    }
-
-    res.json({
-      _id: userWithDefaults._id,
-      displayName: userWithDefaults.name,
-      name: userWithDefaults.name,
-      username: userWithDefaults.username,
-      profilePictureUrl: userWithDefaults.profilePicture,
-      profilePicture: userWithDefaults.profilePicture,
-      coverPhoto: userWithDefaults.coverPhoto || '',
-      bio: userWithDefaults.bio || '',
-      encryptionPublicKey: userWithDefaults.encryptionPublicKey || null,
-      stats: {
-        posts: userStats?.postsCount || userWithDefaults.postsCount || 0,
-        followers: userStats?.followersCount || userWithDefaults.followersCount || 0,
-        following: userStats?.followingCount || userWithDefaults.followingCount || 0,
-        likes: userStats?.totalLikesCount || userWithDefaults.totalLikesCount || 0,
-      },
-      isPrivate: userWithDefaults.isPrivate || false,
-      isTwoFactorEnabled: userWithDefaults.isTwoFactorEnabled || false,
-      role: userWithDefaults.role || 'user',
-      isBlocked,
-      isMuted,
-      isFollowing,
-      isOnline: userWithDefaults.isOnline ?? false,
-      lastSeen: userWithDefaults.lastSeen,
-    });
-  } catch (error) {
-    console.error('Error fetching user profile:', error);
-    res.status(500).json({ message: 'Server Error', error: error.message });
-  }
 };
 
-// @desc    Update user profile
+// ─── Update profile ───────────────────────────────────────────────────────────
 // @route   PUT /api/profile/me
 // @access  Private
 const updateUserProfile = async (req, res) => {
-  const { name, username, bio, profilePicture, coverPhoto, location, website, pronouns, isPrivate } = req.body;
+    const {
+        name, username, bio,
+        profilePicture, profilePublicId,   // Cloudinary URL + public_id
+        coverPhoto,     coverPublicId,
+        location, website, pronouns, isPrivate,
+    } = req.body;
 
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    try {
+        const user = await User.findById(req.user._id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
 
-    // FIX: check for username conflicts before saving
-    if (username && username !== user.username) {
-      const taken = await User.findOne({ username, _id: { $ne: req.user._id } });
-      if (taken) {
-        return res.status(400).json({ message: 'Username is already taken' });
-      }
+        // Username conflict check
+        if (username && username !== user.username) {
+            const taken = await User.findOne({ username, _id: { $ne: req.user._id } });
+            if (taken) return res.status(400).json({ message: 'Username is already taken.' });
+        }
+
+        // If new avatar uploaded and old one exists, delete old from Cloudinary
+        if (profilePublicId && user.profilePublicId && profilePublicId !== user.profilePublicId) {
+            deleteCloudinaryAsset(user.profilePublicId, 'image')
+                .catch(err => console.error('[updateProfile] old avatar delete failed:', err.message));
+        }
+
+        // If new cover uploaded and old one exists, delete old from Cloudinary
+        if (coverPublicId && user.coverPublicId && coverPublicId !== user.coverPublicId) {
+            deleteCloudinaryAsset(user.coverPublicId, 'image')
+                .catch(err => console.error('[updateProfile] old cover delete failed:', err.message));
+        }
+
+        // Apply updates
+        if (name           !== undefined) user.name           = name;
+        if (username       !== undefined) user.username       = username;
+        if (bio            !== undefined) user.bio            = bio;
+        if (profilePicture !== undefined) user.profilePicture = profilePicture;
+        if (profilePublicId!== undefined) user.profilePublicId= profilePublicId;
+        if (coverPhoto     !== undefined) user.coverPhoto     = coverPhoto;
+        if (coverPublicId  !== undefined) user.coverPublicId  = coverPublicId;
+        if (location       !== undefined) user.location       = location;
+        if (website        !== undefined) user.website        = website;
+        if (pronouns       !== undefined) user.pronouns       = pronouns;
+        if (isPrivate      !== undefined) user.isPrivate      = isPrivate;
+
+        const updated = await user.save();
+        const userStats = await getUserStats(req.user._id);
+
+        res.json({ message: 'Profile updated successfully', user: serializeProfile(updated, userStats) });
+    } catch (error) {
+        console.error('[updateUserProfile]', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+// ─── Cloudinary upload signature (for signed uploads from backend) ─────────────
+// @route   GET /api/profile/upload-signature
+// @access  Private
+// Frontend uses unsigned preset directly — this endpoint is optional (for signed flow)
+const getUploadSignature = async (req, res) => {
+    const { uploadType } = req.query; // 'avatar' | 'cover'
+
+    const presetMap = {
+        avatar: process.env.CLOUDINARY_PRESET_AVATAR || 'astrachat_avatars',
+        cover:  process.env.CLOUDINARY_PRESET_COVER  || 'astrachat_covers',
+    };
+
+    const preset = presetMap[uploadType];
+    if (!preset) {
+        return res.status(400).json({ message: 'uploadType must be avatar or cover.' });
     }
 
-    user.name        = name        !== undefined ? name        : user.name;
-    user.username    = username    !== undefined ? username    : user.username;
-    user.bio         = bio         !== undefined ? bio         : user.bio;
-    user.profilePicture = profilePicture !== undefined ? profilePicture : user.profilePicture;
-    user.coverPhoto  = coverPhoto  !== undefined ? coverPhoto  : user.coverPhoto;
-    user.location    = location    !== undefined ? location    : user.location;
-    user.website     = website     !== undefined ? website     : user.website;
-    user.pronouns    = pronouns    !== undefined ? pronouns    : user.pronouns;
-    if (isPrivate !== undefined) user.isPrivate = isPrivate;
-
-    const updatedUser = await user.save();
-    res.json({ message: 'Profile updated successfully', user: updatedUser });
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
-  }
-};
-
-// @desc    Get a presigned URL for profile picture upload
-// @route   GET /api/profile/avatar-upload-url
-// @access  Private
-const getAvatarUploadUrl = async (req, res) => {
-  const { fileType } = req.query;
-
-  if (!fileType) {
-    return res.status(400).json({ message: 'fileType query param is required (e.g. image/jpeg).' });
-  }
-
-  const allowedImageTypes = /^image\/(jpeg|jpg|png|webp)$/;
-  if (!allowedImageTypes.test(fileType)) {
-    return res.status(400).json({ message: 'Only JPEG, PNG, or WebP images are supported for avatars.' });
-  }
-
-  try {
-    const ext = fileType.split('/')[1];
-    const { presignedUrl, key, cloudfrontUrl } = await getPresignedUploadUrl({
-      folder: 'profile',
-      ownerId: req.user._id.toString(),
-      fileName: `avatar.${ext}`,
-      fileType,
-      expiresIn: 300,
+    // For unsigned uploads the frontend doesn't need a signature —
+    // just return the preset name and cloud name
+    res.json({
+        cloudName:    CLOUDINARY_CLOUD,
+        uploadPreset: preset,
+        // Pass userId as public_id so avatar naturally overwrites on re-upload
+        publicId:     req.user._id.toString(),
     });
-
-    res.json({ presignedUrl, key, cloudfrontUrl });
-  } catch (err) {
-    res.status(500).json({ message: 'Could not generate avatar upload URL.', error: err.message });
-  }
 };
 
-// @desc    Get a presigned URL for cover photo upload
-// @route   GET /api/profile/cover-upload-url
-// @access  Private
-const getCoverUploadUrl = async (req, res) => {
-  const { fileType } = req.query;
+// ─── Shared profile serializer ────────────────────────────────────────────────
+function serializeProfile(user, userStats) {
+    const profilePublicId = user.profilePublicId || (user.profilePicture?.public_id);
+    const profilePictureUrl = profilePublicId
+        ? buildCloudinaryUrl(profilePublicId, { width: 400, height: 400, gravity: 'face', radius: 'max' })
+        : '';
 
-  if (!fileType) {
-    return res.status(400).json({ message: 'fileType query param is required (e.g. image/jpeg).' });
-  }
-
-  const allowedImageTypes = /^image\/(jpeg|jpg|png|webp)$/;
-  if (!allowedImageTypes.test(fileType)) {
-    return res.status(400).json({ message: 'Only JPEG, PNG, or WebP images are supported for cover photos.' });
-  }
-
-  try {
-    const ext = fileType.split('/')[1];
-    const { presignedUrl, key, cloudfrontUrl } = await getPresignedUploadUrl({
-      folder: 'cover',
-      ownerId: req.user._id.toString(),
-      fileName: `cover.${ext}`,
-      fileType,
-      expiresIn: 300,
-    });
-
-    res.json({ presignedUrl, key, cloudfrontUrl });
-  } catch (err) {
-    res.status(500).json({ message: 'Could not generate cover photo upload URL.', error: err.message });
-  }
-};
+    return {
+        _id:              user._id,
+        displayName:      user.name,
+        name:             user.name,
+        username:         user.username,
+        // Return the Cloudinary optimized URL for profile picture
+        profilePicture:   profilePictureUrl,
+        profilePictureUrl: profilePictureUrl,
+        profilePublicId:  profilePublicId || null,
+        coverPhoto:       user.coverPhoto || '',
+        bio:              user.bio || '',
+        location:         user.location || '',
+        website:          user.website || '',
+        pronouns:         user.pronouns || '',
+        encryptionPublicKey: user.encryptionPublicKey || null,
+        stats: {
+            posts:     userStats?.postsCount     || user.postsCount     || 0,
+            followers: userStats?.followersCount || user.followersCount || 0,
+            following: userStats?.followingCount || user.followingCount || 0,
+            likes:     userStats?.totalLikesCount|| user.totalLikesCount|| 0,
+        },
+        isPrivate: user.isPrivate || false,
+        isOnline:  user.isOnline  ?? false,
+        lastSeen:  user.lastSeen  || null,
+    };
+}
 
 module.exports = {
-  getUserProfile,
-  getUserProfileById,
-  updateUserProfile,
-  getAvatarUploadUrl,
-  getCoverUploadUrl,
+    getUserProfile,
+    getUserProfileById,
+    updateUserProfile,
+    getUploadSignature,
 };

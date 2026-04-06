@@ -2,38 +2,193 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const mongoose = require('mongoose');
-const { deleteS3Object, deleteFromCloudinary, STORAGE_TYPE } = require('../services/mediaService');
+const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { applyUserDefaults } = require('../utils/lazyDefaults');
+
+// Helper function to normalize participants (handles both old ObjectId format and new object format)
+function normalizeParticipants(participants, populatedParticipants = null) {
+  if (!Array.isArray(participants)) return [];
+  
+  return participants.map((p, index) => {
+    // If it's the new format (object with user field)
+    if (p && typeof p === 'object' && p.user !== undefined) {
+      // Check if user is populated (object) or still an ObjectId (string)
+      const userIsPopulated = p.user && typeof p.user === 'object' && p.user._id;
+      
+      if (!userIsPopulated) {
+        console.warn(`[normalizeParticipants] User not populated for participant at index ${index}:`, { 
+          participantUser: p.user,
+          participantObj: p 
+        });
+      }
+      
+      return {
+        user: p.user,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+        lastReadMsgId: p.lastReadMsgId || null
+      };
+    }
+    
+    // If it's the old format (just ObjectId) - try to get populated user
+    if (mongoose.Types.ObjectId.isValid(p) || (typeof p === 'string' && p.match(/^[0-9a-f]{24}$/i))) {
+      console.warn(`[normalizeParticipants] Found old format participant (raw ObjectId): ${p}`);
+      const populatedUser = populatedParticipants?.[index];
+      return {
+        user: populatedUser || p,
+        role: 'member',
+        joinedAt: new Date(),
+        lastReadMsgId: null
+      };
+    }
+    
+    // Fallback for unexpected format
+    console.warn(`[normalizeParticipants] Unexpected participant format at index ${index}:`, p);
+    return p;
+  });
+}
+
+// Helper to find current user participant (works with both formats)
+function findCurrentUserParticipant(chat, userId) {
+  if (!Array.isArray(chat.participants)) return null;
+  
+  for (const p of chat.participants) {
+    // New format: object with user field
+    if (p && typeof p === 'object' && p.user) {
+      if (p.user?._id?.toString() === userId.toString()) {
+        return p;
+      }
+    }
+    // Old format: just ObjectId
+    else if (mongoose.Types.ObjectId.isValid(p)) {
+      if (p.toString() === userId.toString()) {
+        return { user: p, role: 'member', joinedAt: new Date(), lastReadMsgId: null };
+      }
+    }
+  }
+  return null;
+}
 
 // Get all chats for current user
 async function getChats(req, res) {
   try {
     const userId = req.user._id;
-    // ✅ PRODUCTION FIX: Only return chats that have messages (lastMessage exists)
-    // This prevents empty/unstarted conversations from appearing in the chat list
+    // ✅ PRODUCTION FIX: Query both old format (direct ObjectIds) and new format (user field)
     const chats = await Chat.find({ 
-      'participants.user': userId,
+      $or: [
+        { 'participants.user': userId },        // New format
+        { 'participants': userId }              // Old format (raw ObjectIds)
+      ],
       'lastMessage': { $exists: true }  // Only chats with at least one message
     })
-      .populate('participants.user', 'name username profilePicture isOnline lastSeen')
-      .populate('lastMessage.sender', 'name username profilePicture')
+      .populate({
+        path: 'participants.user',
+        select: 'name username profilePicture isOnline lastSeen bio'
+      })
+      .populate({
+        path: 'lastMessage.sender',
+        select: 'name username profilePicture'
+      })
       .sort({ 'lastMessage.createdAt': -1 })  // Sort by last message time
-      .limit(20)
-      .lean();
+      .limit(20);
 
-    // Apply lazy defaults to participant users
-    const chatsWithDefaults = chats.map(chat => ({
-      ...chat,
-      participants: chat.participants?.map(p => ({
-        ...p,
-        user: p.user ? applyUserDefaults(p.user) : null,
-        role: p.role || 'member',
-        joinedAt: p.joinedAt || new Date(),
-      })) || [],
-      lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
-    }));
+    // Convert to lean objects manually after populate for better control
+    const leanChats = chats.map(chat => chat.toObject ? chat.toObject() : chat);
 
-    res.json(chatsWithDefaults);
+    // 🔍 DEBUG: Log first chat to verify population
+    if (leanChats.length > 0) {
+      console.log('🔍 [DEBUG] First chat after populate:', JSON.stringify(leanChats[0], null, 2));
+      console.log('🔍 [DEBUG] First participant:', JSON.stringify(leanChats[0].participants?.[0], null, 2));
+    }
+
+    // ✅ CRITICAL FIX: Enrich any chats with missing populated user data
+    const enrichedChats = await Promise.all(
+      leanChats.map(chat => enrichChatParticipantsIfNeeded(chat))
+    );
+
+    // ✅ FIX: Calculate unreadCount and lastReadMsgId for each chat
+    const chatsWithUnread = await Promise.all(
+      enrichedChats.map(async (chat) => {
+        try {
+          // Normalize participants to handle both old and new format
+          const normalizedParticipants = normalizeParticipants(chat.participants);
+          
+          // Find the current user's participant record
+          const currentUserParticipant = normalizedParticipants?.find(
+            p => p.user?._id?.toString() === userId.toString()
+          );
+
+          // Find the other participant(s) - for direct chats this is the other user, for groups it's all others
+          const otherParticipants = normalizedParticipants?.filter(
+            p => p.user?._id?.toString() !== userId.toString()
+          ) || [];
+
+          // Count unread messages (received by user, not read by user)
+          const unreadCount = await Message.countDocuments({
+            chat: chat._id,
+            sender: { $ne: userId },
+            'readBy.user': { $ne: userId }
+          });
+
+          // ✅ FIX: Add otherUser for direct chats (for easy access to the chat partner's info)
+          let otherUser = null;
+          if (chat.convoType === 'direct' && otherParticipants.length > 0) {
+            otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
+          }
+
+          return {
+            ...chat,
+            unreadCount,
+            otherUser,  // ✅ NEW: Direct access to other user in direct chats
+            lastReadMsgId: currentUserParticipant?.lastReadMsgId || null,
+            lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
+            participants: normalizedParticipants.map(p => ({
+              ...p,
+              user: p.user ? applyUserDefaults(p.user) : null,
+              role: p.role || 'member',
+              joinedAt: p.joinedAt || new Date(),
+            })) || [],
+            // ✅ NEW: Include lastMessage sender with full user info
+            lastMessage: {
+              ...chat.lastMessage,
+              sender: chat.lastMessage?.sender ? applyUserDefaults(chat.lastMessage.sender) : null
+            }
+          };
+        } catch (err) {
+          console.error('Error calculating unread for chat:', chat._id, err);
+          // Return chat without unread count if calculation fails
+          const normalizedParticipants = normalizeParticipants(chat.participants);
+          const otherParticipants = normalizedParticipants?.filter(
+            p => p.user?._id?.toString() !== userId.toString()
+          ) || [];
+          
+          let otherUser = null;
+          if (chat.convoType === 'direct' && otherParticipants.length > 0) {
+            otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
+          }
+
+          return {
+            ...chat,
+            unreadCount: 0,
+            otherUser,
+            lastReadMsgId: normalizeParticipants(chat.participants).find(p => p.user?._id?.toString() === userId.toString())?.lastReadMsgId || null,
+            lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
+            participants: normalizedParticipants.map(p => ({
+              ...p,
+              user: p.user ? applyUserDefaults(p.user) : null,
+              role: p.role || 'member',
+              joinedAt: p.joinedAt || new Date(),
+            })) || [],
+            lastMessage: {
+              ...chat.lastMessage,
+              sender: chat.lastMessage?.sender ? applyUserDefaults(chat.lastMessage.sender) : null
+            }
+          };
+        }
+      })
+    );
+
+    res.json(chatsWithUnread);
   } catch (error) {
     console.error('getChats error:', error);
     res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
@@ -81,7 +236,7 @@ async function getChatMessages(req, res) {
     // Fetch messages in descending order (newest first) so that newest messages appear at the bottom
     // When loading more (scrolling up), this gives us older messages in reverse chronological order
     const messages = await Message.find(query)
-      .populate('sender', 'name username profilePicture')
+      .populate('sender', 'name username profilePicture isOnline lastSeen bio')
       .populate('quotedMsgId', 'bodyText sender')
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -89,6 +244,16 @@ async function getChatMessages(req, res) {
 
     // Reverse to get chronological order for display
     messages.reverse();
+
+    // ✅ FIX: Apply lazy defaults to sender objects
+    const messagesWithDefaults = messages.map(msg => ({
+      ...msg,
+      sender: msg.sender ? applyUserDefaults(msg.sender) : null,
+      quotedMsgId: msg.quotedMsgId ? {
+        ...msg.quotedMsgId,
+        sender: msg.quotedMsgId.sender ? applyUserDefaults(msg.quotedMsgId.sender) : null
+      } : null
+    }));
 
     // FIX: only add to readBy if user hasn't already read the message,
     // avoiding duplicate object entries that $addToSet can't deduplicate
@@ -101,8 +266,17 @@ async function getChatMessages(req, res) {
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
+    // ✅ FIX: Update lastReadMsgId for the participant (track most recent read message)
+    if (messages.length > 0) {
+      const mostRecentMessageId = messages[messages.length - 1]._id;  // Last message in chronological order
+      await Chat.updateOne(
+        { _id: chatId, 'participants.user': userId },
+        { $set: { 'participants.$.lastReadMsgId': mostRecentMessageId } }
+      );
+    }
+
     res.json({
-      messages: messages,
+      messages: messagesWithDefaults,
       hasMore: messages.length === limit
     });
   } catch (error) {
@@ -124,13 +298,34 @@ async function findChat(req, res) {
         { 'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] } },
         { participants: { $size: 2, $elemMatch: { user: currentUser }, $elemMatch: { user: new mongoose.Types.ObjectId(userId) } } }
       ]
-    }).populate('participants.user', 'name username profilePicture');
+    }).populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
 
     if (!chat) {
       return res.status(404).json({ message: 'Chat not found' });
     }
 
-    res.json(chat);
+    // ✅ FIX: Apply lazy defaults and add otherUser for direct chats
+    const chatObj = chat.toObject();
+    const normalizedParticipants = normalizeParticipants(chatObj.participants);
+    const otherParticipants = normalizedParticipants?.filter(
+      p => p.user?._id?.toString() !== currentUser.toString()
+    ) || [];
+    
+    let otherUser = null;
+    if (otherParticipants.length > 0) {
+      otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
+    }
+
+    res.json({
+      ...chatObj,
+      otherUser,
+      participants: normalizedParticipants.map(p => ({
+        ...p,
+        user: p.user ? applyUserDefaults(p.user) : null,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+      })) || [],
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to find chat', error: error.message });
   }
@@ -171,7 +366,7 @@ async function createChat(req, res) {
       await chat.save();
     }
 
-    chat = await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen');
+    chat = await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
     
     // Apply lazy defaults to participants
     const chatWithDefaults = {
@@ -190,11 +385,9 @@ async function createChat(req, res) {
   }
 }
 
-// Search chats by name (participant name search requires aggregation — simplified here)
-// FIX: removed broken $expr/$regexMatch query that silently returned no results.
-// Now searches by chatName only for group chats; for private chats the client
-// should filter populated participant names on the frontend, or upgrade this
-// to an aggregation pipeline if server-side participant search is needed.
+// Search chats by name or participant username
+// ✅ FIX: Now searches both group names AND participant usernames using aggregation
+// Works for both direct and group chats
 async function searchChats(req, res) {
   try {
     const { query } = req.query;
@@ -204,13 +397,95 @@ async function searchChats(req, res) {
       return res.status(400).json({ message: 'Search query is required' });
     }
 
-    const chats = await Chat.find({
-      'participants.user': userId,
-      title: { $regex: query, $options: 'i' },
-    }).populate('participants.user', 'name username profilePicture');
+    const searchRegex = new RegExp(query, 'i');
 
-    res.json(chats);
+    // ✅ FIX: Use aggregation pipeline to search participant names in direct chats
+    const chats = await Chat.aggregate([
+      // Match chats where user is a participant
+      {
+        $match: {
+          'participants.user': new mongoose.Types.ObjectId(userId)
+        }
+      },
+      // Lookup user details for all participants
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'participants.user',
+          foreignField: '_id',
+          as: 'populatedParticipants'
+        }
+      },
+      // Filter chats by groupName (for groups) or participant username/name (for direct)
+      {
+        $match: {
+          $or: [
+            { groupName: { $regex: searchRegex } },
+            { 'populatedParticipants.username': { $regex: searchRegex } },
+            { 'populatedParticipants.name': { $regex: searchRegex } }
+          ]
+        }
+      },
+      // Limit results
+      { $limit: 20 },
+      // Reconstruct participants with user data
+      {
+        $addFields: {
+          participants: {
+            $map: {
+              input: '$participants',
+              as: 'p',
+              in: {
+                user: {
+                  $arrayElemAt: [
+                    {
+                      $filter: {
+                        input: '$populatedParticipants',
+                        as: 'u',
+                        cond: { $eq: ['$$u._id', '$$p.user'] }
+                      }
+                    },
+                    0
+                  ]
+                },
+                role: '$$p.role',
+                joinedAt: '$$p.joinedAt',
+                lastReadMsgId: '$$p.lastReadMsgId'
+              }
+            }
+          }
+        }
+      },
+      // Remove the temporary field
+      { $project: { populatedParticipants: 0 } }
+    ]);
+
+    // ✅ FIX: Apply lazy defaults to participant users
+    const chatsWithDefaults = chats.map(chat => {
+      const otherParticipants = chat.participants?.filter(
+        p => p.user?._id?.toString() !== userId.toString()
+      ) || [];
+      
+      let otherUser = null;
+      if (chat.convoType === 'direct' && otherParticipants.length > 0) {
+        otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
+      }
+
+      return {
+        ...chat,
+        otherUser,
+        participants: chat.participants?.map(p => ({
+          ...p,
+          user: p.user ? applyUserDefaults(p.user) : null,
+          role: p.role || 'member',
+          joinedAt: p.joinedAt || new Date(),
+        })) || [],
+      };
+    });
+
+    res.json(chatsWithDefaults);
   } catch (error) {
+    console.error('searchChats error:', error);
     res.status(500).json({ message: 'Failed to search chats', error: error.message });
   }
 }
@@ -272,8 +547,18 @@ async function sendMessage(req, res) {
     });
 
     await message.save();
-    await message.populate('sender', 'name username profilePicture');
+    await message.populate('sender', 'name username profilePicture isOnline lastSeen bio');
     await message.populate('quotedMsgId', 'bodyText sender');
+
+    // ✅ FIX: Apply lazy defaults to sender
+    const messageWithDefaults = {
+      ...message.toObject(),
+      sender: message.sender ? applyUserDefaults(message.sender) : null,
+      quotedMsgId: message.quotedMsgId ? {
+        ...message.quotedMsgId,
+        sender: message.quotedMsgId.sender ? applyUserDefaults(message.quotedMsgId.sender) : null
+      } : null
+    };
 
     await Chat.findByIdAndUpdate(chat._id, {
       lastMessage: {
@@ -284,7 +569,7 @@ async function sendMessage(req, res) {
       updatedAt: new Date(),
     });
 
-    res.status(201).json(message);
+    res.status(201).json(messageWithDefaults);
   } catch (error) {
     res.status(500).json({ message: 'Failed to send message', error: error.message });
   }
@@ -312,10 +597,23 @@ async function markAllMessagesAsRead(req, res) {
     const { chatId } = req.body;
     const userId = req.user._id;
 
+    // ✅ FIX: Get the most recent message ID to update lastReadMsgId
+    const latestMessage = await Message.findOne({ chat: chatId })
+      .sort({ createdAt: -1 })
+      .select('_id');
+
     await Message.updateMany(
       { chat: chatId, sender: { $ne: userId }, 'readBy.user': { $ne: userId } },
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
+
+    // ✅ FIX: Update lastReadMsgId for the participant
+    if (latestMessage) {
+      await Chat.updateOne(
+        { _id: chatId, 'participants.user': userId },
+        { $set: { 'participants.$.lastReadMsgId': latestMessage._id } }
+      );
+    }
 
     res.json({ message: 'All messages marked as read' });
   } catch (error) {
@@ -376,11 +674,15 @@ async function editMessage(req, res) {
       { _id: messageId, sender: userId },
       { bodyText, editedAt: new Date() },
       { new: true }
-    ).populate('sender', 'name username');
+    ).populate('sender', 'name username profilePicture isOnline lastSeen bio');
 
     if (!message) return res.status(404).json({ message: 'Message not found or unauthorized' });
 
-    res.json(message);
+    // ✅ FIX: Apply lazy defaults to sender
+    res.json({
+      ...message.toObject(),
+      sender: message.sender ? applyUserDefaults(message.sender) : null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to edit message', error: error.message });
   }
@@ -402,11 +704,15 @@ async function unsendMessage(req, res) {
         editedAt: new Date()
       },
       { new: true }
-    ).populate('sender', 'name username profilePicture');
+    ).populate('sender', 'name username profilePicture isOnline lastSeen bio');
 
     if (!result) return res.status(404).json({ message: 'Message not found or unauthorized' });
 
-    res.json(result);
+    // ✅ FIX: Apply lazy defaults to sender
+    res.json({
+      ...result.toObject(),
+      sender: result.sender ? applyUserDefaults(result.sender) : null
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to unsend message', error: error.message });
   }
@@ -422,26 +728,12 @@ async function deleteMessage(req, res) {
     if (!message) return res.status(404).json({ message: 'Message not found' });
     if (message.sender.toString() !== userId) return res.status(403).json({ message: 'Unauthorized' });
 
-    if (message.mediaKey) {
-      try {
-        if (STORAGE_TYPE === 'cloudinary') {
-          const publicId = message.mediaUrl?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
-          if (publicId) await deleteFromCloudinary(publicId);
-        } else {
-          await deleteS3Object(message.mediaKey);
-        }
-      } catch (err) {
-        console.warn('Media delete failed:', err.message);
-      }
-    }
-
+    // Delete all attachments from Cloudinary
     for (const att of message.attachments || []) {
       try {
-        if (STORAGE_TYPE === 'cloudinary') {
-          const publicId = att.url?.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
-          if (publicId) await deleteFromCloudinary(publicId);
-        } else {
-          await deleteS3Object(att.key);
+        if (att.publicId) {
+          const resourceType = att.type === 'video' ? 'video' : 'image';
+          await deleteCloudinaryAsset(att.publicId, resourceType);
         }
       } catch (err) {
         console.warn('Attachment delete failed:', err.message);
@@ -461,13 +753,23 @@ async function getMessageReceipts(req, res) {
   try {
     const { messageId } = req.params;
     const message = await Message.findById(messageId)
-      .populate('readBy.user deliveredTo.user', 'name username profilePicture');
+      .populate('readBy.user deliveredTo.user', 'name username profilePicture isOnline lastSeen bio');
 
     if (!message) return res.status(404).json({ message: 'Message not found' });
 
+    // ✅ FIX: Apply lazy defaults to users in readBy and deliveredTo
+    const readByWithDefaults = (message.readBy || []).map(rb => ({
+      ...rb,
+      user: rb.user ? applyUserDefaults(rb.user) : null
+    }));
+
+    const deliveredToWithDefaults = (message.deliveredTo || []).map(dt => 
+      dt.user ? applyUserDefaults(dt.user) : null
+    ).filter(Boolean);
+
     res.json({
-      readBy: message.readBy || [],
-      deliveredTo: message.deliveredTo || [],
+      readBy: readByWithDefaults,
+      deliveredTo: deliveredToWithDefaults,
     });
   } catch (error) {
     res.status(500).json({ message: 'Failed to get receipts', error: error.message });
@@ -479,11 +781,17 @@ async function getMessageReactions(req, res) {
   try {
     const { messageId } = req.params;
     const message = await Message.findById(messageId)
-      .populate('reactions.user', 'name username profilePicture');
+      .populate('reactions.user', 'name username profilePicture isOnline lastSeen bio');
 
     if (!message) return res.status(404).json({ message: 'Message not found' });
 
-    res.json(message.reactions || []);
+    // ✅ FIX: Apply lazy defaults to users in reactions
+    const reactionsWithDefaults = (message.reactions || []).map(reaction => ({
+      ...reaction,
+      user: reaction.user ? applyUserDefaults(reaction.user) : null
+    }));
+
+    res.json(reactionsWithDefaults);
   } catch (error) {
     res.status(500).json({ message: 'Failed to get reactions', error: error.message });
   }
@@ -524,8 +832,19 @@ async function createGroupChat(req, res) {
     });
 
     await chat.save();
-    await chat.populate('participants.user', 'name username profilePicture');
-    res.status(201).json(chat);
+    await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
+    
+    // ✅ FIX: Apply lazy defaults to participants
+    const chatObj = chat.toObject();
+    res.status(201).json({
+      ...chatObj,
+      participants: chatObj.participants?.map(p => ({
+        ...p,
+        user: p.user ? applyUserDefaults(p.user) : null,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+      })) || [],
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to create group', error: error.message });
   }
@@ -539,12 +858,22 @@ async function getChatInfo(req, res) {
     const userId = req.user._id;
 
     const chat = await Chat.findOne({ _id: chatId, 'participants.user': userId })
-      .populate('participants.user', 'name username profilePicture')
+      .populate('participants.user', 'name username profilePicture isOnline lastSeen bio')
       .populate('creator', 'name username');
 
     if (!chat) return res.status(403).json({ message: 'Chat not found or access denied' });
 
-    res.json(chat);
+    // ✅ FIX: Apply lazy defaults to participants
+    const chatObj = chat.toObject();
+    res.json({
+      ...chatObj,
+      participants: chatObj.participants?.map(p => ({
+        ...p,
+        user: p.user ? applyUserDefaults(p.user) : null,
+        role: p.role || 'member',
+        joinedAt: p.joinedAt || new Date(),
+      })) || [],
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to get chat info', error: error.message });
   }
@@ -570,12 +899,18 @@ async function getChatMedia(req, res) {
         { attachments: { $exists: true, $ne: [] } },
       ],
     })
-      .populate('sender', 'name username profilePicture')
+      .populate('sender', 'name username profilePicture isOnline lastSeen bio')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
-    res.json(mediaMessages);
+    // ✅ FIX: Apply lazy defaults to sender objects
+    const messagesWithDefaults = mediaMessages.map(msg => ({
+      ...msg.toObject(),
+      sender: msg.sender ? applyUserDefaults(msg.sender) : null
+    }));
+
+    res.json(messagesWithDefaults);
   } catch (error) {
     res.status(500).json({ message: 'Failed to get media', error: error.message });
   }
@@ -640,6 +975,255 @@ async function clearChat(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔐 END-TO-END ENCRYPTED MESSAGE HANDLING
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Send an encrypted message
+ * Client encrypts message locally before sending
+ * Server stores encrypted blob + metadata
+ * Only recipient (with private key) can decrypt
+ * 
+ * Body: {
+ *   receiverId: string,
+ *   encryptedBody: string (base64),
+ *   nonce: string (base64),
+ *   msgType: string,
+ *   attachments: array,
+ *   quotedMsgId: string
+ * }
+ */
+async function sendEncryptedMessage(req, res) {
+  try {
+    const { receiverId, encryptedBody, nonce, msgType = 'text', attachments = [], quotedMsgId } = req.body;
+    const senderId = req.user._id;
+
+    // Validate encryption parameters
+    if (!encryptedBody || typeof encryptedBody !== 'string') {
+      return res.status(400).json({ message: 'Invalid encrypted body' });
+    }
+
+    if (!nonce || typeof nonce !== 'string') {
+      return res.status(400).json({ message: 'Invalid nonce' });
+    }
+
+    // Validate base64 format
+    try {
+      Buffer.from(encryptedBody, 'base64');
+      Buffer.from(nonce, 'base64');
+    } catch (error) {
+      return res.status(400).json({ message: 'Encrypted body and nonce must be valid base64' });
+    }
+
+    // Validate attachments
+    const validatedAttachments = (attachments || []).filter(att => {
+      return (
+        att &&
+        typeof att === 'object' &&
+        att.type &&
+        ['image', 'video', 'audio', 'file'].includes(att.type) &&
+        typeof att.url === 'string' &&
+        (!att.size || att.size <= 50 * 1024 * 1024)
+      );
+    });
+
+    // Find or create chat
+    const userIds = [senderId.toString(), receiverId].sort();
+    let chat = await Chat.findOne({
+      convoType: 'direct',
+      'participants.user': { $all: [new mongoose.Types.ObjectId(userIds[0]), new mongoose.Types.ObjectId(userIds[1])] },
+      participants: { $size: 2 }
+    });
+
+    if (!chat) {
+      const now = new Date();
+      chat = new Chat({
+        convoType: 'direct',
+        participants: [
+          { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
+          { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now },
+        ],
+        lastActivityTimestamp: now
+      });
+      await chat.save();
+    }
+
+    const now = new Date();
+    const message = new Message({
+      sender: senderId,
+      receiver: new mongoose.Types.ObjectId(receiverId),
+      chat: chat._id,
+      encryptedBody: encryptedBody,
+      nonce: nonce,
+      bodyText: '[Encrypted Message]',  // Placeholder for unencrypted view
+      msgType,
+      status: 'sent',
+      attachments: validatedAttachments,
+      quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
+      readBy: [{ user: senderId, readAt: now }],
+      deliveredTo: [],
+      reactions: [],
+      content: '[Encrypted]',
+    });
+
+    await message.save();
+    await message.populate('sender', 'name username profilePicture isOnline lastSeen bio');
+
+    // ✅ FIX: Apply lazy defaults to sender
+    const messageWithDefaults = {
+      ...message.toObject(),
+      sender: message.sender ? applyUserDefaults(message.sender) : null,
+      encrypted: true,
+      message: 'Encrypted message sent successfully'
+    };
+
+    // Update chat's last message
+    await Chat.findByIdAndUpdate(chat._id, {
+      lastMessage: {
+        text: validatedAttachments.length ? '[Encrypted Media]' : '[Encrypted Message]',
+        createdAt: message.createdAt,
+        sender: senderId,
+      },
+      updatedAt: new Date(),
+    });
+
+    res.status(201).json(messageWithDefaults);
+  } catch (error) {
+    console.error('sendEncryptedMessage error:', error);
+    res.status(500).json({
+      message: 'Failed to send encrypted message',
+      error: process.env.NODE_ENV === 'production' ? {} : error.message
+    });
+  }
+}
+
+/**
+ * Get encrypted messages for a chat
+ * Returns encryptedBody and nonce
+ * Client decrypts locally using recipient's private key
+ */
+async function getEncryptedChatMessages(req, res) {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id;
+    const limit = parseInt(req.query.limit) || 50;
+    const beforeMessageId = req.query.beforeMessageId;
+
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ message: 'Invalid chat ID' });
+    }
+
+    // Verify user is in chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      'participants.user': userId
+    });
+
+    if (!chat) {
+      return res.status(403).json({ message: 'Chat not found or access denied' });
+    }
+
+    let query = { chat: chatId };
+
+    if (beforeMessageId) {
+      if (!mongoose.Types.ObjectId.isValid(beforeMessageId)) {
+        return res.status(400).json({ message: 'Invalid beforeMessageId' });
+      }
+
+      const beforeMessage = await Message.findById(beforeMessageId);
+      if (beforeMessage) {
+        query.createdAt = { $lt: beforeMessage.createdAt };
+      }
+    }
+
+    // Fetch encrypted messages
+    const messages = await Message.find(query)
+      .populate('sender', 'name username profilePicture isOnline lastSeen bio')
+      .select('_id sender receiver chat encryptedBody nonce msgType status createdAt updatedAt editedAt unsentAt quotedMsgId reactions readBy deliveredTo')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    messages.reverse();
+
+    // ✅ FIX: Apply lazy defaults to sender objects
+    const messagesWithDefaults = messages.map(msg => ({
+      ...msg,
+      sender: msg.sender ? applyUserDefaults(msg.sender) : null,
+      encrypted: true,
+      displayText: msg.msgType === 'text' ? '[Encrypted Message]' : '[Media]'
+    }));
+
+    // Mark as read if received
+    await Message.updateMany(
+      {
+        chat: chatId,
+        sender: { $ne: userId },
+        'readBy.user': { $ne: userId },
+      },
+      { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
+    );
+
+    res.json({
+      messages: messagesWithDefaults,
+      hasMore: messages.length === limit,
+      encryptionMethod: 'xchacha20-poly1305'
+    });
+  } catch (error) {
+    console.error('getEncryptedChatMessages error:', error);
+    res.status(500).json({
+      message: 'Failed to get encrypted messages',
+      error: process.env.NODE_ENV === 'production' ? {} : error.message
+    });
+  }
+}
+
+// Helper to detect and fill missing user population
+async function enrichChatParticipantsIfNeeded(chat) {
+  if (!chat.participants || !Array.isArray(chat.participants)) return chat;
+
+  const missingUserIds = [];
+  
+  // Identify missing populated users
+  chat.participants.forEach((p, idx) => {
+    if (p && typeof p === 'object' && p.user) {
+      // If user is just an ObjectId (not populated), mark it
+      if (typeof p.user === 'string' || (p.user && !p.user.username)) {
+        if (mongoose.Types.ObjectId.isValid(p.user)) {
+          missingUserIds.push(p.user);
+        }
+      }
+    }
+  });
+
+  // If there are missing users, fetch them
+  if (missingUserIds.length > 0) {
+    console.log(`🔍 Fetching ${missingUserIds.length} missing participant users...`);
+    const users = await User.find({ _id: { $in: missingUserIds } })
+      .select('name username profilePicture isOnline lastSeen bio')
+      .lean();
+
+    const userMap = {};
+    users.forEach(u => {
+      userMap[u._id.toString()] = u;
+    });
+
+    // Enrich participants with fetched users
+    chat.participants = chat.participants.map(p => {
+      if (p && typeof p === 'object' && p.user) {
+        const userIdStr = (p.user._id || p.user).toString();
+        if (userMap[userIdStr] && !p.user.username) {
+          p.user = userMap[userIdStr];
+        }
+      }
+      return p;
+    });
+  }
+
+  return chat;
+}
+
 module.exports = {
   getChats,
   getChatMessages,
@@ -663,4 +1247,7 @@ module.exports = {
   muteChat,
   pinChat,
   clearChat,
+  sendEncryptedMessage,
+  getEncryptedChatMessages,
+  enrichChatParticipantsIfNeeded,  // Exporting the helper function
 };

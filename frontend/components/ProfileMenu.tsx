@@ -4,10 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSocket } from '@/contexts/SocketContext';
 import { post } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme-color';
+import secureTokenManager from '@/services/secureTokenManager';
 
 interface ProfileMenuProps {
   visible: boolean;
@@ -50,7 +50,7 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
             setIsLoggingOut(true);
             try {
               // Step 1: Call backend logout endpoint
-              const token = await AsyncStorage.getItem('token');
+              const token = await secureTokenManager.getToken();
               if (token) {
                 try {
                   await post('/auth/logout', {});
@@ -62,10 +62,8 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
               // Step 2: Disconnect socket
               disconnect();
 
-              // Step 3: Clear stored credentials
-              await AsyncStorage.removeItem('token');
-              await AsyncStorage.removeItem('userId');
-              await AsyncStorage.removeItem('userName');
+              // Step 3: Clear stored credentials from secure storage ✅ SECURE
+              await secureTokenManager.clearAll();
 
               // Step 4: Close menu
               onClose();

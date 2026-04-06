@@ -17,9 +17,11 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { get, put } from '@/services/api';
-import { uploadMedia } from '@/services/mediaService';
+import { uploadProfilePicture } from '@/services/mediaService';
 import SaveToast from '@/components/SaveToast';
 import { useTheme } from '@/hooks/use-theme-color';
+import { parseUploadError, parseSaveProfileError } from '@/utils/uploadErrorHandler';
+import { compressImage, getCompressionSettings } from '@/utils/imageCompression';
 
 export default function EditProfileScreen() {
   const colors = useTheme();
@@ -32,11 +34,10 @@ export default function EditProfileScreen() {
   const [pronouns, setPronouns] = useState<string>('');
 
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
+  const [profilePublicId, setProfilePublicId] = useState<string | null>(null);
   const [newProfilePictureUri, setNewProfilePictureUri] = useState<string | null>(null);
   const [newProfilePictureUrl, setNewProfilePictureUrl] = useState<string | null>(null);
-  const [coverPhoto, setCoverPhoto] = useState<string | null>(null);
-  const [newCoverPhotoUri, setNewCoverPhotoUri] = useState<string | null>(null);
-  const [newCoverPhotoUrl, setNewCoverPhotoUrl] = useState<string | null>(null);
+  const [newProfilePublicId, setNewProfilePublicId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -73,7 +74,7 @@ export default function EditProfileScreen() {
         setWebsite(userData.website || '');
         setPronouns(userData.pronouns || '');
         setProfilePicture(userData.profilePicture);
-        setCoverPhoto(userData.coverPhoto);
+        setProfilePublicId(userData.profilePublicId || null);
       } catch {
         Alert.alert('Error', 'Failed to load profile');
       } finally {
@@ -83,7 +84,7 @@ export default function EditProfileScreen() {
     fetchUserData();
   }, []);
 
-  const pickImage = async (type: 'avatar' | 'cover') => {
+  const pickImage = async (type: 'avatar') => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission required', 'You need to grant permission to access your photos.');
@@ -93,31 +94,61 @@ export default function EditProfileScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: type === 'avatar' ? [1, 1] : [16, 9],
+      aspect: [1, 1],
       quality: 1,
     });
 
     if (!result.canceled && result.assets?.[0]?.uri) {
       const uri = result.assets[0].uri;
-      if (type === 'avatar') {
-        setNewProfilePictureUri(uri);
-      } else {
-        setNewCoverPhotoUri(uri);
-      }
+      setNewProfilePictureUri(uri);
 
       setUploading(true);
       setUploadError(null);
       try {
-        const fileName = `${type}_${Date.now()}.${uri.split('.').pop()}`;
-        const res = await uploadMedia(uri, fileName);
-        if (type === 'avatar') {
-          setNewProfilePictureUrl(res.url);
-        } else {
-          setNewCoverPhotoUrl(res.url);
+        // Step 1: Compress image first ✅
+        const settings = getCompressionSettings('profile');
+        const { uri: compressedUri, size: compressedSize, originalSize } = await compressImage(
+          uri,
+          settings.targetWidth,
+          settings.targetHeight,
+          settings.quality
+        );
+
+        // Step 2: Validate file size (profile <1MB)
+        const maxSize = 1024 * 1024;
+        if (compressedSize > maxSize) {
+          const maxSizeMB = (maxSize / 1024 / 1024).toFixed(1);
+          Alert.alert(
+            'File Too Large',
+            `Compressed image is still ${(compressedSize / 1024 / 1024).toFixed(2)}MB. ` +
+            `Please choose a smaller image (max ${maxSizeMB}MB).`
+          );
+          setUploading(false);
+          return;
         }
-      } catch (error) {
-        setUploadError('Failed to upload image. Please try again.');
+
+        console.log(
+          `[Profile] Compression: ${(originalSize / 1024 / 1024).toFixed(2)}MB → ` +
+          `${(compressedSize / 1024 / 1024).toFixed(2)}MB`
+        );
+
+        // Step 3: Upload compressed image (backend handles Cloudinary upload)
+        const fileName = `profile_${Date.now()}.jpg`;
+        const { url, publicId } = await uploadProfilePicture(compressedUri, fileName);
+        
+        setNewProfilePictureUrl(url);
+        setNewProfilePublicId(publicId);
+      } catch (error: any) {
         console.error('Image upload error:', error);
+        
+        // User-friendly error messages using utility
+        const { message } = parseUploadError(error);
+        setUploadError(message);
+        
+        // Clear error after 5 seconds
+        setTimeout(() => {
+          setUploadError(null);
+        }, 5000);
       } finally {
         setUploading(false);
       }
@@ -135,15 +166,22 @@ export default function EditProfileScreen() {
         website,
         pronouns,
         profilePicture: newProfilePictureUrl || profilePicture,
-        coverPhoto: newCoverPhotoUrl || coverPhoto,
+        profilePublicId: newProfilePublicId || profilePublicId,
       });
 
       setShowToast(true);
       setTimeout(() => router.back(), 1200);
-    } catch {
-      Alert.alert('Error', 'Save failed');
-    } finally {
-      setSaving(false);
+    } catch (error: any) {
+      console.error('Save profile error:', error);
+      
+      // User-friendly error messages using utility
+      const { title, message } = parseSaveProfileError(error);
+      Alert.alert(title, message, [
+        {
+          text: 'OK',
+          onPress: () => setSaving(false),
+        },
+      ]);
     }
   };
 
@@ -152,7 +190,6 @@ export default function EditProfileScreen() {
 
     return (
       <View style={styles.skeletonContainer}>
-        <Animated.View style={[styles.skeletonBlock, { opacity }]} />
         <Animated.View style={[styles.skeletonCircle, { opacity }]} />
         <Animated.View style={[styles.skeletonCard, { opacity }]} />
         <Animated.View style={[styles.skeletonCard, { opacity }]} />
@@ -163,13 +200,6 @@ export default function EditProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.container}>
-
-        <TouchableOpacity onPress={() => pickImage('cover')} style={styles.coverContainer}>
-          {(newCoverPhotoUri || coverPhoto) && (
-            <Image source={{ uri: (newCoverPhotoUri || coverPhoto) as string }} style={styles.cover} />
-          )}
-          {uploading && <ActivityIndicator style={styles.loader} />}
-        </TouchableOpacity>
 
         <View style={styles.avatarWrapper}>
           <TouchableOpacity onPress={() => pickImage('avatar')}>
@@ -223,10 +253,8 @@ export default function EditProfileScreen() {
 
 const createStyles = (colors: any) => StyleSheet.create({
   container: { padding: 16, paddingBottom: 120 },
-  coverContainer: { height: 160, borderRadius: 20, backgroundColor: colors.backgroundSecondary, overflow: 'hidden' },
-  cover: { width: '100%', height: '100%' },
-
-  avatarWrapper: { alignItems: 'center', marginTop: -50, marginBottom: 10 },
+  
+  avatarWrapper: { alignItems: 'center', marginTop: 20, marginBottom: 20 },
   avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 4, borderColor: colors.tint },
   avatarPlaceholder: { width: 110, height: 110, borderRadius: 55, backgroundColor: colors.backgroundSecondary, borderColor: colors.tint, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
 
@@ -254,8 +282,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
 
   skeletonContainer: { flex: 1, padding: 16 },
-  skeletonBlock: { height: 160, backgroundColor: colors.backgroundSecondary, borderRadius: 20, marginBottom: 20 },
-  skeletonCircle: { width: 110, height: 110, borderRadius: 55, backgroundColor: colors.backgroundSecondary, alignSelf: 'center', marginTop: -50, marginBottom: 20 },
+  skeletonCircle: { width: 110, height: 110, borderRadius: 55, backgroundColor: colors.backgroundSecondary, alignSelf: 'center', marginTop: 20, marginBottom: 20 },
   skeletonCard: { height: 120, backgroundColor: colors.backgroundSecondary, borderRadius: 16, marginBottom: 20 },
 });
 

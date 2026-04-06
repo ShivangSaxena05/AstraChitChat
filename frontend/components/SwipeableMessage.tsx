@@ -92,9 +92,10 @@ const styles = StyleSheet.create({
   container: {
     marginVertical: 4,
     marginHorizontal: 8,
+    width: '100%',
   },
   messageWrapper: {
-    // styling passed through children
+    width: '100%',
   },
 });
 

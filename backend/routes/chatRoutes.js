@@ -21,66 +21,74 @@ const {
     getChatMedia,
     muteChat,
     pinChat,
-    clearChat
+    clearChat,
+    sendEncryptedMessage,
+    getEncryptedChatMessages
 } = require('../controllers/chatController');
 
-// const {
-//   getChats, getMessages, sendMessage,
-//   markMessageAsRead, markAllMessagesAsRead,
-//   editMessage, unsendMessage,
-//   addReaction, removeReaction,
-//   getMessageReceipts, getMessageReactions,
-//   searchChats
-// } = require('../controllers/chatController');
-
-
 const { protect } = require('../middleware/auth');
-// const {
-//     getChats, getChatMessages, createChat, searchChats,
-//     sendMessage, markMessageAsRead, markAllMessagesAsRead,
-//     addReaction, removeReaction, editMessage, unsendMessage,
-//     deleteMessage, getMessageReceipts, getMessageReactions,
-//     getUserStatus, createGroupChat, getChatInfo, getChatMedia,
-//     muteChat, pinChat, clearChat
-// } = require('../controllers/chatController');
 const { leaveGroup, addGroupMember, removeGroupMember } = require('../controllers/groupManagement');
+const { validateRequest } = require('../middleware/validateRequest');
+const {
+  createChatValidator,
+  createGroupChatValidator,
+  sendMessageValidator,
+  sendEncryptedMessageValidator,
+  editMessageValidator,
+  deleteMessageValidator,
+  unsendMessageValidator,
+  markMessageAsReadValidator,
+  markAllMessagesAsReadValidator,
+  addReactionValidator,
+  removeReactionValidator,
+  muteChatValidator,
+  pinChatValidator,
+  clearChatValidator,
+  getChatMessagesValidator,
+  searchChatsValidator,
+  addGroupMemberValidator,
+  removeGroupMemberValidator,
+  leaveGroupValidator,
+} = require('../validators/messageValidators');
 
 const router = express.Router();
 
 // ── Static routes first ──────────────────────────────────────
-router.get('/search', protect, searchChats);
+router.get('/search', protect, validateRequest({ querySchema: searchChatsValidator }), searchChats);
 
 // Find existing chat with a user
-router.get('/find/:userId', protect, findChat);
+router.get('/find/:userId', protect, validateRequest({}), findChat);
 
 // Get user online status
-router.get('/user-status/:userId', protect, getUserStatus);
-router.post('/create', protect, createChat);
-router.post('/group', protect, createGroupChat);
-router.post('/read-all', protect, markAllMessagesAsRead);
+router.get('/user-status/:userId', protect, validateRequest({}), getUserStatus);
+router.post('/create', protect, validateRequest({ bodySchema: createChatValidator }), createChat);
+router.post('/group', protect, validateRequest({ bodySchema: createGroupChatValidator }), createGroupChat);
+router.post('/read-all', protect, validateRequest({ bodySchema: markAllMessagesAsReadValidator }), markAllMessagesAsRead);
 
 // ── Message-specific routes (before /:chatId wildcard) ───────
-router.post('/messages/:messageId/read', protect, markMessageAsRead);
-router.put('/messages/:messageId', protect, editMessage);
-router.delete('/messages/:messageId/unsend', protect, unsendMessage);
-router.delete('/messages/:messageId', protect, deleteMessage);
-router.get('/messages/:messageId/receipts', protect, getMessageReceipts);
-router.post('/messages/:messageId/reactions', protect, addReaction);
-router.delete('/messages/:messageId/reactions/:emoji', protect, removeReaction);
-router.get('/messages/:messageId/reactions', protect, getMessageReactions);
+router.post('/messages/:messageId/read', protect, validateRequest({ bodySchema: markMessageAsReadValidator }), markMessageAsRead);
+router.put('/messages/:messageId', protect, validateRequest({ bodySchema: editMessageValidator }), editMessage);
+router.delete('/messages/:messageId/unsend', protect, validateRequest({ bodySchema: unsendMessageValidator }), unsendMessage);
+router.delete('/messages/:messageId', protect, validateRequest({ bodySchema: deleteMessageValidator }), deleteMessage);
+router.get('/messages/:messageId/receipts', protect, validateRequest({}), getMessageReceipts);
+router.post('/messages/:messageId/reactions', protect, validateRequest({ bodySchema: addReactionValidator }), addReaction);
+router.delete('/messages/:messageId/reactions/:emoji', protect, validateRequest({ bodySchema: removeReactionValidator }), removeReaction);
+router.get('/messages/:messageId/reactions', protect, validateRequest({}), getMessageReactions);
 
 // ── Wildcard /:chatId routes last ────────────────────────────
-router.get('/', protect, getChats);
-router.post('/', protect, sendMessage);
-router.get('/:chatId/messages', protect, getChatMessages);
-router.post('/:chatId/messages', protect, sendMessage);
-router.get('/:chatId/info', protect, getChatInfo);
-router.get('/:chatId/media', protect, getChatMedia);
-router.post('/:chatId/mute', protect, muteChat);
-router.post('/:chatId/pin', protect, pinChat);
-router.post('/:chatId/clear', protect, clearChat);
-router.post('/:chatId/leave', protect, leaveGroup);
-router.post('/:chatId/add-member', protect, addGroupMember);
-router.post('/:chatId/remove-member', protect, removeGroupMember);
+router.get('/', protect, validateRequest({}), getChats);
+router.post('/', protect, validateRequest({ bodySchema: sendMessageValidator }), sendMessage);
+router.get('/:chatId/messages', protect, validateRequest({ paramsSchema: getChatMessagesValidator }), getChatMessages);
+router.post('/:chatId/messages', protect, validateRequest({ bodySchema: sendMessageValidator }), sendMessage);
+router.get('/:chatId/encrypted-messages', protect, validateRequest({}), getEncryptedChatMessages);
+router.post('/:chatId/encrypted-messages', protect, validateRequest({ bodySchema: sendEncryptedMessageValidator }), sendEncryptedMessage);
+router.get('/:chatId/info', protect, validateRequest({}), getChatInfo);
+router.get('/:chatId/media', protect, validateRequest({}), getChatMedia);
+router.post('/:chatId/mute', protect, validateRequest({ bodySchema: muteChatValidator }), muteChat);
+router.post('/:chatId/pin', protect, validateRequest({ bodySchema: pinChatValidator }), pinChat);
+router.post('/:chatId/clear', protect, validateRequest({ bodySchema: clearChatValidator }), clearChat);
+router.post('/:chatId/leave', protect, validateRequest({ bodySchema: leaveGroupValidator }), leaveGroup);
+router.post('/:chatId/add-member', protect, validateRequest({ bodySchema: addGroupMemberValidator }), addGroupMember);
+router.post('/:chatId/remove-member', protect, validateRequest({ bodySchema: removeGroupMemberValidator }), removeGroupMember);
 
 module.exports = router;

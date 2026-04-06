@@ -1,29 +1,37 @@
 const mongoose = require('mongoose');
 
 const reportSchema = new mongoose.Schema({
-    reportedUser: {
+    reporter: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
     },
-    reportedBy: {
+    targetId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        required: true
+    },
+    targetType: {
+        type: String,
+        enum: ['post', 'comment', 'user', 'chat'],
         required: true
     },
     reason: {
         type: String,
-        required: true,
-        enum: ['harassment', 'spam', 'inappropriate_content', 'fake_account', 'other']
+        enum: ['spam', 'hate', 'nudity', 'violence'],
+        required: true
     },
-    description: {
+    note: {
         type: String,
         maxlength: 500
     },
     status: {
         type: String,
-        enum: ['pending', 'reviewed', 'resolved'],
+        enum: ['pending', 'reviewed', 'dismissed'],
         default: 'pending'
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: true

@@ -42,13 +42,28 @@ const userSchema = new mongoose.Schema(
     },
 
     profilePicture: {
+        type: {
+            public_id: String,
+            secure_url: String,
+            resource_type: String,
+            version: Number
+        },
+        default: null
+    },
+
+    profilePublicId: {
         type: String,
-        default: 'https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg'
+        default: null
     },
 
     coverPhoto: {
         type: String,
         default: ''
+    },
+
+    coverPublicId: {
+        type: String,
+        default: null
     },
 
     bio: {
@@ -85,46 +100,20 @@ const userSchema = new mongoose.Schema(
         default: null
     },
 
-    blockedUsers: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        }
-    ],
-
-    mutedUsers: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        }
-    ],
-
     isPrivate: {
         type: Boolean,
         default: false
     },
 
-    followRequests: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        }
-    ],
-
-    role: {
-        type: String,
-        enum: ['user', 'admin'],
-        default: 'user'
-    },
-
-    twoFactorSecret: {
-        type: String,
-        select: false
-    },
-
-    isTwoFactorEnabled: {
+    isVerified: {
         type: Boolean,
         default: false
+    },
+
+    accountStatus: {
+        type: String,
+        enum: ['active', 'suspended', 'deleted'],
+        default: 'active'
     },
 
     postsCount: {
@@ -142,15 +131,52 @@ const userSchema = new mongoose.Schema(
         default: 0
     },
 
-    totalLikesCount: {
+    totalLikes: {
         type: Number,
         default: 0
     },
 
-    encryptionPublicKey: {
+    // 🔐 Two-Factor Authentication
+    isTwoFactorEnabled: {
+        type: Boolean,
+        default: false
+    },
+
+    twoFactorSecret: {
         type: String,
-        sparse: true
-    }
+        default: null,
+        select: false
+    },
+
+    // 🔑 Refresh Tokens for Multi-Device Support
+    refreshTokens: [
+        {
+            token: {
+                type: String,
+                required: true
+            },
+            deviceId: {
+                type: String,
+                default: 'unknown'
+            },
+            ipAddress: {
+                type: String,
+                default: null
+            },
+            userAgent: {
+                type: String,
+                default: null
+            },
+            expiresAt: {
+                type: Date,
+                required: true
+            },
+            createdAt: {
+                type: Date,
+                default: Date.now
+            }
+        }
+    ]
 },
 {
     timestamps: true

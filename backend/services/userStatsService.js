@@ -15,7 +15,7 @@ const initializeUserStats = async (userId) => {
         postsCount: 0,
         followersCount: 0,
         followingCount: 0,
-        totalLikesCount: 0,
+        totalLikes: 0,
         commentsCount: 0,
         engagementScore: 0,
       });
@@ -109,14 +109,14 @@ const getUserStats = async (userId) => {
     if (!userStats) {
       // Calculate stats from database if UserStats doesn't exist
       const Post = require('../models/Post');
-      const Follow = require('../models/Follow');
+      const Follower = require('../models/Follower');
       const Like = require('../models/Like');
       
       const [postsCount, followersCount, followingCount, likesCount] = await Promise.all([
-        Post.countDocuments({ user: userId }),
-        Follow.countDocuments({ following: userId }),
-        Follow.countDocuments({ follower: userId }),
-        Like.countDocuments({ user: userId }),
+        Post.countDocuments({ author: userId }),
+        Follower.countDocuments({ following: userId }),
+        Follower.countDocuments({ follower: userId }),
+        Like.countDocuments({ user: userId, targetType: 'post' }),
       ]);
       
       // Create the UserStats document with computed values
@@ -125,7 +125,7 @@ const getUserStats = async (userId) => {
         postsCount,
         followersCount,
         followingCount,
-        totalLikesCount: likesCount,
+        totalLikes: likesCount,
         commentsCount: 0,
         engagementScore: 0,
       });
@@ -148,7 +148,7 @@ const migrateStatsFromUser = async () => {
   try {
     console.log('🔄 Starting stats migration from User to UserStats...');
     
-    const users = await User.find().select('_id postsCount followersCount followingCount totalLikesCount');
+    const users = await User.find().select('_id postsCount followersCount followingCount totalLikes');
     let migratedCount = 0;
 
     for (const user of users) {
@@ -159,7 +159,7 @@ const migrateStatsFromUser = async () => {
           postsCount: user.postsCount || 0,
           followersCount: user.followersCount || 0,
           followingCount: user.followingCount || 0,
-          totalLikesCount: user.totalLikesCount || 0,
+          totalLikes: user.totalLikes || 0,
           commentsCount: 0, // new field, default 0
           engagementScore: 0, // new field, default 0
         },

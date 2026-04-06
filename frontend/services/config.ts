@@ -2,6 +2,7 @@
 // export const SOCKET_URL = 'https://astrachitchat.onrender.com/';
 // export const PROFILE_API_URL = `${API_URL}/profile`;
 
+// ✅ Use your Windows machine IP for Android device (NOT localhost)
 export const API_URL = 'http://localhost:5000/api';
 export const SOCKET_URL = 'http://localhost:5000/';
 export const PROFILE_API_URL = `${API_URL}/profile`;
@@ -10,8 +11,6 @@ export const PROFILE_API_URL = `${API_URL}/profile`;
 // export const API_URL = 'https://your-production-api.com/api';
 // export const SOCKET_URL = 'https://your-production-api.com';
 
-
-
-// When you deploy, you can easily swap these out:
+// When deploying to production, swap the above localhost URLs with your deployed backend:
 // export const API_URL = 'https://your-production-api.com/api';
 // export const SOCKET_URL = 'https://your-production-api.com';

@@ -1,285 +1,373 @@
 const mongoose = require('mongoose');
 const Post = require('../models/Post');
+const Like = require('../models/Like');
 const User = require('../models/User');
-const { deleteS3Object } = require('../services/mediaService');
+const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { incrementStat, decrementStat } = require('../services/userStatsService');
 
-// @desc    Create a new post
+// ─── Create Post ──────────────────────────────────────────────────────────────
 // @route   POST /api/posts/upload
-// @access  Private (uses 'protect' middleware)
+// @access  Private
 const createPost = async (req, res) => {
-    const { mediaUrl, mediaKey, mediaType, caption } = req.body;
+    const { media, caption, hashtags, visibility, location } = req.body;
 
-    if (!mediaUrl || !mediaType) {
-        return res.status(400).json({ message: 'Media URL and Type are required.' });
+    if (!media || !Array.isArray(media) || media.length === 0) {
+        return res.status(400).json({ message: 'media array is required.' });
     }
 
     try {
         const post = await Post.create({
-            user: req.user._id,
-            mediaUrl,
-            mediaKey,   // S3 object key — used to delete the file when the post is removed
-            mediaType,
-            caption,
+            author:       req.user._id,
+            media:        media,  // Array of Cloudinary objects
+            caption:      caption || '',
+            hashtags:     Array.isArray(hashtags) ? hashtags : [],
+            visibility:   visibility || 'public',
+            location:     location || null,
+            likesCount:   0,
+            commentsCount: 0,
+            sharesCount:  0,
+            savedCount:   0,
         });
 
-        // Update stats using UserStats service (atomically)
         await incrementStat(req.user._id, 'postsCount', 1);
 
-        res.status(201).json({
-            message: 'Post created successfully',
-            post
-        });
+        res.status(201).json({ message: 'Post created successfully', post });
     } catch (error) {
+        console.error('[createPost]', error);
         res.status(500).json({ message: 'Server error: could not create post', error: error.message });
     }
 };
 
-// @desc    Delete a post (and its S3 file)
+// ─── Delete Post ──────────────────────────────────────────────────────────────
 // @route   DELETE /api/posts/:postId
-// @access  Private — only the post owner can delete
+// @access  Private — owner only
 const deletePost = async (req, res) => {
     try {
         const post = await Post.findById(req.params.postId);
 
-        if (!post) {
-            return res.status(404).json({ message: 'Post not found.' });
-        }
+        if (!post) return res.status(404).json({ message: 'Post not found.' });
 
-        // Ownership check
-        if (post.user.toString() !== req.user._id.toString()) {
+        if (post.author.toString() !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Forbidden: you can only delete your own posts.' });
         }
 
-        // Delete from S3 first (best-effort — do not block on S3 failures)
-        if (post.mediaKey) {
-            try {
-                await deleteS3Object(post.mediaKey);
-            } catch (s3Err) {
-                // Log but don't fail the request — the DB record should still be removed
-                console.error('[postController] S3 delete failed for key:', post.mediaKey, s3Err.message);
+        // Delete from Cloudinary (best-effort — don't block on failure)
+        if (post.media && Array.isArray(post.media)) {
+            for (const mediaItem of post.media) {
+                if (mediaItem.public_id) {
+                    try {
+                        await deleteCloudinaryAsset(mediaItem.public_id, mediaItem.resource_type);
+                    } catch (err) {
+                        console.error('[deletePost] Cloudinary delete failed:', mediaItem.public_id, err.message);
+                    }
+                }
             }
         }
 
         await post.deleteOne();
-
-        // Update stats using UserStats service (atomically)
         await decrementStat(req.user._id, 'postsCount', 1);
 
         res.json({ message: 'Post deleted successfully.' });
     } catch (error) {
+        console.error('[deletePost]', error);
         res.status(500).json({ message: 'Server error: could not delete post', error: error.message });
     }
 };
 
-// @desc    Get the social feed (posts from people user follows + trending)
+// ─── Toggle Like ──────────────────────────────────────────────────────────────
+// @route   POST /api/posts/:postId/like
+// @access  Private
+const toggleLike = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const userId = req.user._id;
+
+        if (!mongoose.Types.ObjectId.isValid(postId)) {
+            return res.status(400).json({ message: 'Invalid post ID.' });
+        }
+
+        const post = await Post.findById(postId);
+        if (!post) return res.status(404).json({ message: 'Post not found.' });
+
+        const existingLike = await Like.findOne({
+            user: userId,
+            target: postId,
+            targetType: 'post'
+        });
+
+        if (existingLike) {
+            // Unlike
+            await Like.deleteOne({ _id: existingLike._id });
+            await Post.findByIdAndUpdate(postId, { $inc: { likesCount: -1 } });
+            res.json({
+                liked: false,
+                likes: post.likesCount - 1,
+            });
+        } else {
+            // Like
+            await Like.create({
+                user: userId,
+                target: postId,
+                targetType: 'post'
+            });
+            await Post.findByIdAndUpdate(postId, { $inc: { likesCount: 1 } });
+            res.json({
+                liked: true,
+                likes: post.likesCount + 1,
+            });
+        }
+    } catch (error) {
+        console.error('[toggleLike]', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// ─── Share Post ───────────────────────────────────────────────────────────────
+// @route   POST /api/posts/:postId/share
+// @access  Private (fire-and-forget)
+const sharePost = async (req, res) => {
+    // Respond immediately — don't make client wait
+    res.json({ message: 'Share recorded', postId: req.params.postId });
+
+    // Async increment in background
+    Post.findByIdAndUpdate(req.params.postId, { $inc: { sharesCount: 1 } })
+        .catch(err => console.error('[sharePost] increment failed:', err.message));
+};
+
+// ─── Feed Posts ───────────────────────────────────────────────────────────────
 // @route   GET /api/posts/feed
 // @access  Private
 const getFeedPosts = async (req, res) => {
     const pageSize = 10;
-    const page = Number(req.query.page) || 1;
-    const category = req.query.category || 'for-you';
-
-    // Validate inputs
-    if (page < 1) {
-        return res.status(400).json({ message: 'Page must be >= 1' });
-    }
+    const page     = Math.max(Number(req.query.page) || 1, 1);
+    const category = (req.query.category || 'for-you').toLowerCase();
+    const userId   = req.user._id;
 
     try {
         let filter = {};
+        let sort   = { createdAt: -1 };
 
-        // Apply category filter
-        switch (category.toLowerCase()) {
+        switch (category) {
             case 'trending':
-                filter = {
-                    createdAt: { 
-                        $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) 
-                    }
-                };
+                filter = { createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } };
+                sort   = { likesCount: -1, createdAt: -1 };  // sort by engagement
                 break;
             case 'videos':
-                filter = { mediaType: { $in: ['flick', 'video'] } };
+            case 'flicks':
+                filter = { 'media.resource_type': 'video' };
                 break;
             case 'images':
-                filter = { mediaType: 'image' };
-                break;
             case 'posts':
-                // Posts category: image posts only (exclude videos)
-                filter = { mediaType: 'image' };
+                filter = { 'media.resource_type': 'image' };
                 break;
-            default:
-                filter = {};
+            case 'for-you':
+            default: {
+                // Show posts from people they follow; fall back to all if no follows
+                const currentUser = await User.findById(userId).select('following').lean();
+                if (currentUser?.following?.length > 0) {
+                    filter = { author: { $in: currentUser.following } };
+                }
+                break;
+            }
         }
 
-        // Fetch one extra to determine if more posts exist
+        // ✅ FIX: Optimize query execution
+        // 1. Use select() to only fetch needed fields initially
+        // 2. Fetch one extra to determine hasMore
+        // 3. Use .lean() early for better performance
         const posts = await Post.find(filter)
-            .sort({ createdAt: -1 })
+            .select('author caption media likesCount commentsCount createdAt')
+            .sort(sort)
             .limit(pageSize + 1)
             .skip(pageSize * (page - 1))
-            .populate('user', 'name username profilePicture')
-            .lean();
+            .lean()
+            .exec();
 
-        // Determine if there are more pages
-        const hasMore = posts.length > pageSize;
-        const data = posts.slice(0, pageSize);
+        // Populate author with needed fields after lean
+        const postsWithAuthor = await Promise.all(
+            posts.map(async (post) => {
+                const author = await User.findById(post.author)
+                    .select('name username profilePicture')
+                    .lean();
+                return { ...post, author };
+            })
+        );
 
-        // Sanitize response
-        const sanitized = data.map(post => ({
-            _id: post._id || '',
-            mediaUrl: post.mediaUrl || '',
-            mediaType: post.mediaType || 'post',
-            caption: post.caption || '',
-            // Determine type: video, photo, or text
-            type: post.mediaType === 'flick' ? 'video' : (post.mediaUrl && post.mediaType === 'image' ? 'photo' : 'text'),
-            user: {
-                _id: post.user?._id || '',
-                username: post.user?.username || 'unknown',
-                profilePicture: post.user?.profilePicture || ''
-            },
-            createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
-            // Convert array to count
-            likes: Array.isArray(post.likes) ? post.likes.length : (Number(post.likes) || 0),
-            comments: Array.isArray(post.comments) ? post.comments.length : (Number(post.comments) || 0),
-            hashtags: Array.isArray(post.hashtags) ? post.hashtags : []
-        }));
+        const hasMore = postsWithAuthor.length > pageSize;
+        const data = postsWithAuthor.slice(0, pageSize);
 
-        res.json({
-            posts: sanitized,
-            page,
-            hasMore,
-            category
-        });
+        const sanitized = data.map(post => sanitizePost(post, userId));
+
+        res.json({ posts: sanitized, page, hasMore, category });
     } catch (error) {
         console.error('[getFeedPosts]', error);
-        res.status(500).json({ 
-            message: 'Server error: could not fetch posts', 
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        res.status(500).json({
+            message: 'Server error: could not fetch posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
 };
 
-// @desc    Get short videos (flicks)
+// ─── Short Videos / Flicks ────────────────────────────────────────────────────
 // @route   GET /api/posts/flicks
 // @access  Private
 const getShortVideos = async (req, res) => {
     const pageSize = 10;
-    const page = Number(req.query.page) || 1;
+    const page     = Math.max(Number(req.query.page) || 1, 1);
+    const userId   = req.user._id;
 
     try {
-        // Fetch posts where mediaType is 'flick'
-        const flicks = await Post.find({ mediaType: 'flick' })
-            .sort({ createdAt: -1 }) // Sort by newest first
-            .limit(pageSize)
+        // ✅ FIX: Optimize video query
+        const raw = await Post.find({ 'media.resource_type': 'video' })
+            .select('author caption media likesCount commentsCount createdAt')
+            .sort({ createdAt: -1 })
+            .limit(pageSize + 1)
             .skip(pageSize * (page - 1))
-            .populate('user', 'name username profilePicture');
+            .lean()
+            .exec();
 
-        res.json({ flicks, page });
+        // Populate author with needed fields after lean
+        const postsWithAuthor = await Promise.all(
+            raw.map(async (post) => {
+                const author = await User.findById(post.author)
+                    .select('name username profilePicture')
+                    .lean();
+                return { ...post, author };
+            })
+        );
+
+        const hasMore = postsWithAuthor.length > pageSize;
+        const data = postsWithAuthor.slice(0, pageSize);
+
+        res.json({
+            posts:    data.map(post => sanitizePost(post, userId)),
+            page,
+            hasMore,
+            category: 'flicks',
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Server error: could not fetch flicks', error: error.message });
+        console.error('[getShortVideos]', error);
+        res.status(500).json({ message: 'Server error: could not fetch videos', error: error.message });
     }
 };
 
-// @desc    Get posts for a specific user by ID
+// ─── User Posts by ID ─────────────────────────────────────────────────────────
 // @route   GET /api/posts/user/:userId
 // @access  Private
 const getUserPostsById = async (req, res) => {
+    const { userId } = req.params;
+    const requesterId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({ message: 'Invalid user ID format.' });
+    }
+
     try {
-        const { userId } = req.params;
-
-        // Validate userId is a valid MongoDB ObjectId
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({ message: 'Invalid user ID format.' });
-        }
-
-        const posts = await Post.find({ user: userId })
+        const posts = await Post.find({ author: userId })
             .sort({ createdAt: -1 })
-            .populate('user', 'name username profilePicture');
+            .populate('author', 'name username profilePicture')
+            .lean();
 
-        res.json({ posts });
+        res.json({ posts: posts.map(p => sanitizePost(p, requesterId)) });
     } catch (error) {
         res.status(500).json({ message: 'Server error: could not fetch user posts', error: error.message });
     }
 };
 
-// @desc    Get posts for the current user
+// ─── Own Posts ────────────────────────────────────────────────────────────────
 // @route   GET /api/posts/me
 // @access  Private
 const getUserPosts = async (req, res) => {
+    const userId = req.user._id;
     try {
-        const posts = await Post.find({ user: req.user._id })
+        const posts = await Post.find({ author: userId })
             .sort({ createdAt: -1 })
-            .populate('user', 'name username profilePicture');
+            .populate('author', 'name username profilePicture')
+            .lean();
 
-        res.json({ posts });
+        res.json({ posts: posts.map(p => sanitizePost(p, userId)) });
     } catch (error) {
         res.status(500).json({ message: 'Server error: could not fetch user posts', error: error.message });
     }
 };
 
-// @desc    Search posts by caption, hashtags, or username
-// @route   GET /api/posts/search
+// ─── Search Posts ─────────────────────────────────────────────────────────────
+// @route   GET /api/posts/search?q=...
 // @access  Private
 const searchPosts = async (req, res) => {
     const { q, limit = 20 } = req.query;
+    const userId = req.user._id;
 
-    // Validate search query
-    if (!q || typeof q !== 'string' || q.trim().length === 0) {
-        return res.status(400).json({ message: 'Search query is required' });
+    if (!q || typeof q !== 'string' || !q.trim()) {
+        return res.status(400).json({ message: 'Search query is required.' });
     }
-
     if (q.length > 100) {
-        return res.status(400).json({ message: 'Search query too long (max 100 chars)' });
+        return res.status(400).json({ message: 'Search query too long (max 100 chars).' });
     }
 
     try {
-        const searchLimit = Math.min(Number(limit) || 20, 100);
-        
-        // Escape special regex characters to prevent regex injection
+        const searchLimit  = Math.min(Number(limit) || 20, 100);
         const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const searchRegex = new RegExp(escapedQuery, 'i');
+        const searchRegex  = new RegExp(escapedQuery, 'i');
+
+        // Find matching users first (can't query populated fields in MongoDB)
+        const matchingUsers = await User.find({ username: searchRegex }).select('_id').lean();
+        const userIds       = matchingUsers.map(u => u._id);
 
         const posts = await Post.find({
             $or: [
-                { caption: searchRegex },
+                { caption:  searchRegex },
                 { hashtags: searchRegex },
-                { 'user.username': searchRegex }
-            ]
+                { author:     { $in: userIds } },   // ✅ correct way to search by username
+            ],
         })
             .sort({ createdAt: -1 })
             .limit(searchLimit)
-            .populate('user', 'name username profilePicture')
+            .populate('author', 'name username profilePicture')
             .lean();
 
-        // Sanitize response to ensure data integrity
-        const sanitized = posts.map(post => ({
-            _id: post._id || '',
-            mediaUrl: post.mediaUrl || '',
-            mediaType: post.mediaType || 'post',
-            caption: post.caption || '',
-            user: {
-                _id: post.user?._id || '',
-                username: post.user?.username || 'unknown',
-                profilePicture: post.user?.profilePicture || ''
-            },
-            createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
-            likes: Number(post.likes || 0),
-            comments: Number(post.comments || 0),
-            hashtags: Array.isArray(post.hashtags) ? post.hashtags : []
-        }));
-
-        res.json({ posts: sanitized });
+        res.json({ posts: posts.map(p => sanitizePost(p, userId)) });
     } catch (error) {
         console.error('[searchPosts]', error);
         res.status(500).json({
             message: 'Search failed',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
     }
 };
 
+// ─── Shared sanitizer (keeps all handlers consistent) ────────────────────────
+function sanitizePost(post, requesterId) {
+    const primaryMedia = post.media && post.media.length > 0 ? post.media[0] : {};
+    
+    return {
+        _id:          post._id || '',
+        secure_url:   primaryMedia.secure_url || '',
+        resource_type: primaryMedia.resource_type || 'image',
+        caption:      post.caption || '',
+        hashtags:     Array.isArray(post.hashtags) ? post.hashtags : [],
+        type:         primaryMedia.resource_type === 'video' ? 'video' : 'photo',
+        author: {
+            _id:            post.author?._id || '',
+            username:       post.author?.username || 'unknown',
+            profilePicture: post.author?.profilePicture || '',
+            name:           post.author?.name || '',
+        },
+        createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
+        likes:     post.likesCount || 0,
+        isLiked:   false, // Will be determined by frontend based on Like collection
+        comments:  post.commentsCount || 0,
+        shares:    post.sharesCount || 0,
+        visibility: post.visibility || 'public',
+        location:  post.location || null,
+    };
+}
+
 module.exports = {
     createPost,
     deletePost,
+    toggleLike,
+    sharePost,
     getFeedPosts,
     getShortVideos,
     getUserPosts,

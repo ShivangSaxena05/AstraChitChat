@@ -63,9 +63,10 @@ const searchAll = async (req, res) => {
     const sanitizedPosts = posts.map(post => ({
       _id: post._id || '',
       mediaUrl: post.mediaUrl || '',
-      mediaType: post.mediaType || 'post',
+      mediaType: post.mediaType || 'text',
       caption: post.caption || '',
-      type: post.mediaType === 'flick' ? 'video' : (post.mediaUrl ? 'photo' : 'text'),
+      duration: post.duration || null,
+      type: post.mediaType === 'video' ? 'video' : (post.mediaUrl ? 'photo' : 'text'),
       user: {
         _id: post.user?._id || '',
         username: post.user?.username || 'unknown',
@@ -81,7 +82,8 @@ const searchAll = async (req, res) => {
       users: sortedUsers, 
       posts: sanitizedPosts,
       page: 1,
-      hasMore: false
+      hasMore: false,
+      category: 'search'
     });
   } catch (error) {
     console.error('Search error:', error);

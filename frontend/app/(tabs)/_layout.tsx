@@ -1,83 +1,62 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useRouter, useFocusEffect } from 'expo-router';
-import React, { useEffect, useRef } from 'react';
-import { StyleSheet, AppState, AppStateStatus } from 'react-native';
+import { Tabs } from 'expo-router';
+import React from 'react';
 
+import BottomTabBarComponent from '@/components/BottomTabBarComponent';
+import HamburgerMenu from '@/components/HamburgerMenu';
+import { HapticTab } from '@/components/haptic-tab';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useTheme } from '@/hooks/use-theme-color';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const colors = useTheme();
-  const router = useRouter();
-  const appState = useRef(AppState.currentState);
-
-  // Check auth status on component mount
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  // Also check auth status when screen is focused (when returning from other screens)
-  useFocusEffect(
-    React.useCallback(() => {
-      verifyAuthStatus();
-    }, [])
-  );
-
-  const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-    // If the app is coming to foreground from background/inactive state
-    if (
-      appState.current.match(/inactive|background/) &&
-      nextAppState === 'active'
-    ) {
-      // Verify auth status when app resumes
-      await verifyAuthStatus();
-    }
-
-    appState.current = nextAppState;
-  };
-
-  const verifyAuthStatus = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        // If token is missing, redirect to login
-        router.replace('/auth/login');
-      }
-    } catch (error) {
-      console.error('Error verifying auth status:', error);
-      router.replace('/auth/login');
-    }
-  };
 
   return (
-    <Stack>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="chat" options={{ headerShown: false, presentation: 'modal' }} />
-    </Stack>
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerShown: false,
+        tabBarButton: HapticTab,
+      }}
+      tabBar={(props) => <BottomTabBarComponent {...props} />}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="chat-list"
+        options={{
+          title: 'Chat',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="t.bubble.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="upload"
+        options={{
+          title: 'Create',
+          href: null, // Hidden from tab bar - accessed via FAB
+          tabBarIcon: ({ color }) => <IconSymbol size={32} name="plus.circle.fill" color="#4ADDAE" />,
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Notifications',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="bell.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.fill" color={color} />,
+          headerShown: false,
+        }}
+      />
+
+    </Tabs>
   );
-
 }
-
-const styles = StyleSheet.create({
-  uploadButton: {
-    top: -10,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: 'rgba(0,0,0,0.3)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
-    borderWidth: 3,
-    // borderColor will be set dynamically
-  },
-});

@@ -1,6 +1,6 @@
 import { get } from "@/services/api";
 import { SOCKET_URL } from "@/services/config";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import secureTokenManager from "@/services/secureTokenManager";
 import React, {
     createContext,
     ReactNode,
@@ -101,6 +101,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [offlineQueue, setOfflineQueue] = useState<MessageQueueItem[]>([]);
+  const [userKeys, setUserKeys] = useState<{ publicKey: string; secretKey: string } | null>(null);
   
   const initializedRef = useRef(false);
   const socketRef = useRef<Socket | null>(null);
@@ -314,10 +315,11 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   // ========================================================================
   // Global Socket Listeners
   // ========================================================================
+  // ✅ FIX BUG 6: Register conversation listener ONLY once, not in both connect and here
   useEffect(() => {
     if (!socket) return;
 
-    // Listen for conversation updates globally
+    // Listen for conversation updates globally (only registered once)
     socket.on("conversationUpdated", updateConversation);
 
     return () => {
@@ -325,17 +327,66 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, [socket, updateConversation]);
 
-  // ✅ FIX: Robust socket connection with validation
+  // ✅ FIX: Robust socket connection with validation using secure storage
   const connect = useCallback(async (force = false) => {
     if (initializedRef.current && !force) return;
     if (force) initializedRef.current = false;
 
     try {
-      const token = await AsyncStorage.getItem("token");
-      const userId = await AsyncStorage.getItem("userId");
+      // ✅ SECURE: Retrieve token from encrypted storage
+      const token = await secureTokenManager.getToken();
+      const userId = await secureTokenManager.getUserId();
 
       if (!token || !userId || typeof userId !== "string" || !userId.trim()) {
         console.warn('[Socket] Cannot connect: missing credentials');
+        return;
+      }
+
+      // ✅ CRITICAL FIX: Validate token BEFORE attempting socket connection
+      // This prevents connecting to socket with an invalid/expired token
+      // which would then cause a 401 error and clear the token
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+          console.warn('[Socket] Invalid token format');
+          await secureTokenManager.clearAll();
+          return;
+        }
+
+        // ✅ FIX BUG 9: Use base64-js or Buffer instead of atob for React Native compatibility
+        // atob is a browser API and not available in React Native's Hermes engine
+        let payload;
+        try {
+          // Try native Buffer first (works in React Native and Node)
+          payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        } catch (bufferError) {
+          // Fallback to atob for web environments
+          try {
+            payload = JSON.parse(atob(parts[1]));
+          } catch (atobError) {
+            console.warn('[Socket] Failed to decode token payload:', atobError);
+            await secureTokenManager.clearAll();
+            return;
+          }
+        }
+        
+        // Check expiration
+        const now = Math.floor(Date.now() / 1000);
+        if (payload.exp && payload.exp < now) {
+          console.warn('[Socket] Token is expired');
+          await secureTokenManager.clearAll();
+          return;
+        }
+
+        // Verify payload contains required field — backend signs with 'id'
+        if (!payload.id && !payload._id && !payload.userId) {
+          console.warn('[Socket] Token payload missing user ID');
+          await secureTokenManager.clearAll();
+          return;
+        }
+      } catch (tokenError) {
+        console.error('[Socket] Token validation failed:', tokenError);
+        await secureTokenManager.clearAll();
         return;
       }
 
@@ -353,12 +404,19 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       const newSocket = io(SOCKET_URL, {
         auth: { token },
         transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionAttempts: 15,
-        reconnectionDelay: 1000,
-        randomizationFactor: 0.5,
-        reconnectionDelayMax: 10000,
-        timeout: 30000,
+        
+        // ✅ AUTO-RECONNECTION CONFIGURATION (ENHANCED)
+        reconnection: true, // Enable auto-reconnect
+        reconnectionDelay: 1000, // Start with 1s delay
+        reconnectionDelayMax: 5000, // Max 5s between attempts
+        reconnectionAttempts: Infinity, // Keep trying forever (critical for mobile)
+        randomizationFactor: 0.5, // Randomize to avoid thundering herd
+        
+        // ✅ TIMEOUT SETTINGS
+        timeout: 20000, // 20s connection timeout
+        
+        // ✅ OTHER CRITICAL SETTINGS
+        autoConnect: true, // Auto-connect on creation
         query: { EIO: "4" },
         forceNew: force,
       });
@@ -366,11 +424,27 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       socketRef.current = newSocket;
 
       newSocket.on("connect", async () => {
+        console.log('[Socket] Connected successfully');
         setIsConnected(true);
         setIsOnline(true);
         initializedRef.current = true;
         
         newSocket.emit("setup", { _id: userId, isOnline: true });
+
+        // ✅ FIX BUG 7: Load user encryption keys on connection
+        try {
+          const keysData = await get("/user/encryption-keys");
+          if (keysData && keysData.publicKey && keysData.secretKey) {
+            setUserKeys({
+              publicKey: keysData.publicKey,
+              secretKey: keysData.secretKey,
+            });
+            console.log('[Socket] User encryption keys loaded');
+          }
+        } catch (error) {
+          console.warn('[Socket] Error loading encryption keys:', error);
+          // Non-critical, continue without keys
+        }
 
         // Load initial conversations
         try {
@@ -405,11 +479,106 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       });
 
       newSocket.on("disconnect", (reason) => {
+        console.warn('[Socket] Disconnected. Reason:', reason);
+        setIsConnected(false);
+        setIsOnline(false);
+        
+        // Some reasons (like "io server disconnect") require manual reconnection
+        if (reason === "io server disconnect") {
+          console.log('[Socket] Server disconnected, attempting manual reconnection');
+          newSocket.connect();
+        }
+      });
+
+      // ✅ ENHANCED: Connection error handler
+      newSocket.on("connect_error", (error: any) => {
+        console.warn('[Socket] Connection error:', error?.message || error);
+        setIsConnected(false);
+        // Socket.io will automatically retry
+      });
+
+      // ✅ CRITICAL FIX: Auth error handler
+      // If socket auth fails (401), clear tokens and stop reconnecting
+      newSocket.on("auth_error", (error: any) => {
+        console.error('[Socket] Authentication error:', error?.message || error);
+        setIsConnected(false);
+        setIsOnline(false);
+        initializedRef.current = false;
+        
+        // Clear tokens to force re-login
+        secureTokenManager.clearAll().catch((e) => {
+          console.error('[Socket] Error clearing tokens:', e);
+        });
+        
+        // Disconnect to stop auto-reconnection attempts
+        newSocket.disconnect();
+      });
+
+      // ✅ ENHANCED: Reconnection attempt handler
+      newSocket.on("reconnect_attempt", () => {
+        console.log('[Socket] Reconnection attempt in progress...');
+      });
+
+      // ✅ ENHANCED: Reconnection success handler
+      newSocket.on("reconnect", async (attemptNumber) => {
+        console.log('[Socket] Reconnected successfully after attempt:', attemptNumber);
+        setIsConnected(true);
+        setIsOnline(true);
+        
+        // Re-emit setup to server on reconnect
+        newSocket.emit("setup", { _id: userId, isOnline: true });
+        
+        // ✅ FIX BUG 7: Reload user encryption keys on reconnect
+        try {
+          const keysData = await get("/user/encryption-keys");
+          if (keysData && keysData.publicKey && keysData.secretKey) {
+            setUserKeys({
+              publicKey: keysData.publicKey,
+              secretKey: keysData.secretKey,
+            });
+            console.log('[Socket] User encryption keys reloaded after reconnect');
+          }
+        } catch (error) {
+          console.warn('[Socket] Error reloading encryption keys after reconnect:', error);
+        }
+        
+        // Sync state after reconnection
+        try {
+          const data = await get("/chats");
+          if (data && Array.isArray(data)) {
+            const uniqueChats = Array.from(
+              new Map(data.map(chat => [chat._id, chat])).values()
+            );
+            const validChats = uniqueChats.filter(
+              (chat) => chat.lastMessage?.text || chat.lastMessage?.createdAt
+            );
+            setConversations(validChats.sort((a: any, b: any) => {
+              const aTime = a.lastMessage?.createdAt
+                ? new Date(a.lastMessage.createdAt).getTime()
+                : new Date(a.updatedAt || 0).getTime();
+              const bTime = b.lastMessage?.createdAt
+                ? new Date(b.lastMessage.createdAt).getTime()
+                : new Date(b.updatedAt || 0).getTime();
+              return bTime - aTime;
+            }));
+          }
+        } catch (error) {
+          console.error('[Socket] Error syncing conversations after reconnect:', error);
+        }
+        
+        // Process any queued messages
+        processOfflineQueue();
+      });
+
+      // ✅ ENHANCED: Reconnection failed handler
+      newSocket.on("reconnect_failed", () => {
+        console.error('[Socket] Reconnection failed permanently');
         setIsConnected(false);
         setIsOnline(false);
       });
 
-      newSocket.on("userStatus", (data: { userId: string; isOnline: boolean }) => {
+      // ✅ User status listener - matches backend 'user online' event
+      newSocket.on("user online", (data: { userId: string; isOnline: boolean; lastSeen?: string }) => {
         setOnlineUsers((prev) => {
           const newMap = new Map(prev);
           newMap.set(data.userId, data.isOnline);
@@ -418,17 +587,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       });
 
       newSocket.on("conversationUpdated", updateConversation);
-
-      newSocket.on("connect_error", (error) => {
-        setIsConnected(false);
-        setIsOnline(false);
-      });
-
-      newSocket.on("reconnect", () => {
-        setIsConnected(true);
-        setIsOnline(true);
-        newSocket.emit("setup", { _id: userId, isOnline: true });
-      });
 
       setSocket(newSocket);
     } catch (error) {
@@ -439,24 +597,43 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   }, [updateConversation, processOfflineQueue]);
 
   const disconnect = useCallback(() => {
+    console.log('[Socket] Disconnecting socket and clearing state');
+    
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current.removeAllListeners();
       socketRef.current = null;
     }
+    
     setSocket(null);
     setIsConnected(false);
     setIsOnline(false);
     setCurrentUserId(null);
+    setUserKeys(null);
+    
+    // ✅ FIX: Clear conversations and active chat on disconnect
+    // This ensures no stale data from previous account remains
+    setConversations([]);
+    setActiveChatId(null);
+    setOnlineUsers(new Map());
+    setOfflineQueue([]);
+    
     initializedRef.current = false;
+    console.log('[Socket] Socket and state cleared');
   }, []);
 
+  // Use refs to hold stable references so the effect only runs once on mount
+  const connectRef = useRef(connect);
+  const disconnectRef = useRef(disconnect);
+  useEffect(() => { connectRef.current = connect; }, [connect]);
+  useEffect(() => { disconnectRef.current = disconnect; }, [disconnect]);
+
   useEffect(() => {
-    connect();
+    connectRef.current();
     return () => {
-      disconnect();
+      disconnectRef.current();
     };
-  }, []);
+  }, []); // Empty deps — only run on mount/unmount
 
   return (
     <SocketContext.Provider
@@ -466,7 +643,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         isOnline,
         currentUserId,
         onlineUsers,
-        userKeys: null,
+        userKeys,
         conversations,
         setConversations,
         updateConversation,

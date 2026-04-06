@@ -1,3 +1,25 @@
+/**
+ * ⚠️ DEPRECATED: uploadMiddleware.js
+ * 
+ * This middleware has been superseded by:
+ *   - config/multerCloudinary.js (for Cloudinary uploads)
+ *   - services/mediaService.js (for S3 presigned URLs)
+ * 
+ * All routes should now use:
+ *   - /api/media/upload/post
+ *   - /api/media/upload/profile
+ *   - /api/media/upload/story/image
+ *   - /api/media/upload/story/video
+ *   - /api/media/upload/video
+ *   - /api/media/upload/flick
+ *   - /api/media/upload/flick-cover
+ * 
+ * Or for S3 direct uploads:
+ *   - GET /api/media/presigned-url
+ * 
+ * Legacy support (DO NOT USE IN NEW CODE):
+ */
+
 const multer = require('multer');
 const multerS3 = require('multer-s3');
 const s3 = require('../config/s3');
@@ -9,11 +31,18 @@ const STORAGE_TYPE = process.env.STORAGE_TYPE || 'cloudinary';
 const createCloudinaryStorage = (folder) => {
     return new CloudinaryStorage({
         cloudinary: cloudinary,
-        params: {
-            folder: `Astra/${folder}`,
-            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'ogg'],
-            resource_type: 'auto',
-            transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+        params: async (req, file, cb) => {
+            const userId = req.user?._id?.toString() || 'anonymous';
+            const timestamp = Date.now();
+            const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+            
+            cb(null, {
+                folder: `myapp/${folder}/${userId}`,
+                allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'wav', 'ogg'],
+                resource_type: 'auto',
+                public_id: `${timestamp}-${safeFileName}`,
+                transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+            });
         }
     });
 };
@@ -51,7 +80,7 @@ const createUpload = (folder, getOwnerId) => {
     return multer({ storage: createCloudinaryStorage(folder) });
 };
 
-const upload = createUpload('posts');
+const upload = createUpload('images/posts/original');
 
 module.exports = upload;
 module.exports.createUpload = createUpload;

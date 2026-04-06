@@ -1,22 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, useColorScheme } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
 import { useSocket } from '@/contexts/SocketContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { handleErrorResponse } from '@/services/errorHandler';
 import { useTheme } from '@/hooks/use-theme-color';
+import secureTokenManager from '@/services/secureTokenManager';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [requires2FA, setRequires2FA] = useState(false);
   const [mfaToken, setMfaToken] = useState('');
   const [userId, setUserId] = useState('');
   const [mfaTimer, setMfaTimer] = useState(300); // 5 minutes
-  const router = useRouter();
   const { connect } = useSocket();
+  const { signIn } = useAuth();
+  const router = useRouter();
   const colors = useTheme();
 
   // ✅ FIX 1.3: 2FA Timeout protection
@@ -45,16 +50,40 @@ export default function LoginScreen() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // ✅ FIX 1.2: Improved account handling with validation
+  // ✅ FIX 1.2: Improved account handling with validation and secure token storage
   const completeLogin = async (data: any) => {
     try {
-      if (!data.token || !data._id) {
+      console.log('[Login] 🔐 Completing login...');
+      
+      // Backend returns accessToken, frontend also accepts token
+      const token = data.token || data.accessToken;
+      
+      console.log('[Login] Received data:', {
+        hasToken: !!token,
+        tokenLength: token?.length,
+        hasId: !!data._id,
+        userId: data._id,
+      });
+
+      if (!token || !data._id) {
         throw new Error('Invalid response from server: missing token or user ID');
       }
 
-      // Store token and userId
-      await AsyncStorage.setItem('token', data.token);
-      await AsyncStorage.setItem('userId', data._id);
+      console.log('[Login] 💾 Storing token in secure storage...');
+      // ✅ SECURE: Store token in encrypted storage (Keychain/Keystore)
+      await secureTokenManager.setToken(token);
+      console.log('[Login] ✅ Token stored successfully');
+
+      // ✅ SECURE: Store refresh token if provided
+      if (data.refreshToken) {
+        console.log('[Login] 💾 Storing refresh token...');
+        await secureTokenManager.setRefreshToken(data.refreshToken);
+        console.log('[Login] ✅ Refresh token stored');
+      }
+
+      // ✅ SECURE: Store user ID
+      await secureTokenManager.setUserId(data._id);
+      console.log('[Login] ✅ User ID stored');
 
       // Multi-account support with validation
       const savedAccountsStr = await AsyncStorage.getItem('saved_accounts');
@@ -77,9 +106,10 @@ export default function LoginScreen() {
         acc && acc.userId && acc.userId === data._id
       );
 
+      // ⚠️ SECURITY: DO NOT STORE TOKEN IN ACCOUNTS
+      // Tokens are stored in secure storage only
       const accountData = {
         userId: data._id,
-        token: data.token,
         username: data.username?.trim() || data.name?.trim() || email.split('@')[0],
         profilePicture: data.profilePicture || 'https://via.placeholder.com/40',
       };
@@ -95,19 +125,12 @@ export default function LoginScreen() {
 
       await AsyncStorage.setItem('saved_accounts', JSON.stringify(savedAccounts));
 
-      // ✅ FIX 1.4: Wait for socket connection before navigation
-      try {
-        await connect();
-        // Give socket time to establish connection
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (error) {
-        console.warn('Socket connection failed, proceeding anyway:', error);
-        // Continue even if socket fails
-      }
-
-      // Navigate only after all operations complete
-      router.replace('/(tabs)' as any);
+      // After storing credentials, trigger signIn() which flips isSignedIn
+      // in AuthContext — _layout.tsx re-renders and switches to authenticated routes.
+      console.log('[Login] ✅ Calling signIn() to switch to authenticated routes...');
+      await signIn(connect);
     } catch (error: any) {
+      console.error('[Login] ❌ Login error:', error);
       Alert.alert('Login Error', error.message || 'Failed to complete login');
       setLoading(false);
     }
@@ -188,14 +211,27 @@ export default function LoginScreen() {
             autoCapitalize="none"
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.passwordContainer}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              style={styles.eyeIcon}
+              onPress={() => setShowPassword(!showPassword)}
+              disabled={loading}
+            >
+              <Ionicons
+                name={showPassword ? 'eye' : 'eye-off'}
+                size={24}
+                color={colors.text}
+              />
+            </TouchableOpacity>
+          </View>
         </>
       ) : (
         <>
@@ -263,6 +299,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     fontSize: 16,
   },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 10,
+    paddingRight: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 12,
+    fontSize: 16,
+  },
+  eyeIcon: {
+    padding: 8,
+  },
   button: {
     padding: 15,
     borderRadius: 8,
@@ -287,4 +339,3 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 });
-

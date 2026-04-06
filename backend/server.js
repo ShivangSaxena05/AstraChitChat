@@ -46,7 +46,9 @@ const authLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => {
-        // FIX: Don't rate limit signup (only rate limit login for security)
+        // NOTE: req.path here is ROUTER-RELATIVE (e.g. '/register', not '/api/auth/register')
+        // because Express strips the prefix when the limiter runs. This is intentional — we
+        // skip rate-limiting on register (open sign-ups), but keep it on login to prevent brute-force.
         return req.path === '/register';
     }
 });
@@ -70,6 +72,10 @@ if (process.env.FRONTEND_URL) {
 
 const corsOptions = {
     origin: (origin, callback) => {
+        // In development, allow all origins so physical devices work on LAN
+        if (process.env.NODE_ENV !== 'production') {
+            return callback(null, true);
+        }
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -119,15 +125,18 @@ if (process.env.NODE_ENV !== 'production') {
 
 // ── API Routes ────────────────────────────────────────────────────────────────
 // ✅ FIX: authLimiter is now actually applied to the auth routes
-app.use('/api/auth',    authLimiter, require('./routes/auth'));
-app.use('/api/posts',               require('./routes/postRoutes'));
-app.use('/api/profile',             require('./routes/profileRoutes'));
-app.use('/api/media',               require('./routes/mediaRoutes'));
-app.use('/api/chats',               require('./routes/chatRoutes'));
-app.use('/api/follow',              require('./routes/followRoutes'));
-app.use('/api/users',               require('./routes/userRoutes'));
-app.use('/api/search',              require('./routes/searchRoutes'));
-app.use('/api/report',              require('./routes/reportRoutes'));
+app.use('/api/auth', authLimiter, require('./routes/auth'));
+app.use('/api/posts', require('./routes/postRoutes'));
+app.use('/api/profile', require('./routes/profileRoutes'));
+app.use('/api/media', require('./routes/mediaRoutes'));
+app.use('/api/chats', require('./routes/chatRoutes'));
+app.use('/api/follow', require('./routes/followRoutes'));
+app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/search', require('./routes/searchRoutes'));
+app.use('/api/report', require('./routes/reportRoutes'));
+app.use('/api/stories', require('./routes/storyRoutes'));
+app.use('/api/e2ee', require('./routes/e2eeRoutes'));
+app.use('/api/e2ee', require('./routes/multiDeviceE2eeRoutes'));
 
 app.get('/', (req, res) => res.send('Hello World'));
 
@@ -142,6 +151,8 @@ const socketOrigins = process.env.SOCKET_ORIGINS
         'http://localhost:8081',
         'http://localhost:8082',
         'exp://localhost:8081',
+        'http://10.170.22.72:8081',      // ✅ Android device development
+        'exp://10.170.22.72:8081',       // ✅ Expo development
     ];
 
 const io = new Server(server, {
@@ -397,7 +408,7 @@ io.on('connection', (socket) => {
             const senderRoomId = rawData.sender?.toString() || '';
 
             if (receiverRoomId) io.to(receiverRoomId).emit('conversationUpdated', conversationUpdate);
-            if (senderRoomId)   io.to(senderRoomId).emit('conversationUpdated', conversationUpdate);
+            if (senderRoomId) io.to(senderRoomId).emit('conversationUpdated', conversationUpdate);
 
         } catch (error) {
             console.error('Error saving message:', error);
@@ -406,7 +417,7 @@ io.on('connection', (socket) => {
     });
 
     // ── Typing indicators ─────────────────────────────────────────────────────
-    socket.on('typing',      (room) => socket.in(room).emit('typing'));
+    socket.on('typing', (room) => socket.in(room).emit('typing'));
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
     // ── Read receipts (Blue Ticks) ────────────────────────────────────────────
@@ -792,8 +803,8 @@ io.on('connection', (socket) => {
 // ✅ FIX: Catch undefined routes before error handler
 app.use((req, res, next) => {
     if (!res.headersSent) {
-        res.status(404).json({ 
-            message: 'Route not found', 
+        res.status(404).json({
+            message: 'Route not found',
             path: req.originalUrl,
             method: req.method,
         });

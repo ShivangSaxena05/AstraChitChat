@@ -67,7 +67,7 @@ function serializeUser(user) {
     name: user.name,
     username: user.username,
     email: user.email,
-    profilePicture: user.profilePicture ?? 'https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg',
+    profilePicture: user.profilePicture ?? null,
     coverPhoto: user.coverPhoto ?? '',
     bio: user.bio ?? '',
     location: user.location ?? '',
@@ -77,10 +77,11 @@ function serializeUser(user) {
     lastSeen: user.lastSeen ?? null,
     isPrivate: user.isPrivate ?? false,
     isVerified: user.isVerified ?? false,
+    accountStatus: user.accountStatus ?? 'active',
     postsCount: user.postsCount ?? 0,
     followersCount: user.followersCount ?? 0,
     followingCount: user.followingCount ?? 0,
-    totalLikesCount: user.totalLikesCount ?? 0,
+    totalLikes: user.totalLikes ?? 0,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -151,13 +152,13 @@ function applyPostDefaults(post) {
 function serializePost(post) {
   if (!post) return null;
 
+  const primaryMedia = post.media && post.media.length > 0 ? post.media[0] : {};
+
   return {
     _id: post._id,
-    user: post.user,
+    author: post.author,
     caption: post.caption ?? '',
-    mediaUrl: post.mediaUrl,
-    mediaKey: post.mediaKey ?? null,
-    mediaType: post.mediaType,
+    media: post.media ?? [],
     likesCount: post.likesCount ?? 0,
     commentsCount: post.commentsCount ?? 0,
     sharesCount: post.sharesCount ?? 0,

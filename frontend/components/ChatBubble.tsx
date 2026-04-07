@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useMemo, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Animated, Pressable } from 'react-native';
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme-color';
 
@@ -27,6 +27,56 @@ interface ChatBubbleProps {
 
 export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) {
   const colors = useTheme();
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const opacityAnim = useRef(new Animated.Value(0.9)).current;
+
+  useEffect(() => {
+    // Fade in animation on mount
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+  }, [scaleAnim, opacityAnim]);
+
+  const handlePressIn = () => {
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 0.95,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 0.8,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -58,14 +108,19 @@ export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) 
         <Text style={[styles.senderName, { color: colors.textSecondary }]}>{displayName}</Text>
       )}
 
-      <View
-        style={[
-          styles.bubble,
-          isCurrentUser
-            ? [styles.sentBubble, { backgroundColor: colors.tint }]
-            : [styles.receivedBubble, { backgroundColor: colors.card }],
-        ]}
-      >
+      <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
+        <Animated.View
+          style={[
+            styles.bubble,
+            isCurrentUser
+              ? [styles.sentBubble, { backgroundColor: colors.tint }]
+              : [styles.receivedBubble, { backgroundColor: colors.card }],
+            {
+              transform: [{ scale: scaleAnim }],
+              opacity: opacityAnim,
+            },
+          ]}
+        >
         {message.chatType === 'text' && (
           <ThemedText
             style={[
@@ -92,7 +147,8 @@ export default function ChatBubble({ message, currentUserId }: ChatBubbleProps) 
         <Text style={isCurrentUser ? sentTimestamp : receivedTimestamp}>
           {formatTime(message.createdAt)}
         </Text>
-      </View>
+        </Animated.View>
+      </Pressable>
     </View>
   );
 }

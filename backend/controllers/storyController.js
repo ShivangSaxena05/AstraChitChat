@@ -5,49 +5,86 @@ const { deleteCloudinaryAsset } = require('../services/mediaService');
 // ─── Upload Story ─────────────────────────────────────────────────────────────
 // @route   POST /api/stories
 // @access  Private
+// @body    {
+//            mediaUrl: string (from Cloudinary upload)
+//            mediaPublicId: string (Cloudinary public_id)
+//            mediaType: 'image' | 'video'
+//            textOverlay: Array<{ id, text, fontSize, color }>
+//            drawings: Array (optional, ephemeral)
+//          }
 exports.uploadStory = asyncHandler(async (req, res) => {
     const {
-        mediaUrl,
-        mediaPublicId,    // Cloudinary public_id — required for deletion
-        mediaType,
-        thumbnailUrl,     // for video stories — Cloudinary eager poster
-        duration,
-        textOverlay,
-        drawings,
+        mediaUrl,           // Cloudinary secure_url
+        mediaPublicId,      // Cloudinary public_id — required for deletion
+        mediaType,          // 'image' | 'video'
+        thumbnailUrl,       // optional: for video stories
+        duration,           // optional: video duration
+        textOverlay,        // optional: text overlays
+        drawings,           // optional: drawing overlays
     } = req.body;
 
     const userId = req.user._id;
 
-    if (!mediaUrl || !mediaType) {
-        return res.status(400).json({ success: false, message: 'mediaUrl and mediaType are required.' });
+    // Validate required fields
+    if (!mediaUrl || !mediaPublicId || !mediaType) {
+        return res.status(400).json({
+            success: false,
+            message: 'mediaUrl, mediaPublicId, and mediaType are required.'
+        });
     }
 
     if (!['image', 'video'].includes(mediaType)) {
-        return res.status(400).json({ success: false, message: 'mediaType must be image or video.' });
+        return res.status(400).json({
+            success: false,
+            message: 'mediaType must be image or video.'
+        });
     }
 
-    if (!mediaPublicId) {
-        return res.status(400).json({ success: false, message: 'mediaPublicId is required.' });
-    }
+    // Build media object matching Story schema
+    const media = {
+        public_id: mediaPublicId,
+        secure_url: mediaUrl,
+        resource_type: mediaType,
+        format: mediaType === 'video' ? 'mp4' : 'jpg',
+        thumbnail_url: thumbnailUrl || null,
+        duration: mediaType === 'video' ? (duration || null) : null
+    };
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    // Sanitize text overlays — only keep text content, not position
+    const sanitizedTextOverlay = Array.isArray(textOverlay)
+        ? textOverlay.map(overlay => ({
+              id: overlay.id,
+              text: overlay.text?.trim() || '',
+              fontSize: overlay.fontSize || 24,
+              color: overlay.color || '#FFFFFF'
+              // x, y, rotation intentionally NOT persisted (ephemeral)
+          }))
+        : [];
 
+    // Drawings are typically ephemeral, but include if provided
+    const sanitizedDrawings = Array.isArray(drawings) ? drawings : [];
+
+    // Set expiration to 24 hours from now
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    // Create story
     const story = await Story.create({
-        user:         userId,
-        mediaUrl,
-        mediaPublicId,
-        mediaType,
-        thumbnailUrl:  thumbnailUrl || null,
-        duration:      mediaType === 'video' ? (duration || null) : null,
-        textOverlay:   Array.isArray(textOverlay) ? textOverlay : [],
-        drawings:      Array.isArray(drawings)    ? drawings    : [],
+        author: userId,
+        media,
+        textOverlay: sanitizedTextOverlay,
+        drawings: sanitizedDrawings,
         expiresAt,
-        viewers:       [],
+        visibility: 'public'
     });
 
-    await story.populate('user', 'name username profilePicture');
+    // Populate author details
+    await story.populate('author', 'name username profilePicture');
 
-    res.status(201).json({ success: true, message: 'Story uploaded successfully', data: story });
+    res.status(201).json({
+        success: true,
+        message: 'Story uploaded successfully',
+        data: story
+    });
 });
 
 // ─── Stories Feed (from followed users) ───────────────────────────────────────

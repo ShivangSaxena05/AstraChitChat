@@ -132,7 +132,14 @@ export default function EditProfileScreen() {
           `${(compressedSize / 1024 / 1024).toFixed(2)}MB`
         );
 
-        // Step 3: Upload compressed image (backend handles Cloudinary upload)
+        // Step 3: Upload compressed image
+        // ✅ BACKEND FLOW (Automatic Cleanup):
+        // 1. POST to /api/media/upload/profile-picture
+        // 2. Backend uploads to Cloudinary: myapp/profile/current/{userId}
+        // 3. Backend deletes old profilePublicId from Cloudinary (if exists)
+        // 4. Backend updates User model with new url & publicId
+        // 5. Frontend receives: { url, publicId }
+        // Returns: { url, publicId }
         const fileName = `profile_${Date.now()}.jpg`;
         const { url, publicId } = await uploadProfilePicture(compressedUri, fileName);
         
@@ -158,6 +165,18 @@ export default function EditProfileScreen() {
   const handleSaveChanges = async () => {
     setSaving(true);
     try {
+      // Construct profilePicture as nested object matching schema: { public_id, secure_url, resource_type, version }
+      const profilePictureData = newProfilePublicId && newProfilePictureUrl
+        ? {
+            public_id: newProfilePublicId,
+            secure_url: newProfilePictureUrl,
+            resource_type: 'image',
+            version: Math.floor(Date.now() / 1000),
+          }
+        : newProfilePictureUrl
+        ? newProfilePictureUrl // Fallback to URL string if no public_id
+        : profilePicture; // Keep existing if no changes
+
       await put('/profile/me', {
         name,
         username,
@@ -165,7 +184,7 @@ export default function EditProfileScreen() {
         location,
         website,
         pronouns,
-        profilePicture: newProfilePictureUrl || profilePicture,
+        profilePicture: profilePictureData,
         profilePublicId: newProfilePublicId || profilePublicId,
       });
 

@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { post } from '@/services/api';
+import { uploadStory as createStory } from '@/services/storyService';
+import { uploadStoryImage, uploadStoryVideo, detectMediaTypeFromAsset } from '@/services/mediaService';
 import { useTheme } from '@/hooks/use-theme-color';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -48,6 +50,10 @@ export default function StoryCamera() {
 
   const [mode, setMode] = useState<'camera' | 'gallery' | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -87,21 +93,80 @@ export default function StoryCamera() {
         quality: 0.8
       });
       setCapturedImage(photo.uri);
+      setMediaType('image'); // Camera always captures images
       setMode(null);
+    }
+  };
+
+  const startRecording = async () => {
+    if (cameraRef.current && !isRecording) {
+      try {
+        setIsRecording(true);
+        setRecordingDuration(0);
+        
+        // Start timer to track recording duration
+        recordingIntervalRef.current = setInterval(() => {
+          setRecordingDuration(prev => {
+            const newDuration = prev + 1;
+            // Auto-stop at 60 seconds (story limit)
+            if (newDuration >= 60) {
+              stopRecording();
+            }
+            return newDuration;
+          });
+        }, 1000) as unknown as NodeJS.Timeout;
+
+        // Start video recording
+        const video = await cameraRef.current.recordAsync({
+          maxDuration: 60 // Max 60 seconds for stories
+        });
+        
+        if (video) {
+          setCapturedImage(video.uri);
+          setMediaType('video');
+          setMode(null);
+        }
+      } catch (error) {
+        console.error('[startRecording] Error:', error);
+        Alert.alert('Error', 'Failed to record video');
+        setIsRecording(false);
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+        }
+      }
+    }
+  };
+
+  const stopRecording = async () => {
+    if (cameraRef.current && isRecording) {
+      try {
+        // Stop recording - the promise from recordAsync will resolve with the video data
+        setIsRecording(false);
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+        }
+      } catch (error) {
+        console.error('[stopRecording] Error:', error);
+      }
     }
   };
 
   const pickFromGallery = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['photos', 'videos'],
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsEditing: false,
         aspect: [9, 16],
         quality: 0.8
       });
 
       if (!result.canceled) {
-        setCapturedImage(result.assets[0].uri);
+        const asset = result.assets[0];
+        const detectedType = detectMediaTypeFromAsset(asset);
+        
+        setCapturedImage(asset.uri);
+        setMediaType(detectedType);
+        console.log('[pickFromGallery] Selected media:', { uri: asset.uri, type: detectedType });
         setMode(null);
       }
     } catch (error) {
@@ -143,33 +208,63 @@ export default function StoryCamera() {
     );
   };
 
-  const uploadStory = async () => {
+  const handleUploadStory = async () => {
     if (!capturedImage) {
-      Alert.alert('Error', 'No image selected');
+      Alert.alert('Error', 'No media selected');
       return;
     }
 
     setIsUploading(true);
     try {
-      // In production, upload image to S3 first and get URL
-      // For now, using base64 or temporary local URL
-      const mediaUrl = capturedImage;
-      const mediaType = 'image';
+      // Step 1: Upload story media (image or video) to Cloudinary/S3 via backend
+      // Uses dedicated endpoints for correct folder mapping
+      console.log('[handleUploadStory] Starting story upload:', { uri: capturedImage, type: mediaType });
+      
+      let uploadResult;
+      
+      if (mediaType === 'video') {
+        const fileName = `story-video-${Date.now()}.mp4`;
+        uploadResult = await uploadStoryVideo(capturedImage, fileName);
+        console.log('[handleUploadStory] Story video uploaded successfully:', uploadResult);
+      } else {
+        const fileName = `story-${Date.now()}.jpg`;
+        uploadResult = await uploadStoryImage(capturedImage, fileName);
+        console.log('[handleUploadStory] Story image uploaded successfully:', uploadResult);
+      }
 
-      const response = await post('/stories', {
-        mediaUrl,
-        mediaType,
-        textOverlay: textOverlays,
+      if (!uploadResult.success || !uploadResult.url || !uploadResult.publicId) {
+        throw new Error(`Story ${mediaType} upload failed: missing url or publicId`);
+      }
+
+      // Step 2: Sanitize text overlays — only include text content, NOT position/rotation
+      // Position and rotation are ephemeral UI concerns, not persisted data
+      const sanitizedTextOverlay = textOverlays.map(overlay => ({
+        id: overlay.id,
+        text: overlay.text,
+        fontSize: overlay.fontSize,
+        color: overlay.color
+        // x, y, rotation intentionally excluded
+      }));
+
+      // Step 3: Create story record with cloud URL and publicId
+      const storyResponse = await createStory({
+        mediaUrl: uploadResult.url,          // Cloudinary secure_url
+        mediaPublicId: uploadResult.publicId, // Cloudinary public_id for deletion
+        mediaType: mediaType,
+        textOverlay: sanitizedTextOverlay,
         drawings: []
       });
 
-      if (response.success) {
-        Alert.alert('Success', 'Story uploaded successfully');
+      if (storyResponse.success) {
+        Alert.alert('Success', 'Story posted successfully');
         router.back();
+      } else {
+        throw new Error(storyResponse.message || 'Failed to create story');
       }
     } catch (error) {
-      console.error('Upload error:', error);
-      Alert.alert('Error', 'Failed to upload story');
+      console.error('[handleUploadStory] Error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload story';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsUploading(false);
     }
@@ -205,16 +300,48 @@ export default function StoryCamera() {
             <View style={styles.bottomControls}>
               <TouchableOpacity
                 style={styles.closeButton}
-                onPress={() => setMode(null)}
+                onPress={() => {
+                  setMode(null);
+                  if (isRecording) {
+                    stopRecording();
+                  }
+                }}
               >
                 <Ionicons name="close" size={32} color="#FFF" />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.captureButton}
-                onPress={takePicture}
-              >
-                <View style={styles.captureCircle} />
-              </TouchableOpacity>
+
+              {/* Photo capture button */}
+              {!isRecording ? (
+                <TouchableOpacity
+                  style={styles.captureButton}
+                  onPress={takePicture}
+                >
+                  <View style={styles.captureCircle} />
+                </TouchableOpacity>
+              ) : null}
+
+              {/* Video recording button */}
+              {isRecording ? (
+                <View style={styles.recordingContainer}>
+                  <TouchableOpacity
+                    style={[styles.recordButton, styles.recordingActive]}
+                    onPress={stopRecording}
+                  >
+                    <View style={styles.recordingSquare} />
+                  </TouchableOpacity>
+                  <Text style={styles.recordingTimer}>
+                    {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                  </Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.recordButton}
+                  onPress={startRecording}
+                >
+                  <View style={styles.recordingCircle} />
+                </TouchableOpacity>
+              )}
+
               <View style={styles.spacer} />
             </View>
           </>
@@ -251,10 +378,20 @@ export default function StoryCamera() {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.editorContainer}>
-        <Image
-          source={{ uri: capturedImage }}
-          style={styles.mediaPreview}
-        />
+        {mediaType === 'video' ? (
+          <Video
+            source={{ uri: capturedImage }}
+            style={styles.mediaPreview}
+            useNativeControls
+            isLooping
+            progressUpdateIntervalMillis={500}
+          />
+        ) : (
+          <Image
+            source={{ uri: capturedImage }}
+            style={styles.mediaPreview}
+          />
+        )}
         {/* Text overlays */}
         {textOverlays.map((text) => (
           <TouchableOpacity
@@ -310,6 +447,7 @@ export default function StoryCamera() {
           style={styles.controlButton}
           onPress={() => {
             setCapturedImage(null);
+            setMediaType('image');
             setTextOverlays([]);
           }}
         >
@@ -321,7 +459,7 @@ export default function StoryCamera() {
 
         <TouchableOpacity
           style={[styles.controlButton, { opacity: isUploading ? 0.5 : 1 }]}
-          onPress={uploadStory}
+          onPress={handleUploadStory}
           disabled={isUploading}
         >
           {isUploading ? (
@@ -346,7 +484,7 @@ export default function StoryCamera() {
               Add Text
             </Text>
             <TouchableOpacity onPress={addTextOverlay}>
-              <Text style={{ color: theme.primary, fontSize: 16, fontWeight: 'bold' }}>
+              <Text style={{ color: theme.tint, fontSize: 16, fontWeight: 'bold' }}>
                 Done
               </Text>
             </TouchableOpacity>
@@ -356,7 +494,7 @@ export default function StoryCamera() {
             style={[
               styles.textInput,
               {
-                borderColor: theme.primary,
+                borderColor: theme.tint,
                 color: theme.text,
                 backgroundColor: theme.card
               }
@@ -459,6 +597,43 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     backgroundColor: '#FF0000'
+  },
+  recordButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#FF0000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.5)'
+  },
+  recordingActive: {
+    backgroundColor: '#FF4444',
+    borderWidth: 4,
+    borderColor: 'rgba(255,0,0,0.7)'
+  },
+  recordingCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FFF'
+  },
+  recordingSquare: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: '#FFF'
+  },
+  recordingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  recordingTimer: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 8
   },
   spacer: {
     width: 50

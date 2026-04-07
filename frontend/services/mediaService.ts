@@ -185,6 +185,46 @@ export const detectMediaTypeByAspectRatio = (
   return aspectRatio < 1 ? 'flick' : 'video';
 };
 
+/**
+ * Detect media type (image or video) from file URI by file extension.
+ * 
+ * @param fileUri File URI (e.g. "file:///path/to/video.mp4")
+ * @returns 'image' | 'video'
+ */
+export const detectMediaTypeFromUri = (fileUri: string): 'image' | 'video' => {
+  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+  const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'flv', 'wmv', 'webm', 'm4v'];
+  
+  const ext = fileUri.split('.').pop()?.toLowerCase() || '';
+  
+  if (imageExtensions.includes(ext)) {
+    return 'image';
+  }
+  if (videoExtensions.includes(ext)) {
+    return 'video';
+  }
+  
+  // Default to image if extension is unclear
+  return 'image';
+};
+
+/**
+ * Detect media type from ImagePicker asset.
+ * ImagePicker.ImagePickerAsset has a 'type' field that can be 'image' or 'video'.
+ * 
+ * @param asset ImagePicker asset
+ * @returns 'image' | 'video'
+ */
+export const detectMediaTypeFromAsset = (asset: any): 'image' | 'video' => {
+  // Check if asset has a type field (ImagePicker v13+)
+  if (asset.type) {
+    return asset.type === 'video' ? 'video' : 'image';
+  }
+  
+  // Fallback to URI-based detection
+  return detectMediaTypeFromUri(asset.uri);
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN UPLOAD FUNCTIONS (Backend-Centric)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,6 +246,7 @@ export const uploadVideo = async (
     const formData = new FormData();
     formData.append('file', fileData as any);
 
+    console.log('[uploadVideo] Uploading:', { fileName, platform: Platform.OS });
     const response = await post('/media/upload/video', formData);
     return response;
   } catch (error) {
@@ -231,6 +272,7 @@ export const uploadImage = async (
     const formData = new FormData();
     formData.append('file', fileData as any);
 
+    console.log('[uploadImage] Uploading:', { fileName, platform: Platform.OS });
     const response = await post('/media/upload/image', formData);
     return response;
   } catch (error) {
@@ -256,6 +298,7 @@ export const uploadAudio = async (
     const formData = new FormData();
     formData.append('file', fileData as any);
 
+    console.log('[uploadAudio] Uploading:', { fileName, platform: Platform.OS });
     const response = await post('/media/upload/audio', formData);
     return response;
   } catch (error) {
@@ -272,14 +315,50 @@ export const uploadAudio = async (
  * @param fileName Original file name (e.g. "avatar.jpg")
  * @returns        { url, publicId }
  */
+/**
+ * Upload a profile picture to the backend.
+ * 
+ * ARCHITECTURE: Backend-Centric Upload
+ * - Frontend sends FormData with compressed image
+ * - Backend handles Cloudinary upload to: myapp/profile/current/{userId}
+ * - Backend auto-deletes old profile picture and updates User model
+ * - Frontend receives: { url, publicId }
+ * 
+ * NOTE ON CLOUDINARY PRESETS:
+ * The backend uses programmatic Cloudinary API uploads (not preset-based).
+ * This ensures the folder structure (myapp/profile/current/{userId}) is
+ * consistent and independent of Cloudinary preset configurations.
+ * 
+ * @param fileUri   Local file URI from image picker
+ * @param fileName  File name (e.g. "profile_1712953200000.jpg")
+ * @returns         { url, publicId } from successful upload
+ * @throws          Error if upload fails (size, format, network, etc)
+ */
 export const uploadProfilePicture = async (
   fileUri: string,
   fileName: string
 ): Promise<UploadResult> => {
   try {
     const fileData = await uriToFile(fileUri, fileName);
+    
+    // ✅ FIX: Construct FormData carefully for React Native compatibility
     const formData = new FormData();
-    formData.append('file', fileData as any);
+    
+    // On React Native, FormData expects: { uri, type, name }
+    // On web, it can accept File objects
+    if (Platform.OS === 'ios' || Platform.OS === 'android') {
+      // React Native: Use native format directly
+      formData.append('file', fileData as any);
+    } else {
+      // Web: Use File object
+      formData.append('file', fileData as any);
+    }
+
+    console.log('[uploadProfilePicture] Uploading:', {
+      fileName,
+      fileType: (fileData as any).type,
+      platform: Platform.OS,
+    });
 
     const response = await post('/media/upload/profile-picture', formData);
     return response;
@@ -310,6 +389,58 @@ export const uploadCoverPhoto = async (
     return response;
   } catch (error) {
     console.error('Error uploading cover photo:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a story image to the backend.
+ * Backend handles Cloudinary upload to the correct stories/images folder.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "story-123.jpg")
+ * @returns        { url, publicId, secureUrl }
+ */
+export const uploadStoryImage = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    console.log('[uploadStoryImage] Uploading:', { fileName, platform: Platform.OS });
+    const response = await post('/media/upload/story-image', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading story image:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a story video to the backend.
+ * Backend handles Cloudinary upload to the correct stories/videos folder.
+ * 
+ * @param fileUri  Local file URI from video picker
+ * @param fileName Original file name (e.g. "story-video-123.mp4")
+ * @returns        { url, publicId, secureUrl }
+ */
+export const uploadStoryVideo = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult> => {
+  try {
+    const fileData = await uriToFile(fileUri, fileName);
+    const formData = new FormData();
+    formData.append('file', fileData as any);
+
+    console.log('[uploadStoryVideo] Uploading:', { fileName, platform: Platform.OS });
+    const response = await post('/media/upload/story-video', formData);
+    return response;
+  } catch (error) {
+    console.error('Error uploading story video:', error);
     throw error;
   }
 };

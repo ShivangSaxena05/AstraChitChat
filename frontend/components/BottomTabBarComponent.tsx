@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, Dimensions } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, TouchableOpacity, Text, StyleSheet, Dimensions, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme-color';
@@ -23,7 +23,8 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
   const router = useRouter();
   const colors = useTheme();
   
-  // HIGH FIX: Sync current index with state more reliably
+  // ...existing code...
+  
   const getCurrentIndex = () => {
     if (!state || !state.routes || state.index === undefined) {
       return 0;
@@ -39,6 +40,20 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
   };
 
   const currentIndex = getCurrentIndex();
+  
+  // Animation refs for each tab
+  const tabAnimations = useRef(tabs.map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    // Animate active tab icon
+    tabAnimations.forEach((anim, index) => {
+      Animated.timing(anim, {
+        toValue: index === currentIndex ? 1 : 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [currentIndex, tabAnimations]);
 
   const handleTabPress = (tabName: string) => {
     navigation.navigate(tabName);
@@ -53,22 +68,46 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
     <View style={[styles.container, { backgroundColor: colors.card }]}>
       {/* Main Tab Bar */}
       <View style={[styles.tabBar, { borderTopColor: colors.border }]}>
-        {tabs.map((tab, index) => (
-          <TouchableOpacity
-            key={tab.name}
-            style={styles.tab}
-            onPress={() => handleTabPress(tab.name)}
-          >
-            <Ionicons
-              name={tab.icon as any}
-              size={24}
-              color={currentIndex === index ? colors.tint : colors.icon}
-            />
-            <Text style={[styles.label, currentIndex === index && { color: colors.tint }]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {tabs.map((tab, index) => {
+          const isActive = currentIndex === index;
+          const scaleAnim = tabAnimations[index].interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.2],
+          });
+          const colorAnim = tabAnimations[index].interpolate({
+            inputRange: [0, 1],
+            outputRange: [colors.icon, colors.tint],
+          });
+
+          return (
+            <TouchableOpacity
+              key={tab.name}
+              style={styles.tab}
+              onPress={() => handleTabPress(tab.name)}
+              activeOpacity={0.7}
+            >
+              <Animated.View
+                style={{
+                  transform: [{ scale: scaleAnim }],
+                }}
+              >
+                <Ionicons
+                  name={tab.icon as any}
+                  size={24}
+                  color={isActive ? colors.tint : colors.icon}
+                />
+              </Animated.View>
+              <Animated.Text 
+                style={[
+                  styles.label, 
+                  { color: isActive ? colors.tint : colors.text }
+                ]}
+              >
+                {tab.label}
+              </Animated.Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Floating Create Button */}

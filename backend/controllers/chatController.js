@@ -1,11 +1,38 @@
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
+const MessageReaction = require('../models/MessageReaction');
 const User = require('../models/User');
 const mongoose = require('mongoose');
 const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { applyUserDefaults } = require('../utils/lazyDefaults');
+const { updateChatOnNewMessage } = require('../services/chatActivity.service');
 
-// Helper function to normalize participants (handles both old ObjectId format and new object format)
+// Helper to convert MessageReaction collection format to frontend format
+// Frontend expects: { emoji, users: [userId, ...] }
+// Database has: [{ message, reactor, emoji, reactedAt }, ...]
+function formatReactionsForFrontend(dbReactions) {
+  const reactionMap = {};
+  
+  dbReactions.forEach(reaction => {
+    const emoji = reaction.emoji;
+    const userId = reaction.reactor?._id?.toString() || reaction.reactor?.toString();
+    
+    if (!reactionMap[emoji]) {
+      reactionMap[emoji] = {
+        emoji: emoji,
+        users: []
+      };
+    }
+    
+    if (userId) {
+      reactionMap[emoji].users.push(userId);
+    }
+  });
+  
+  return Object.values(reactionMap);
+}
+
+// Helper to normalize participants (handles both old ObjectId format and new object format)
 function normalizeParticipants(participants, populatedParticipants = null) {
   if (!Array.isArray(participants)) return [];
   
@@ -74,12 +101,14 @@ async function getChats(req, res) {
   try {
     const userId = req.user._id;
     // ✅ PRODUCTION FIX: Query both old format (direct ObjectIds) and new format (user field)
+    // CRITICAL FIX: Removed 'lastMessage': { $exists: true } filter
+    // New chats won't have a lastMessage until first message is sent
+    // This ensures newly created chats appear immediately in the list
     const chats = await Chat.find({ 
       $or: [
         { 'participants.user': userId },        // New format
         { 'participants': userId }              // Old format (raw ObjectIds)
-      ],
-      'lastMessage': { $exists: true }  // Only chats with at least one message
+      ]
     })
       .populate({
         path: 'participants.user',
@@ -89,7 +118,7 @@ async function getChats(req, res) {
         path: 'lastMessage.sender',
         select: 'name username profilePicture'
       })
-      .sort({ 'lastMessage.createdAt': -1 })  // Sort by last message time
+      .sort({ 'lastMessage.createdAt': -1, 'createdAt': -1 })  // Sort by last message time, fallback to chat creation time
       .limit(20);
 
     // Convert to lean objects manually after populate for better control
@@ -233,8 +262,10 @@ async function getChatMessages(req, res) {
       }
     }
 
+    // ⚠️ BUG: Frontend scroll logic is inverted - loads older messages at BOTTOM not TOP
     // Fetch messages in descending order (newest first) so that newest messages appear at the bottom
-    // When loading more (scrolling up), this gives us older messages in reverse chronological order
+    // Client calls fetchMessages when offsetY > maxOffset - 100 (near BOTTOM), but should fetch at TOP (offsetY < 100)
+    // This is backwards: should load older messages when scrolling UP to see history, not DOWN to future
     const messages = await Message.find(query)
       .populate('sender', 'name username profilePicture isOnline lastSeen bio')
       .populate('quotedMsgId', 'bodyText sender')
@@ -291,13 +322,12 @@ async function findChat(req, res) {
     const { userId } = req.params;
     const currentUser = req.user._id;
 
-    // FIX: Handle both participant orders to find existing direct chat
+    // ✅ FIX: Handle both participant orders to find existing direct chat
+    // Use $all on participants.user to check for both users (same pattern as createChat)
     const chat = await Chat.findOne({
       convoType: 'direct',
-      $or: [
-        { 'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] } },
-        { participants: { $size: 2, $elemMatch: { user: currentUser }, $elemMatch: { user: new mongoose.Types.ObjectId(userId) } } }
-      ]
+      'participants.user': { $all: [currentUser, new mongoose.Types.ObjectId(userId)] },
+      participants: { $size: 2 }
     }).populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
 
     if (!chat) {
@@ -494,46 +524,74 @@ async function searchChats(req, res) {
 async function sendMessage(req, res) {
   try {
     const { receiverId, bodyText, msgType = 'text', attachments = [], quotedMsgId } = req.body;
+    const { chatId: chatIdParam } = req.params;
     const senderId = req.user._id;
 
-    // ✅ FIX: Validate attachments structure before storing
+    // ✅ FIX: Support both routes:
+    // - POST / uses receiverId to find/create chat
+    // - POST /:chatId/messages uses chatId directly
+    let chatId = chatIdParam;
+
+    if (!chatId && !receiverId) {
+      return res.status(400).json({ message: 'Either chatId or receiverId is required' });
+    }
+
+    // ✅ FIX: Validate attachments structure before storing (matches Message schema: public_id, secure_url, resource_type)
     const validatedAttachments = (attachments || []).filter(att => {
       return (
         att &&
         typeof att === 'object' &&
-        att.type &&
-        ['image', 'video', 'audio', 'file'].includes(att.type) &&
-        typeof att.url === 'string' &&
-        (!att.size || att.size <= 50 * 1024 * 1024)  // 50MB limit
+        att.public_id &&
+        typeof att.public_id === 'string' &&
+        att.secure_url &&
+        typeof att.secure_url === 'string' &&
+        att.resource_type &&
+        ['image', 'video', 'audio', 'file'].includes(att.resource_type) &&
+        (!att.size || (typeof att.size === 'number' && att.size <= 50 * 1024 * 1024))  // 50MB limit
       );
     });
 
-    // FIX: Sort participant IDs to ensure consistent ordering and prevent duplicates
-    const userIds = [senderId.toString(), receiverId].sort();
+    let chat;
 
-    let chat = await Chat.findOne({
-      convoType: 'direct',
-      'participants.user': { $all: [new mongoose.Types.ObjectId(userIds[0]), new mongoose.Types.ObjectId(userIds[1])] },
-      participants: { $size: 2 }
-    });
+    if (chatId) {
+      // Route: POST /:chatId/messages - Use existing chat
+      chat = await Chat.findById(chatId);
+      if (!chat) {
+        return res.status(404).json({ message: 'Chat not found' });
+      }
+    } else {
+      // Route: POST / - Find or create chat using receiverId
+      if (!receiverId) {
+        return res.status(400).json({ message: 'receiverId is required for this endpoint' });
+      }
 
-    if (!chat) {
-      const now = new Date();
-      chat = new Chat({
+      // FIX: Sort participant IDs to ensure consistent ordering and prevent duplicates
+      const userIds = [senderId.toString(), receiverId].sort();
+
+      chat = await Chat.findOne({
         convoType: 'direct',
-        participants: [
-          { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
-          { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now },
-        ],
-        lastActivityTimestamp: now
+        'participants.user': { $all: [new mongoose.Types.ObjectId(userIds[0]), new mongoose.Types.ObjectId(userIds[1])] },
+        participants: { $size: 2 }
       });
-      await chat.save();
+
+      if (!chat) {
+        const now = new Date();
+        chat = new Chat({
+          convoType: 'direct',
+          participants: [
+            { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
+            { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now },
+          ],
+          lastActivityTimestamp: now
+        });
+        await chat.save();
+      }
     }
 
     const now = new Date();
     const message = new Message({
       sender: senderId,
-      receiver: new mongoose.Types.ObjectId(receiverId),
+      receiver: receiverId ? new mongoose.Types.ObjectId(receiverId) : null,
       chat: chat._id,
       bodyText: bodyText || '',
       msgType,
@@ -542,8 +600,6 @@ async function sendMessage(req, res) {
       quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
       readBy: [{ user: senderId, readAt: now }],
       deliveredTo: [],
-      reactions: [],
-      content: bodyText || '',
     });
 
     await message.save();
@@ -560,14 +616,9 @@ async function sendMessage(req, res) {
       } : null
     };
 
-    await Chat.findByIdAndUpdate(chat._id, {
-      lastMessage: {
-        text: bodyText || (validatedAttachments.length ? 'Media' : 'Message'),
-        createdAt: message.createdAt,
-        sender: senderId,
-      },
-      updatedAt: new Date(),
-    });
+    // ✅ FIX: Use chatActivity service instead of manual updatedAt
+    const messageText = bodyText || (validatedAttachments.length ? 'Media' : 'Message');
+    await updateChatOnNewMessage(chat._id.toString(), message._id.toString(), senderId.toString(), messageText);
 
     res.status(201).json(messageWithDefaults);
   } catch (error) {
@@ -622,43 +673,76 @@ async function markAllMessagesAsRead(req, res) {
 }
 
 // Add reaction
+// ✅ FIX: Now uses MessageReaction collection instead of embedded array
+// Uses compound unique index { message, reactor, emoji } to prevent duplicates
 async function addReaction(req, res) {
   try {
     const { messageId } = req.params;
     const { emoji } = req.body;
     const userId = req.user._id;
 
+    // Validate message exists
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: 'Message not found' });
 
-    if (!message.reactions) message.reactions = [];
-
-    const existing = message.reactions.find(
-      r => r.emoji === emoji && r.user.toString() === userId.toString()
-    );
-    if (!existing) {
-      message.reactions.push({ emoji, user: userId, reactedAt: new Date() });
-      await message.save();
+    // Create or skip if already exists (unique index prevents duplicates)
+    try {
+      const reaction = new MessageReaction({
+        message: messageId,
+        reactor: userId,
+        emoji: emoji,
+        reactedAt: new Date()
+      });
+      await reaction.save();
+    } catch (err) {
+      // If duplicate reaction (same user, same emoji), just return existing reactions
+      if (err.code === 11000) {
+        console.log(`[Reaction] Duplicate reaction attempt - skipping`);
+      } else {
+        throw err;
+      }
     }
 
-    res.json(message.reactions);
+    // Fetch all reactions for this message
+    const reactions = await MessageReaction.find({ message: messageId })
+      .populate('reactor', '_id name username profilePicture')
+      .lean();
+
+    // Format for frontend: { emoji, users: [userId, ...] }
+    const formattedReactions = formatReactionsForFrontend(reactions);
+
+    res.json(formattedReactions);
   } catch (error) {
+    console.error('addReaction error:', error);
     res.status(500).json({ message: 'Failed to add reaction', error: error.message });
   }
 }
 
 // Remove reaction
+// ✅ FIX: Now uses MessageReaction collection instead of embedded array
 async function removeReaction(req, res) {
   try {
     const { messageId, emoji } = req.params;
     const userId = req.user._id;
 
-    await Message.findByIdAndUpdate(messageId, {
-      $pull: { reactions: { emoji, user: userId } },
+    // Delete the reaction from MessageReaction collection
+    await MessageReaction.deleteOne({
+      message: messageId,
+      reactor: userId,
+      emoji: emoji
     });
 
-    res.json({ message: 'Reaction removed' });
+    // Fetch remaining reactions for this message
+    const reactions = await MessageReaction.find({ message: messageId })
+      .populate('reactor', '_id name username profilePicture')
+      .lean();
+
+    // Format for frontend: { emoji, users: [userId, ...] }
+    const formattedReactions = formatReactionsForFrontend(reactions);
+
+    res.json(formattedReactions);
   } catch (error) {
+    console.error('removeReaction error:', error);
     res.status(500).json({ message: 'Failed to remove reaction', error: error.message });
   }
 }
@@ -777,22 +861,28 @@ async function getMessageReceipts(req, res) {
 }
 
 // Get message reactions
+// ✅ FIX: Now queries MessageReaction collection for analytics and detailed data
+// Returns formatted frontend structure: { emoji, users: [userId, ...] }
 async function getMessageReactions(req, res) {
   try {
     const { messageId } = req.params;
-    const message = await Message.findById(messageId)
-      .populate('reactions.user', 'name username profilePicture isOnline lastSeen bio');
 
+    // Verify message exists
+    const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: 'Message not found' });
 
-    // ✅ FIX: Apply lazy defaults to users in reactions
-    const reactionsWithDefaults = (message.reactions || []).map(reaction => ({
-      ...reaction,
-      user: reaction.user ? applyUserDefaults(reaction.user) : null
-    }));
+    // Fetch all reactions from MessageReaction collection
+    const reactions = await MessageReaction.find({ message: messageId })
+      .populate('reactor', '_id name username profilePicture')
+      .sort({ reactedAt: -1 })
+      .lean();
 
-    res.json(reactionsWithDefaults);
+    // Format for frontend: { emoji, users: [userId, ...] }
+    const formattedReactions = formatReactionsForFrontend(reactions);
+
+    res.json(formattedReactions);
   } catch (error) {
+    console.error('getMessageReactions error:', error);
     res.status(500).json({ message: 'Failed to get reactions', error: error.message });
   }
 }
@@ -1016,15 +1106,18 @@ async function sendEncryptedMessage(req, res) {
       return res.status(400).json({ message: 'Encrypted body and nonce must be valid base64' });
     }
 
-    // Validate attachments
+    // Validate attachments (matches Message schema: public_id, secure_url, resource_type)
     const validatedAttachments = (attachments || []).filter(att => {
       return (
         att &&
         typeof att === 'object' &&
-        att.type &&
-        ['image', 'video', 'audio', 'file'].includes(att.type) &&
-        typeof att.url === 'string' &&
-        (!att.size || att.size <= 50 * 1024 * 1024)
+        att.public_id &&
+        typeof att.public_id === 'string' &&
+        att.secure_url &&
+        typeof att.secure_url === 'string' &&
+        att.resource_type &&
+        ['image', 'video', 'audio', 'file'].includes(att.resource_type) &&
+        (!att.size || (typeof att.size === 'number' && att.size <= 50 * 1024 * 1024))
       );
     });
 
@@ -1063,8 +1156,6 @@ async function sendEncryptedMessage(req, res) {
       quotedMsgId: quotedMsgId ? new mongoose.Types.ObjectId(quotedMsgId) : null,
       readBy: [{ user: senderId, readAt: now }],
       deliveredTo: [],
-      reactions: [],
-      content: '[Encrypted]',
     });
 
     await message.save();
@@ -1078,15 +1169,9 @@ async function sendEncryptedMessage(req, res) {
       message: 'Encrypted message sent successfully'
     };
 
-    // Update chat's last message
-    await Chat.findByIdAndUpdate(chat._id, {
-      lastMessage: {
-        text: validatedAttachments.length ? '[Encrypted Media]' : '[Encrypted Message]',
-        createdAt: message.createdAt,
-        sender: senderId,
-      },
-      updatedAt: new Date(),
-    });
+    // ✅ FIX: Use chatActivity service instead of manual updatedAt
+    const messageText = validatedAttachments.length ? '[Encrypted Media]' : '[Encrypted Message]';
+    await updateChatOnNewMessage(chat._id.toString(), message._id.toString(), senderId.toString(), messageText);
 
     res.status(201).json(messageWithDefaults);
   } catch (error) {

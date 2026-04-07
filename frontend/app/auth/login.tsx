@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, useColorScheme } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -196,24 +196,26 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{requires2FA ? 'Two-Factor Authentication' : 'Login'}</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>{requires2FA ? 'Two-Factor Authentication' : 'Login'}</Text>
 
       {!requires2FA ? (
         <>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
             placeholder="Email"
+            placeholderTextColor={colors.placeholder}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             editable={!loading}
           />
-          <View style={styles.passwordContainer}>
+          <View style={[styles.passwordContainer, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <TextInput
-              style={styles.passwordInput}
+              style={[styles.passwordInput, { color: colors.text }]}
               placeholder="Password"
+              placeholderTextColor={colors.placeholder}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
@@ -235,27 +237,28 @@ export default function LoginScreen() {
       ) : (
         <>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
             placeholder="6-digit Authenticator Code"
+            placeholderTextColor={colors.placeholder}
             value={mfaToken}
             onChangeText={setMfaToken}
             keyboardType="number-pad"
             maxLength={6}
             editable={!loading}
           />
-          <Text style={styles.timer}>Code expires in: {formatMFATimer(mfaTimer)}</Text>
+          <Text style={[styles.timer, { color: colors.text }]}>Code expires in: {formatMFATimer(mfaTimer)}</Text>
         </>
       )}
 
       <TouchableOpacity 
-        style={[styles.button, loading && styles.buttonDisabled]} 
+        style={[styles.button, { backgroundColor: colors.tint }, loading && styles.buttonDisabled]} 
         onPress={handleLogin} 
         disabled={loading}
       >
         {loading ? (
           <ActivityIndicator color={colors.card} />
         ) : (
-          <Text style={styles.buttonText}>
+          <Text style={[styles.buttonText, { color: colors.card }]}>
             {requires2FA ? 'Verify Code' : 'Login'}
           </Text>
         )}
@@ -263,7 +266,7 @@ export default function LoginScreen() {
 
       {!requires2FA && (
         <TouchableOpacity onPress={() => router.push('/auth/signup')} disabled={loading}>
-          <Text style={styles.link}>Don't have an account? Sign up</Text>
+          <Text style={[styles.link, { color: colors.tint }]}>Don't have an account? Sign up</Text>
         </TouchableOpacity>
       )}
 
@@ -272,7 +275,7 @@ export default function LoginScreen() {
           onPress={() => { setRequires2FA(false); setMfaToken(''); }} 
           disabled={loading}
         >
-          <Text style={[styles.link, { marginTop: 10 }]}>Back to Login</Text>
+          <Text style={[styles.link, { color: colors.tint, marginTop: 10 }]}>Back to Login</Text>
         </TouchableOpacity>
       )}
     </View>

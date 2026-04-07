@@ -10,6 +10,10 @@ import {
   StatusBar,
   Animated,
   FlatList,
+  ActivityIndicator,
+  TextInput,
+  ScrollView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +23,7 @@ import Svg, { Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { Video } from 'expo-av';
+import { handleMediaUpload } from '../../services/uploadService';
 
 // ⚠️ SAFE IMPORTS - Handle camera module gracefully
 let CameraView: any = null;
@@ -206,19 +211,88 @@ function PreviewScreen({
 }) {
   const router = useRouter();
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  
+  // ✅ NEW: Post metadata state
+  const [caption, setCaption] = useState('');
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [hashtagInput, setHashtagInput] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'private' | 'friends'>('public');
+  const [showVisibilityPicker, setShowVisibilityPicker] = useState(false);
+
+  const handleAddHashtag = () => {
+    const trimmed = hashtagInput.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      setHashtagInput('#' + trimmed);
+      return;
+    }
+    
+    if (trimmed && !hashtags.includes(trimmed)) {
+      setHashtags([...hashtags, trimmed]);
+      setHashtagInput('');
+    }
+  };
+
+  const handleRemoveHashtag = (tag: string) => {
+    setHashtags(hashtags.filter(h => h !== tag));
+  };
 
   const handleUpload = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsUploading(true);
+    setUploadProgress('Uploading...');
+
     try {
-      // TODO: Implement actual upload logic based on mediaType and mode
-      Alert.alert('Success', `${mediaType} uploaded as ${mode}`);
-      router.push('/(tabs)');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to upload media');
-      console.error('Upload error:', error);
+      // Extract filename from URI
+      const fileName = uri.split('/').pop() || `media-${Date.now()}.${mediaType === 'video' ? 'mp4' : 'jpg'}`;
+
+      console.log('[PreviewScreen] Starting upload:', { uri, mediaType, mode, fileName, caption, hashtags, visibility });
+
+      // Upload using the upload service with user-provided metadata
+      setUploadProgress('Processing media...');
+      const result = await handleMediaUpload(
+        uri,
+        mediaType as 'image' | 'video',
+        fileName,
+        mode as any, // Mode is already validated from the screen
+        {
+          caption: caption.trim(),
+          hashtags: hashtags,
+          visibility: visibility,
+          location: undefined,
+        }
+      );
+
+      if (result.success) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        setUploadProgress('');
+        Alert.alert(
+          'Success',
+          `${mode} ${mediaType} uploaded successfully!`,
+          [
+            {
+              text: 'Done',
+              onPress: () => router.push('/(tabs)'),
+            },
+          ]
+        );
+      } else {
+        throw new Error(result.message || 'Upload failed');
+      }
+    } catch (error: any) {
+      console.error('[PreviewScreen] Upload error:', error);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      setUploadProgress('');
+
+      const errorMessage =
+        error?.message ||
+        error?.response?.data?.message ||
+        'Failed to upload media. Please try again.';
+
+      Alert.alert('Upload Failed', errorMessage);
     } finally {
       setIsUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -243,6 +317,96 @@ function PreviewScreen({
             shouldPlay={false}
           />
         )}
+      </View>
+
+      {/* ✅ NEW: Post metadata editor - overlaid on bottom half of media */}
+      <View style={previewStyles.metadataOverlay}>
+        <ScrollView 
+          style={previewStyles.metadataContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Caption Input */}
+          <View style={previewStyles.section}>
+            <Text style={previewStyles.sectionLabel}>Caption</Text>
+            <TextInput
+              style={previewStyles.captionInput}
+              placeholder="Add a caption..."
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              value={caption}
+              onChangeText={setCaption}
+              multiline
+              maxLength={2200}
+              editable={!isUploading}
+            />
+            <Text style={previewStyles.charCount}>
+              {caption.length} / 2200
+            </Text>
+          </View>
+
+          {/* Hashtags */}
+          <View style={previewStyles.section}>
+            <Text style={previewStyles.sectionLabel}>Hashtags</Text>
+            <View style={previewStyles.hashtagInputRow}>
+              <TextInput
+                style={previewStyles.hashtagInput}
+                placeholder="Add a hashtag"
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={hashtagInput}
+                onChangeText={setHashtagInput}
+                editable={!isUploading}
+                returnKeyType="done"
+                onSubmitEditing={handleAddHashtag}
+              />
+              <TouchableOpacity 
+                style={previewStyles.addHashtagBtn}
+                onPress={handleAddHashtag}
+                disabled={!hashtagInput.trim() || isUploading}
+              >
+                <Ionicons name="add" size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {hashtags.length > 0 && (
+              <View style={previewStyles.hashtagsList}>
+                {hashtags.map((tag, idx) => (
+                  <View key={idx} style={previewStyles.hashtagTag}>
+                    <Text style={previewStyles.hashtagText}>{tag}</Text>
+                    <TouchableOpacity 
+                      onPress={() => handleRemoveHashtag(tag)}
+                      disabled={isUploading}
+                    >
+                      <Ionicons name="close" size={16} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* Visibility */}
+          <View style={previewStyles.section}>
+            <Text style={previewStyles.sectionLabel}>Visibility</Text>
+            <TouchableOpacity 
+              style={previewStyles.visibilitySelector}
+              onPress={() => setShowVisibilityPicker(true)}
+              disabled={isUploading}
+            >
+              <Ionicons 
+                name={
+                  visibility === 'public' ? 'globe' : 
+                  visibility === 'friends' ? 'people' : 
+                  'lock-closed'
+                } 
+                size={18} 
+                color="#fff" 
+              />
+              <Text style={previewStyles.visibilityLabel}>
+                {visibility.charAt(0).toUpperCase() + visibility.slice(1)}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color="rgba(255,255,255,0.6)" />
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
 
       {/* Top controls */}
@@ -270,12 +434,68 @@ function PreviewScreen({
           onPress={handleUpload}
           disabled={isUploading}
         >
-          <Ionicons name="cloud-upload-outline" size={20} color="#000" />
-          <Text style={[previewStyles.btnText, previewStyles.uploadBtnText]}>
-            {isUploading ? 'Uploading...' : 'Upload'}
-          </Text>
+          {isUploading ? (
+            <>
+              <ActivityIndicator size="small" color="#000" />
+              <Text style={[previewStyles.btnText, previewStyles.uploadBtnText]}>
+                {uploadProgress || 'Uploading...'}
+              </Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="cloud-upload-outline" size={20} color="#000" />
+              <Text style={[previewStyles.btnText, previewStyles.uploadBtnText]}>
+                Upload
+              </Text>
+            </>
+          )}
         </TouchableOpacity>
       </SafeAreaView>
+
+      {/* ✅ NEW: Visibility Picker Modal */}
+      <Modal
+        visible={showVisibilityPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowVisibilityPicker(false)}
+      >
+        <TouchableOpacity 
+          style={previewStyles.modalOverlay}
+          onPress={() => setShowVisibilityPicker(false)}
+          activeOpacity={1}
+        >
+          <View style={previewStyles.visibilityPickerContainer}>
+            {(['public', 'friends', 'private'] as const).map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={previewStyles.visibilityOption}
+                onPress={() => {
+                  setVisibility(option);
+                  setShowVisibilityPicker(false);
+                }}
+              >
+                <Ionicons 
+                  name={
+                    option === 'public' ? 'globe' : 
+                    option === 'friends' ? 'people' : 
+                    'lock-closed'
+                  } 
+                  size={20} 
+                  color="#fff" 
+                />
+                <Text style={previewStyles.visibilityOptionLabel}>
+                  {option === 'public' ? 'Public' :
+                   option === 'friends' ? 'Friends' :
+                   'Private'}
+                </Text>
+                {visibility === option && (
+                  <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -403,6 +623,146 @@ const previewStyles = StyleSheet.create({
   },
   uploadBtnText: {
     color: '#000',
+  },
+
+  // ✅ NEW: Metadata Editor Styles
+  metadataOverlay: {
+    position: 'absolute',
+    bottom: 60,
+    left: 0,
+    right: 0,
+    height: '55%',
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    zIndex: 10,
+  },
+  metadataContainer: {
+    flex: 1,
+    padding: 16,
+  },
+  section: {
+    marginBottom: 16,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    opacity: 0.7,
+  },
+  captionInput: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    minHeight: 80,
+  },
+  charCount: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  hashtagInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  hashtagInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  addHashtagBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(16,185,129,0.3)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hashtagsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  hashtagTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16,185,129,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  hashtagText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  visibilitySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  visibilityLabel: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+
+  // ✅ NEW: Visibility Picker Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  visibilityPickerContainer: {
+    backgroundColor: '#1F2937',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 0,
+  },
+  visibilityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+    gap: 12,
+  },
+  visibilityOptionLabel: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
   },
 });
 
@@ -646,13 +1006,11 @@ function GalleryOnlyFallback() {
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
-        router.push({
-          pathname: '/(tabs)/upload',
-          params: {
-            uri: asset.uri,
-            mediaType: asset.type === 'video' ? 'video' : 'image',
-            mode: 'Post',
-          },
+        // ✅ FIX: Use setParams() to trigger PreviewScreen via useLocalSearchParams()
+        router.setParams({
+          uri: asset.uri,
+          mediaType: asset.type === 'video' ? 'video' : 'image',
+          mode: 'Post',
         });
       }
     } catch (error) {
@@ -889,13 +1247,12 @@ function CameraUploadScreenContent() {
     });
     if (!result.canceled && result.assets[0]) {
       const a = result.assets[0];
-      router.push({
-        pathname: '/(tabs)/upload',
-        params: {
-          uri: a.uri,
-          mediaType: a.type === 'video' ? 'video' : 'image',
-          mode: activeMode,
-        },
+      // ✅ FIX: Use setParams() instead of push() since we're updating the current route
+      // This ensures useLocalSearchParams() is triggered and PreviewScreen is shown
+      router.setParams({
+        uri: a.uri,
+        mediaType: a.type === 'video' ? 'video' : 'image',
+        mode: activeMode,
       });
     }
   };

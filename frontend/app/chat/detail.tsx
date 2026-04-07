@@ -160,7 +160,8 @@ export default function ChatDetailScreen() {
       try {
         // Get current user ID — /profile/me is the correct endpoint
         const userData = await get('/profile/me');
-        setCurrentUserId(String(userData._id || userData.id));
+        const currentId = String(userData._id || userData.id);
+        setCurrentUserId(currentId);
 
         // Fetch other user status and profile
         const otherUserData = await get(`/profile/${otherUserId}`);
@@ -174,8 +175,9 @@ export default function ChatDetailScreen() {
         setActiveChatId(chatId);
         setLoading(false);
 
-        // Fetch initial messages
-        await fetchMessages(false);
+        // Fetch initial messages with the currentId we just fetched
+        // Pass currentId directly to avoid state update race conditions
+        await fetchMessages(false, currentId);
       } catch (error: any) {
         setError(
           error.response?.data?.message || 'Failed to initialize chat',
@@ -189,7 +191,10 @@ export default function ChatDetailScreen() {
   }, [chatId, otherUserId]);
 
   // Fetch messages from API
-  const fetchMessages = async (isLoadMore = false) => {
+  const fetchMessages = async (isLoadMore = false, userIdParam?: string) => {
+    // Use userIdParam if provided, otherwise fall back to state (for subsequent calls)
+    const effectiveUserId = userIdParam || currentUserId;
+    
     try {
       if (!isLoadMore) {
         if (messages.length === 0) setLoading(true);
@@ -265,20 +270,21 @@ export default function ChatDetailScreen() {
 
         setMessages(hydratedMessages);
 
-        if (chatId && currentUserId) {
-          markAllAsRead();
+        // ✅ FIX: Use effectiveUserId instead of relying on state variable
+        if (chatId && effectiveUserId) {
+          markAllAsRead(effectiveUserId);
           if (data.messages && data.messages.length > 0) {
             data.messages.forEach((msg: Message) => {
               if (
-                String(msg.sender._id) !== String(currentUserId) &&
+                String(msg.sender._id) !== String(effectiveUserId) &&
                 (!msg.deliveredTo ||
-                  !msg.deliveredTo.includes(currentUserId))
+                  !msg.deliveredTo.includes(effectiveUserId))
               ) {
                 socket?.emit('message delivered', {
                   messageId: msg._id,
                   chatId: chatId,
                   senderId: msg.sender._id,
-                  receiverId: currentUserId,
+                  receiverId: effectiveUserId,
                 });
               }
             });
@@ -304,7 +310,11 @@ export default function ChatDetailScreen() {
     }
   };
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = async (userIdParam?: string) => {
+    // Use provided userId or fall back to state
+    const effectiveUserId = userIdParam || currentUserId;
+    if (!effectiveUserId) return;
+
     try {
       await post('/chats/read-all', { chatId });
       if (socket) {
@@ -313,10 +323,10 @@ export default function ChatDetailScreen() {
 
       setMessages((prev) =>
         prev.map((m) => {
-          if (String(m.sender._id) !== String(currentUserId)) {
+          if (String(m.sender._id) !== String(effectiveUserId)) {
             return {
               ...m,
-              readBy: [...(m.readBy || []), String(currentUserId)],
+              readBy: [...(m.readBy || []), String(effectiveUserId)],
             };
           }
           return m;
@@ -494,7 +504,7 @@ export default function ChatDetailScreen() {
     const layoutHeight = event.nativeEvent.layoutMeasurement.height;
     const maxOffset = contentHeight - layoutHeight;
 
-    if (offsetY > maxOffset - 100 && hasMore && !loadingMore) {
+    if (offsetY < 100 && hasMore && !loadingMore) {
       fetchMessages(true);
     }
   }, [hasMore, loadingMore]);

@@ -23,7 +23,13 @@ const registerPublicKey = asyncHandler(async (req, res) => {
 
         // Validate base64 format
         try {
-            Buffer.from(publicKey, 'base64');
+            const keyBuffer = Buffer.from(publicKey, 'base64');
+            // Curve25519 public keys must be exactly 32 bytes
+            if (keyBuffer.length !== 32) {
+                return res.status(400).json({ 
+                    message: 'Public key must be exactly 32 bytes (44 base64 characters) for curve25519' 
+                });
+            }
         } catch (error) {
             return res.status(400).json({ message: 'Public key must be valid base64' });
         }
@@ -38,16 +44,11 @@ const registerPublicKey = asyncHandler(async (req, res) => {
         // Create fingerprint for verification
         const fingerprint = await createKeyFingerprint(publicKey);
 
-        res.json({
+        res.status(201).json({
             message: 'Public key registered successfully',
             user: user,
             fingerprint: fingerprint,
             keyRegisteredAt: new Date()
-        });
-
-        res.status(201).json({
-            message: 'Public key registered successfully',
-            keyFingerprint: createKeyFingerprint(publicKey)
         });
     } catch (error) {
         console.error('registerPublicKey error:', error);
@@ -156,7 +157,7 @@ const rotatePublicKey = asyncHandler(async (req, res) => {
         { new: true, runValidators: true }
     ).select('-password -twoFactorSecret');
 
-    const fingerprint = createKeyFingerprint(newPublicKey);
+    const fingerprint = await createKeyFingerprint(newPublicKey);
 
     res.json({
         message: 'Public key rotated successfully',

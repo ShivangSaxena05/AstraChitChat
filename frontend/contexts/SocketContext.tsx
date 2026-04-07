@@ -453,18 +453,20 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onAuth
         newSocket.emit("setup", { _id: userId, isOnline: true });
 
         // ✅ FIX BUG 7: Load user encryption keys on connection
+        // NOTE: Only fetching public key from server. Secret key must be stored locally.
         try {
-          const keysData = await get("/user/encryption-keys");
-          if (keysData && keysData.publicKey && keysData.secretKey) {
+          const keysData = await get("/e2ee/own-key");
+          if (keysData && keysData.publicKey) {
+            // Only store public key from server; secret key should come from local storage
             setUserKeys({
               publicKey: keysData.publicKey,
-              secretKey: keysData.secretKey,
+              secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
-            console.log('[Socket] User encryption keys loaded');
+            console.log('[Socket] User encryption public key loaded from server');
           }
         } catch (error) {
-          console.warn('[Socket] Error loading encryption keys:', error);
-          // Non-critical, continue without keys
+          console.warn('[Socket] Non-critical: Could not load public key from server:', error);
+          // Non-critical, continue without server keys. Client-side keys take precedence.
         }
 
         // Load initial conversations
@@ -529,17 +531,19 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onAuth
         newSocket.emit("setup", { _id: userId, isOnline: true });
         
         // ✅ FIX BUG 7: Reload user encryption keys on reconnect
+        // NOTE: Only fetching public key from server. Secret key must be stored locally.
         try {
-          const keysData = await get("/user/encryption-keys");
-          if (keysData && keysData.publicKey && keysData.secretKey) {
+          const keysData = await get("/e2ee/own-key");
+          if (keysData && keysData.publicKey) {
+            // Only store public key from server; secret key should come from local storage
             setUserKeys({
               publicKey: keysData.publicKey,
-              secretKey: keysData.secretKey,
+              secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
-            console.log('[Socket] User encryption keys reloaded after reconnect');
+            console.log('[Socket] User encryption public key reloaded after reconnect');
           }
         } catch (error) {
-          console.warn('[Socket] Error reloading encryption keys after reconnect:', error);
+          console.warn('[Socket] Non-critical: Could not reload public key after reconnect:', error);
         }
         
         // Sync state after reconnection

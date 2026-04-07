@@ -2,8 +2,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { del, get, post } from '@/services/api';
 import secureTokenManager from '@/services/secureTokenManager';
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme, Modal } from 'react-native';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme, Modal, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import ProfilePictureModal from '@/components/ProfilePictureModal';
@@ -71,6 +71,9 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
   const colorScheme = useColorScheme();
   const colors = useTheme();
   const { socket } = useSocket();
+
+  // Spring animation for follow button
+  const followButtonScale = useRef(new Animated.Value(1)).current;
 
   // Ensure stats are always available (with defaults if needed)
   const userStats = user?.stats || {
@@ -157,6 +160,21 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
 
   const handleFollow = async () => {
     if (isActionLoading) return;
+    
+    // Trigger spring animation
+    Animated.sequence([
+      Animated.spring(followButtonScale, {
+        toValue: 0.9,
+        useNativeDriver: true,
+      }),
+      Animated.spring(followButtonScale, {
+        toValue: 1,
+        friction: 3,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
     setIsActionLoading(true);
 
     // Optimistic Update
@@ -192,6 +210,21 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
 
   const handleUnfollow = async () => {
     if (isActionLoading) return;
+    
+    // Trigger spring animation
+    Animated.sequence([
+      Animated.spring(followButtonScale, {
+        toValue: 0.9,
+        useNativeDriver: true,
+      }),
+      Animated.spring(followButtonScale, {
+        toValue: 1,
+        friction: 3,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
     setIsActionLoading(true);
 
     // Optimistic Update
@@ -754,30 +787,48 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
                 <Ionicons name="chatbubble-outline" size={16} color={colors.background} />
                 <ThemedText style={styles.primaryButtonText}>Message</ThemedText>
               </TouchableOpacity>
-              <TouchableOpacity 
-                disabled={isActionLoading} 
-                style={[styles.secondaryButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.tint, opacity: isActionLoading ? 0.6 : 1 }]} 
-                onPress={handleUnfollow}
+              <Animated.View
+                style={{
+                  transform: [{ scale: followButtonScale }],
+                }}
               >
-                <ThemedText style={styles.secondaryButtonText}>Unfollow</ThemedText>
-              </TouchableOpacity>
+                <TouchableOpacity 
+                  disabled={isActionLoading} 
+                  style={[styles.secondaryButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.tint, opacity: isActionLoading ? 0.6 : 1 }]} 
+                  onPress={handleUnfollow}
+                >
+                  <ThemedText style={styles.secondaryButtonText}>Unfollow</ThemedText>
+                </TouchableOpacity>
+              </Animated.View>
             </>
           ) : isRequested ? (
-            <TouchableOpacity 
-              disabled={isActionLoading} 
-              style={[styles.secondaryButton, { backgroundColor: colors.backgroundSecondary, opacity: isActionLoading ? 0.6 : 1 }]} 
-              onPress={handleUnfollow}
+            <Animated.View
+              style={{
+                transform: [{ scale: followButtonScale }],
+              }}
             >
-              <ThemedText style={styles.secondaryButtonText}>Requested</ThemedText>
-            </TouchableOpacity>
+              <TouchableOpacity 
+                disabled={isActionLoading} 
+                style={[styles.secondaryButton, { backgroundColor: colors.backgroundSecondary, opacity: isActionLoading ? 0.6 : 1 }]} 
+                onPress={handleUnfollow}
+              >
+                <ThemedText style={styles.secondaryButtonText}>Requested</ThemedText>
+              </TouchableOpacity>
+            </Animated.View>
           ) : (
-            <TouchableOpacity 
-              disabled={isActionLoading} 
-              style={[styles.primaryButton, { backgroundColor: colors.tint, opacity: isActionLoading ? 0.6 : 1 }]} 
-              onPress={handleFollow}
+            <Animated.View
+              style={{
+                transform: [{ scale: followButtonScale }],
+              }}
             >
-              <ThemedText style={styles.primaryButtonText}>Follow</ThemedText>
-            </TouchableOpacity>
+              <TouchableOpacity 
+                disabled={isActionLoading} 
+                style={[styles.primaryButton, { backgroundColor: colors.tint, opacity: isActionLoading ? 0.6 : 1 }]} 
+                onPress={handleFollow}
+              >
+                <ThemedText style={styles.primaryButtonText}>Follow</ThemedText>
+              </TouchableOpacity>
+            </Animated.View>
           )}
         </View>
       </View>

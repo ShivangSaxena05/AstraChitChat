@@ -102,23 +102,55 @@ const updateUserProfile = async (req, res) => {
             if (taken) return res.status(400).json({ message: 'Username is already taken.' });
         }
 
-        // If new avatar uploaded and old one exists, delete old from Cloudinary
+        // ✅ DELETE OLD PROFILE PICTURE IF NEW ONE PROVIDED
+        // This handles the case where user updates profile via PUT endpoint
+        // (instead of using /media/upload/profile-picture which auto-deletes)
         if (profilePublicId && user.profilePublicId && profilePublicId !== user.profilePublicId) {
             deleteCloudinaryAsset(user.profilePublicId, 'image')
-                .catch(err => console.error('[updateProfile] old avatar delete failed:', err.message));
+                .then(() => {
+                    console.log(`[updateProfile] Deleted old profile picture: ${user.profilePublicId}`);
+                })
+                .catch(err => {
+                    console.warn('[updateProfile] Could not delete old profile picture:', err.message);
+                    // Non-blocking: continue even if deletion fails
+                    // User can still proceed; old picture just remains in Cloudinary (will be cleaned up later)
+                });
         }
 
-        // If new cover uploaded and old one exists, delete old from Cloudinary
+        // ✅ DELETE OLD COVER PHOTO IF NEW ONE PROVIDED
         if (coverPublicId && user.coverPublicId && coverPublicId !== user.coverPublicId) {
             deleteCloudinaryAsset(user.coverPublicId, 'image')
-                .catch(err => console.error('[updateProfile] old cover delete failed:', err.message));
+                .then(() => {
+                    console.log(`[updateProfile] Deleted old cover photo: ${user.coverPublicId}`);
+                })
+                .catch(err => {
+                    console.warn('[updateProfile] Could not delete old cover photo:', err.message);
+                    // Non-blocking: continue even if deletion fails
+                });
         }
 
         // Apply updates
         if (name           !== undefined) user.name           = name;
         if (username       !== undefined) user.username       = username;
         if (bio            !== undefined) user.bio            = bio;
-        if (profilePicture !== undefined) user.profilePicture = profilePicture;
+        // Handle profilePicture as nested object (schema expects { public_id, secure_url, resource_type, version })
+        if (profilePicture !== undefined) {
+            if (profilePicture && typeof profilePicture === 'string') {
+                // If string URL is passed, construct the nested object
+                user.profilePicture = {
+                    secure_url: profilePicture,
+                    public_id: profilePublicId || null,
+                    resource_type: 'image',
+                    version: Math.floor(Date.now() / 1000),
+                };
+            } else if (profilePicture && typeof profilePicture === 'object') {
+                // If object is passed, use it directly
+                user.profilePicture = profilePicture;
+            } else {
+                // If null/undefined, clear it
+                user.profilePicture = null;
+            }
+        }
         if (profilePublicId!== undefined) user.profilePublicId= profilePublicId;
         if (coverPhoto     !== undefined) user.coverPhoto     = coverPhoto;
         if (coverPublicId  !== undefined) user.coverPublicId  = coverPublicId;
@@ -130,6 +162,8 @@ const updateUserProfile = async (req, res) => {
         const updated = await user.save();
         const userStats = await getUserStats(req.user._id);
 
+        console.log(`[updateUserProfile] Profile updated for user ${req.user._id}`);
+
         res.json({ message: 'Profile updated successfully', user: serializeProfile(updated, userStats) });
     } catch (error) {
         console.error('[updateUserProfile]', error);
@@ -140,7 +174,28 @@ const updateUserProfile = async (req, res) => {
 // ─── Cloudinary upload signature (for signed uploads from backend) ─────────────
 // @route   GET /api/profile/upload-signature
 // @access  Private
-// Frontend uses unsigned preset directly — this endpoint is optional (for signed flow)
+// 
+// NOTE: This endpoint is OPTIONAL and NOT CURRENTLY USED.
+// 
+// Current flow uses backend-centric uploads via /media/upload/profile-picture
+// which programmatically uploads to Cloudinary and updates the User model.
+// 
+// ARCHITECTURE DECISION:
+// ✅ Backend-Centric (Current)
+//    - Backend handles Cloudinary upload directly
+//    - Ensures consistent folder structure: myapp/profile/current/{userId}
+//    - Independent of Cloudinary preset configurations
+//    - User model automatically updated
+//    - Old pictures automatically deleted on new upload
+// 
+// ❌ Preset-Based (Deprecated - shown for reference only)
+//    - Would require frontend to use Cloudinary unsigned upload with preset
+//    - Risk of folder mismatch if preset folder ≠ backend folder
+//    - Would require separate User model update call
+// 
+// If future features require preset-based uploads, ensure that:
+// 1. Preset folder in Cloudinary dashboard = backend MEDIA_FOLDERS path
+// 2. Example: preset "astrachat_avatars" → folder "myapp/profile/current"
 const getUploadSignature = async (req, res) => {
     const { uploadType } = req.query; // 'avatar' | 'cover'
 

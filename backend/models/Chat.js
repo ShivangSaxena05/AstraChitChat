@@ -42,13 +42,10 @@ const chatSchema = new mongoose.Schema({
         },
         default: null
     },
-    // Group admins reference
-    admins: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        }
-    ],
+    // ✅ FIX: Removed redundant admins[] array - use participants[].role instead
+    // Admin status is stored in participants[].role = 'admin'
+    // Single source of truth prevents sync issues between admins[] and participants[].role
+    
     // Last message for preview
     lastMessage: {
         text: String,

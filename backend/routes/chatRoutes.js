@@ -77,6 +77,10 @@ router.get('/messages/:messageId/reactions', protect, validateRequest({}), getMe
 
 // ── Wildcard /:chatId routes last ────────────────────────────
 router.get('/', protect, validateRequest({}), getChats);
+
+// ✅ FIX: sendMessage supports both routes:
+// - POST / sends message by receiverId (finds/creates chat automatically)
+// - POST /:chatId/messages sends message to existing chat using chatId
 router.post('/', protect, validateRequest({ bodySchema: sendMessageValidator }), sendMessage);
 router.get('/:chatId/messages', protect, validateRequest({ paramsSchema: getChatMessagesValidator }), getChatMessages);
 router.post('/:chatId/messages', protect, validateRequest({ bodySchema: sendMessageValidator }), sendMessage);

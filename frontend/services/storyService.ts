@@ -1,32 +1,51 @@
 import { get, post, del } from '@/services/api';
 
+interface TextOverlayData {
+  id: string;
+  text: string;
+  fontSize: number;
+  color: string;
+  // NOTE: x, y, rotation are ephemeral and NOT persisted
+  // Position/rotation are client-side UI concerns, not backend storage
+}
+
 interface UploadStoryPayload {
-  mediaUrl: string;
-  mediaKey?: string;
+  mediaUrl: string;                    // Cloudinary secure_url
+  mediaPublicId: string;               // Cloudinary public_id for deletion
   mediaType: 'image' | 'video';
-  duration?: number;
-  textOverlay?: Array<any>;
-  drawings?: Array<any>;
+  thumbnailUrl?: string;               // Optional: for videos
+  duration?: number;                   // Optional: video duration in ms
+  textOverlay?: TextOverlayData[];      // Sanitized text overlays (text content only)
+  drawings?: Array<any>;                // Optional: ephemeral drawing data
 }
 
 interface Story {
   _id: string;
-  user: {
+  author: {
     _id: string;
     name: string;
     username: string;
     profilePicture: string;
   };
-  mediaUrl: string;
-  mediaType: string;
-  textOverlay: Array<any>;
-  viewers: Array<any>;
+  media: {
+    public_id: string;
+    secure_url: string;
+    resource_type: string;
+    format: string;
+    thumbnail_url?: string;
+    duration?: number;
+  };
+  textOverlay: TextOverlayData[];
   createdAt: string;
   expiresAt: string;
+  viewsCount: number;
 }
 
 /**
  * Upload a new story
+ * 
+ * @param payload Story upload data with cloud media URL and metadata
+ * @returns Success response with created story
  */
 export const uploadStory = async (
   payload: UploadStoryPayload

@@ -1,5 +1,5 @@
 const User = require('../models/User');
-const Follow = require('../models/Follow');
+const Follower = require('../models/Follower');
 const Block = require('../models/Block');
 const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { getUserStats } = require('../services/userStatsService');
@@ -61,7 +61,7 @@ const getUserProfileById = async (req, res) => {
 
         // Social relationship checks (run in parallel)
         const [isFollowing, blockRecord] = await Promise.all([
-            Follow.findOne({ follower: req.user._id, following: userId }).lean(),
+            Follower.findOne({ follower: req.user._id, following: userId, status: 'accepted' }).lean(),
             Block.findOne({ blocker: req.user._id, blocked: userId }).lean(),
         ]);
 

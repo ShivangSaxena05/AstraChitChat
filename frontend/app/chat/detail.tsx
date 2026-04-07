@@ -38,6 +38,7 @@ import { sanitizeMessage } from '@/utils/chatUtils';
 import { UserStatusHeader } from '@/components/chat/UserStatusHeader';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageInputBox } from '@/components/chat/MessageInputBox';
+import { validateNewMessageEvent, validateTypingEvent, validateStopTypingEvent } from '@/types/socketEvents';
 
 /**
  * ChatDetailScreen - Refactored Orchestrator Component
@@ -52,6 +53,15 @@ import { MessageInputBox } from '@/components/chat/MessageInputBox';
  * 
  * Lines: ~350 (down from 1863)
  */
+
+// ✅ FIX (Bug #12): Interface for tracking failed messages
+interface FailedMessage {
+  id: string;
+  text: string;
+  error: string;
+  timestamp: number;
+}
+
 export default function ChatDetailScreen() {
   const colors = useTheme();
   const router = useRouter();
@@ -78,7 +88,7 @@ export default function ChatDetailScreen() {
   }, [chatId, otherUserId, otherUsername, router]);
 
   // Global state
-  const { socket, setConversations, updateConversation, setActiveChatId, onlineUsers } =
+  const { socket, isConnected, setConversations, updateConversation, setActiveChatId, onlineUsers } =
     useSocket();
   const { initiateCall } = useCall();
 
@@ -99,6 +109,8 @@ export default function ChatDetailScreen() {
   >(null);
   const [isHoldingTop, setIsHoldingTop] = useState(false);
   const [callProgress, setCallProgress] = useState(0);
+  // ✅ FIX (Bug #12): Track failed messages for retry
+  const [failedMessages, setFailedMessages] = useState<FailedMessage[]>([]);
 
   // Animation refs
   const isAtBottom = useSharedValue(true);
@@ -108,14 +120,23 @@ export default function ChatDetailScreen() {
 
   // Utility refs
   const messageIdsRef = useRef<Set<string>>(new Set());
+  // ✅ FIX (Bug #3): Keep currentUserId in ref for async operations
+  // Prevents race conditions where currentUserId state is stale in async callbacks
+  const currentUserIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ✅ FIX (Bug #13): Debounce typing indicator to reduce socket emissions
+  const typingDebounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasEmittedTypingRef = useRef<boolean>(false);
   const tempTimeouts = useRef<NodeJS.Timeout[]>([]);
   const retryAttempts = useRef<Map<string, number>>(new Map());
   const sendMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const lastSentMessageRef = useRef<string | null>(null);
+  // ✅ FIX (Bug #4): Atomic flag to prevent concurrent sends
   const isSendingRef = useRef(false);
+  // ✅ FIX (Bug #4): Queue for messages sent while another is in progress
+  const messageQueueRef = useRef<string[]>([]);
 
   // Socket logic (extracted to hook)
   const {
@@ -141,6 +162,23 @@ export default function ChatDetailScreen() {
       }
     };
   }, []);
+
+  // ✅ FIX (Bug #8): Monitor socket connection status in real-time
+  useEffect(() => {
+    if (!isConnected) {
+      // Socket disconnected - show error
+      console.warn('[Chat] Socket disconnected, showing offline message');
+      setError('Connection lost. Attempting to reconnect...');
+      setShowError(true);
+    } else {
+      // Socket reconnected - clear error
+      if (showError && error?.includes('Connection lost')) {
+        console.log('[Chat] Socket reconnected, clearing error');
+        setShowError(false);
+        setError(null);
+      }
+    }
+  }, [isConnected]);
 
   // Error snackbar animation
   useEffect(() => {
@@ -168,6 +206,12 @@ export default function ChatDetailScreen() {
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // ✅ FIX (Bug #3): Sync currentUserId state to ref to prevent stale state in async operations
+  // This ensures fetchMessages and markAllAsRead always have the latest userId
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   // Fetch initial user info
   useEffect(() => {
@@ -207,8 +251,15 @@ export default function ChatDetailScreen() {
 
   // Fetch messages from API
   const fetchMessages = async (isLoadMore = false, userIdParam?: string) => {
-    // Use userIdParam if provided, otherwise fall back to state (for subsequent calls)
-    const effectiveUserId = userIdParam || currentUserId;
+    // ✅ FIX (Bug #3): Use userIdParam if provided (from initialization), 
+    // otherwise use ref (safe for async operations), fallback to state as last resort
+    const effectiveUserId = userIdParam || currentUserIdRef.current || currentUserId;
+    
+    // Early return if userId is not available
+    if (!effectiveUserId) {
+      console.warn('[Chat] Cannot fetch messages: userId not available yet');
+      return;
+    }
     
     try {
       if (!isLoadMore) {
@@ -237,9 +288,19 @@ export default function ChatDetailScreen() {
             [...processedMessages, ...prevMessages].map((m) => [m._id, m]),
           );
 
+          // ✅ FIX (Bug #10): Properly hydrate quoted messages from backend data
           const hydratedNewMessages = processedMessages.map((msg: Message) => {
-            if (msg.quotedMsgId && !msg.quotedMessage) {
-              const found = allMessagesMap.get(msg.quotedMsgId);
+            // If quotedMessage is already populated by backend, use it
+            if (msg.quotedMessage) {
+              return msg;
+            }
+            
+            // If only quotedMsgId is present, try to hydrate from current messages
+            if (msg.quotedMsgId) {
+              // Handle both string IDs and object IDs
+              const quotedId = typeof msg.quotedMsgId === 'string' ? msg.quotedMsgId : (msg.quotedMsgId as any)?._id;
+              const found = allMessagesMap.get(quotedId);
+              
               if (found) {
                 return {
                   ...msg,
@@ -252,6 +313,17 @@ export default function ChatDetailScreen() {
                     msgType: found.msgType,
                   },
                 };
+              } else {
+                // Fallback: show placeholder for unavailable quoted message
+                return {
+                  ...msg,
+                  quotedMessage: {
+                    _id: quotedId,
+                    bodyText: '[Original message not available]',
+                    sender: { _id: '', username: 'Unknown', profilePicture: '' },
+                    msgType: 'text'
+                  }
+                };
               }
             }
             return msg;
@@ -263,9 +335,20 @@ export default function ChatDetailScreen() {
         const msgMap = new Map<string, Message>(
           processedMessages.map((m: Message) => [m._id, m]),
         );
+        
+        // ✅ FIX (Bug #10): Properly hydrate quoted messages from backend
         const hydratedMessages = processedMessages.map((msg: Message) => {
-          if (msg.quotedMsgId && !msg.quotedMessage) {
-            const found = msgMap.get(msg.quotedMsgId);
+          // If quotedMessage is already populated by backend, use it
+          if (msg.quotedMessage) {
+            return msg;
+          }
+          
+          // If only quotedMsgId is present, try to hydrate from current messages
+          if (msg.quotedMsgId) {
+            // Handle both string IDs and object IDs
+            const quotedId = typeof msg.quotedMsgId === 'string' ? msg.quotedMsgId : (msg.quotedMsgId as any)?._id;
+            const found = msgMap.get(quotedId);
+            
             if (found) {
               return {
                 ...msg,
@@ -277,6 +360,17 @@ export default function ChatDetailScreen() {
                   sender: found.sender,
                   msgType: found.msgType,
                 },
+              };
+            } else {
+              // Fallback: show placeholder for unavailable quoted message
+              return {
+                ...msg,
+                quotedMessage: {
+                  _id: quotedId,
+                  bodyText: '[Original message not available]',
+                  sender: { _id: '', username: 'Unknown', profilePicture: '' },
+                  msgType: 'text'
+                }
               };
             }
           }
@@ -326,9 +420,13 @@ export default function ChatDetailScreen() {
   };
 
   const markAllAsRead = async (userIdParam?: string) => {
-    // Use provided userId or fall back to state
-    const effectiveUserId = userIdParam || currentUserId;
-    if (!effectiveUserId) return;
+    // ✅ FIX (Bug #3): Use userIdParam if provided (from initialization),
+    // otherwise use ref (safe for async operations), fallback to state as last resort
+    const effectiveUserId = userIdParam || currentUserIdRef.current || currentUserId;
+    if (!effectiveUserId) {
+      console.warn('[Chat] Cannot mark as read: userId not available yet');
+      return;
+    }
 
     try {
       await post('/chats/read-all', { chatId });
@@ -358,28 +456,31 @@ export default function ChatDetailScreen() {
       !sanitizedText ||
       !currentUserId ||
       !socket ||
-      !socket.connected ||
+      !isConnected ||
       isSendingRef.current
     ) {
-      if (!socket?.connected) {
-        setError('You are offline. Trying to reconnect...');
+      // ✅ FIX (Bug #4): Queue message if send is already in progress
+      if (isSendingRef.current && sanitizedText) {
+        console.warn('[Chat] Send already in progress, queuing message');
+        messageQueueRef.current.push(sanitizedText);
+        return;
+      }
+
+      // ✅ FIX (Bug #8): Use synchronized isConnected state from SocketContext
+      if (!isConnected) {
+        setError('You are offline. Please check your internet connection.');
         setShowError(true);
       }
       return;
     }
 
-    // ✅ FIX: Stronger debounce using both ref and set
+    // ✅ FIX (Bug #4): Stronger debounce - prevent exact duplicate sends
     if (lastSentMessageRef.current === sanitizedText) {
       console.warn('[Chat] Duplicate message send attempt detected, ignoring');
       return;
     }
 
-    // ✅ FIX: Prevent concurrent sends with flag
-    if (isSendingRef.current) {
-      console.warn('[Chat] Send already in progress, ignoring duplicate request');
-      return;
-    }
-
+    // ✅ FIX (Bug #4): Set flag immediately to prevent concurrent sends
     isSendingRef.current = true;
     lastSentMessageRef.current = sanitizedText;
 
@@ -456,6 +557,13 @@ export default function ChatDetailScreen() {
         socketMessageData.quotedMsgId = quotedMessage._id;
       }
 
+      // ✅ FIX: Validate socket event before emitting
+      if (!validateNewMessageEvent(socketMessageData)) {
+        setError('Invalid message format. Please check your input and try again.');
+        setShowError(true);
+        return;
+      }
+
       // ✅ FIX: Clear message before emitting to prevent race conditions
       setNewMessage('');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -485,31 +593,123 @@ export default function ChatDetailScreen() {
       console.log('[Chat] Message sent successfully');
     } catch (error: any) {
       console.error('[Chat] Error sending message:', error);
-      setError('Failed to send message');
+      
+      // ✅ FIX (Bug #12): Store failed message for retry
+      const failedMsg: FailedMessage = {
+        id: `failed_${Date.now()}`,
+        text: sanitizedText,
+        error: error.message || 'Failed to send',
+        timestamp: Date.now(),
+      };
+      
+      setFailedMessages(prev => [...prev, failedMsg]);
+      setError(`Failed to send message: ${failedMsg.error}`);
       setShowError(true);
       
       // Remove optimistic message on error
       setMessages((prev) => prev.filter((m) => m._id !== tempId));
       messageIdsRef.current.delete(tempId);
     } finally {
-      // ✅ FIX: Always reset the sending flag
+      // ✅ FIX (Bug #4): Reset flag and process queued messages
       isSendingRef.current = false;
+      
+      // Process queued message if exists
+      if (messageQueueRef.current.length > 0) {
+        const nextMessage = messageQueueRef.current.shift();
+        if (nextMessage) {
+          setNewMessage(nextMessage);
+          // Allow UI to update before triggering next send
+          setTimeout(() => sendMessage(), 100);
+        }
+      }
     }
   };
 
+  // ✅ FIX (Bug #13): Debounce typing indicator to reduce socket emissions
+  // Store typing state to track if we've already emitted the typing event
   const handleTyping = (text: string) => {
     setNewMessage(text);
-    if (!socket || !socket.connected || text.length === 0) return;
+    if (!socket || !socket.connected) return;
 
-    socket.emit('typing', chatId);
+    // If text is empty, emit stop typing immediately
+    if (text.length === 0) {
+      if (hasEmittedTypingRef.current) {
+        const stopEvent = { chatId };
+        if (validateStopTypingEvent(stopEvent)) {
+          socket.emit('stop typing', chatId);
+          hasEmittedTypingRef.current = false;
+        }
+      }
+      if (typingDebounceTimeoutRef.current) {
+        clearTimeout(typingDebounceTimeoutRef.current);
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      return;
+    }
+
+    // Debounce the typing event emission
+    if (typingDebounceTimeoutRef.current) {
+      clearTimeout(typingDebounceTimeoutRef.current);
+    }
+
+    // Set debounce timer (300ms - only emit if user hasn't typed in this time)
+    typingDebounceTimeoutRef.current = setTimeout(() => {
+      if (!hasEmittedTypingRef.current) {
+        // ✅ FIX: Validate typing event before emitting
+        const typingEvent = { chatId };
+        if (validateTypingEvent(typingEvent)) {
+          socket.emit('typing', chatId);
+          hasEmittedTypingRef.current = true;
+        } else {
+          console.warn('[Chat] Invalid typing event data');
+        }
+      }
+    }, 300);
+
+    // Set stop typing timeout (auto-stop after 3 seconds of inactivity)
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('stop typing', chatId);
-    }, 2000);
+      // ✅ FIX: Validate stop typing event before emitting
+      if (validateStopTypingEvent({ chatId })) {
+        socket.emit('stop typing', chatId);
+        hasEmittedTypingRef.current = false;
+      } else {
+        console.warn('[Chat] Invalid stop typing event data');
+      }
+    }, 3000);
   };
+
+  // ✅ FIX (Bug #12): Retry failed message by restoring it to input field
+  const retryFailedMessage = useCallback((failedMsg: FailedMessage) => {
+    // Restore the failed message text to the input field
+    setNewMessage(failedMsg.text);
+    
+    // Remove from failed messages list
+    setFailedMessages(prev => prev.filter(m => m.id !== failedMsg.id));
+    
+    // Focus on input for user to review and resend
+    if (inputRef.current) {
+      inputRef.current.focus?.();
+    }
+    
+    // Dismiss error message
+    setShowError(false);
+    
+    console.log(`[Chat] Restoring failed message for retry: "${failedMsg.text}"`);
+  }, []);
+
+  // ✅ FIX (Bug #12): Dismiss a failed message without retrying
+  const dismissFailedMessage = useCallback((failedMsgId: string) => {
+    setFailedMessages(prev => prev.filter(m => m.id !== failedMsgId));
+    if (failedMessages.length <= 1) {
+      setShowError(false);
+    }
+  }, [failedMessages.length]);
 
   const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
@@ -532,28 +732,66 @@ export default function ChatDetailScreen() {
     setQuotedMessage(message);
   }, []);
 
+  // FIX: Add getItemLayout for better Android FlatList performance
+  // This provides the FlatList with predictable item heights for faster scrolling
+  const getItemLayout = useCallback(
+    (data: any, index: number) => ({
+      length: 100,  // Approximate height of each item (message or separator)
+      offset: 100 * index,
+      index,
+    }),
+    [],
+  );
+
   const handleReplyPress = useCallback(
     (targetMessageId: string) => {
-      const reversedData = [...groupedMessages].reverse();
-      const index = reversedData.findIndex(
+      if (!flatListRef.current) return;
+
+      // Find message in the original (non-reversed) order
+      const messageIndex = groupedMessages.findIndex(
         (item) => item.type === 'message' && item.data._id === targetMessageId,
       );
 
-      if (index !== -1) {
-        flatListRef.current?.scrollToIndex({
-          index: Number(index),
-          animated: true,
-          viewPosition: 0.5,
-        });
-
-        setHighlightedMessageId(targetMessageId);
-        setTimeout(() => {
-          setHighlightedMessageId(null);
-        }, 2000);
-      } else {
+      if (messageIndex === -1) {
         setError('Original message not found in loaded messages.');
         setShowError(true);
+        return;
       }
+
+      // FIX: Add platform-specific delays for Android to ensure layout is ready
+      const scrollDelay = Platform.OS === 'android' ? 300 : 100;
+
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToIndex({
+            index: messageIndex,
+            animated: true,
+            viewPosition: 0.5,
+          });
+
+          // Highlight the message
+          setHighlightedMessageId(targetMessageId);
+          setTimeout(() => {
+            setHighlightedMessageId(null);
+          }, 2000);
+        } catch (error) {
+          console.warn('[Chat] ScrollToIndex failed:', error);
+
+          // Fallback: Use scrollToOffset with estimated position
+          // Each message is approximately 100 points tall
+          const estimatedOffset = messageIndex * 100;
+          flatListRef.current?.scrollToOffset({
+            offset: estimatedOffset,
+            animated: true,
+          });
+
+          // Still highlight the message
+          setHighlightedMessageId(targetMessageId);
+          setTimeout(() => {
+            setHighlightedMessageId(null);
+          }, 2000);
+        }
+      }, scrollDelay);
     },
     [groupedMessages],
   );
@@ -587,7 +825,11 @@ export default function ChatDetailScreen() {
   }, [otherUserId, chatId, otherUsername, otherUserProfilePicture]);
 
   // Pull-to-call gesture
+  // FIX: Add platform-specific gesture configuration for Android
   const pullGesture = Gesture.Pan()
+    .minDistance(Platform.OS === 'android' ? 15 : 10)
+    .minPointers(1)
+    .maxPointers(1)
     .onChange((event) => {
       if (isAtBottom.value && Math.abs(event.translationY) > 0) {
         pullDistance.value = Math.abs(event.translationY);
@@ -596,7 +838,10 @@ export default function ChatDetailScreen() {
       }
     })
     .onEnd(() => {
-      if (pullDistance.value > 150) {
+      // FIX: Higher threshold on Android for more deliberate gesture
+      const threshold = Platform.OS === 'android' ? 200 : 150;
+      
+      if (pullDistance.value > threshold) {
         triggerAnimatedCall().catch((err) => {
           console.error('[Gesture] Call initiation failed:', err);
         });
@@ -614,6 +859,24 @@ export default function ChatDetailScreen() {
       opacity: withSpring(Math.min(pullDistance.value / 100, 1)),
     };
   });
+
+  // FIX: Platform-specific keyboard configuration for Android
+  const getKeyboardConfig = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      return {
+        behavior: 'padding' as const,
+        keyboardVerticalOffset: 90,
+      };
+    }
+
+    // Android: Use padding behavior with 0 offset to let system handle it
+    return {
+      behavior: 'padding' as const,
+      keyboardVerticalOffset: 0,
+    };
+  }, []);
+
+  const keyboardConfig = useMemo(() => getKeyboardConfig(), [getKeyboardConfig]);
 
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -640,8 +903,7 @@ export default function ChatDetailScreen() {
     <GestureHandlerRootView style={[{ flex: 1, backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         style={[styles.container, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={90}
+        {...keyboardConfig}
       >
         {isHoldingTop && (
           <Animated.View style={[styles.callHoverContainer, animatedPullStyle]}>
@@ -723,13 +985,15 @@ export default function ChatDetailScreen() {
           onReplyPress={handleReplyPress}
           onScroll={handleScroll}
           onLoadMore={() => fetchMessages(true)}
+          getItemLayout={getItemLayout} // Add getItemLayout here
         />
 
         <MessageInputBox
           ref={inputRef}
           message={newMessage}
           quotedMessage={quotedMessage}
-          isSocketConnected={socket?.connected || false}
+          // ✅ FIX (Bug #8): Use synchronized isConnected state from SocketContext
+          isSocketConnected={isConnected}
           isFollowing={isFollowing}
           otherUsername={otherUsername}
           colors={colors}
@@ -737,6 +1001,43 @@ export default function ChatDetailScreen() {
           onSend={sendMessage}
           onCancelReply={() => setQuotedMessage(null)}
         />
+
+        {/* Error snackbar for failed messages */}
+        {failedMessages.length > 0 && (
+          <Animated.View
+            style={[
+              styles.errorSnackbar,
+              {
+                opacity: errorOpacity,
+                transform: [{ translateY: errorTranslateY }],
+              },
+            ]}
+          >
+            <Text style={styles.errorText}>
+              {failedMessages[failedMessages.length - 1].error}
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                dismissFailedMessage(failedMessages[failedMessages.length - 1].id)
+              }
+              style={styles.dismissButton}
+            >
+              <Text style={styles.dismissButtonText}>Dismiss</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+
+        {/* Retry button for failed messages */}
+        {failedMessages.length > 0 && (
+          <TouchableOpacity
+            onPress={() =>
+              retryFailedMessage(failedMessages[failedMessages.length - 1])
+            }
+            style={styles.retryButton}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        )}
       </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );
@@ -763,4 +1064,46 @@ const createStyles = (colors: any) =>
       borderRadius: 40,
     },
     circularProgress: { position: 'absolute' },
+    errorSnackbar: {
+      position: 'absolute',
+      bottom: 50,
+      left: 10,
+      right: 10,
+      backgroundColor: colors.error,
+      borderRadius: 8,
+      padding: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      zIndex: 200,
+    },
+    errorText: {
+      color: colors.background,
+      flex: 1,
+    },
+    dismissButton: {
+      marginLeft: 10,
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+      backgroundColor: colors.background,
+      borderRadius: 4,
+    },
+    dismissButtonText: {
+      color: colors.error,
+      fontWeight: '600',
+    },
+    retryButton: {
+      position: 'absolute',
+      bottom: 10,
+      left: 10,
+      right: 10,
+      backgroundColor: colors.success,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+      zIndex: 200,
+    },
+    retryButtonText: {
+      color: colors.background,
+      fontWeight: '600',
+    },
   });

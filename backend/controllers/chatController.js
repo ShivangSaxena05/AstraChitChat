@@ -33,20 +33,23 @@ function formatReactionsForFrontend(dbReactions) {
 }
 
 // Helper to normalize participants (handles both old ObjectId format and new object format)
+/**
+ * ✅ FIX (Bug #5): Normalize participants to new format
+ * Ensures all participants have user, role, joinedAt, lastReadMsgId
+ * Handles legacy old format (raw ObjectId) with warnings
+ * After migration script runs, old format should never appear
+ */
 function normalizeParticipants(participants, populatedParticipants = null) {
   if (!Array.isArray(participants)) return [];
   
   return participants.map((p, index) => {
-    // If it's the new format (object with user field)
+    // NEW FORMAT: object with user field
     if (p && typeof p === 'object' && p.user !== undefined) {
-      // Check if user is populated (object) or still an ObjectId (string)
+      // Check if user is populated (object) or still an ObjectId
       const userIsPopulated = p.user && typeof p.user === 'object' && p.user._id;
       
       if (!userIsPopulated) {
-        console.warn(`[normalizeParticipants] User not populated for participant at index ${index}:`, { 
-          participantUser: p.user,
-          participantObj: p 
-        });
+        console.warn(`[normalizeParticipants] User not populated for participant at index ${index}`);
       }
       
       return {
@@ -57,9 +60,10 @@ function normalizeParticipants(participants, populatedParticipants = null) {
       };
     }
     
-    // If it's the old format (just ObjectId) - try to get populated user
+    // OLD FORMAT (Legacy): just ObjectId or string
+    // ⚠️ This should only appear before migration script runs
     if (mongoose.Types.ObjectId.isValid(p) || (typeof p === 'string' && p.match(/^[0-9a-f]{24}$/i))) {
-      console.warn(`[normalizeParticipants] Found old format participant (raw ObjectId): ${p}`);
+      console.warn(`[BUG #5] Found old format participant (raw ObjectId): ${p} - Run migrateParticipantsFormat.js`);
       const populatedUser = populatedParticipants?.[index];
       return {
         user: populatedUser || p,
@@ -69,25 +73,28 @@ function normalizeParticipants(participants, populatedParticipants = null) {
       };
     }
     
-    // Fallback for unexpected format
-    console.warn(`[normalizeParticipants] Unexpected participant format at index ${index}:`, p);
+    // UNKNOWN FORMAT - Log and return as-is
+    console.warn(`[BUG #5] Unexpected participant format at index ${index}:`, p);
     return p;
   });
 }
 
-// Helper to find current user participant (works with both formats)
+// ✅ FIX (Bug #5): Find current user in participants
+// Works with normalized new format
 function findCurrentUserParticipant(chat, userId) {
   if (!Array.isArray(chat.participants)) return null;
   
   for (const p of chat.participants) {
-    // New format: object with user field
+    // NEW FORMAT: object with user field
     if (p && typeof p === 'object' && p.user) {
       if (p.user?._id?.toString() === userId.toString()) {
         return p;
       }
     }
-    // Old format: just ObjectId
+    // OLD FORMAT (Legacy): just ObjectId
+    // ⚠️ Should not occur after migration, but handle gracefully
     else if (mongoose.Types.ObjectId.isValid(p)) {
+      console.warn(`[BUG #5] Found old format participant in findCurrentUserParticipant - Run migrateParticipantsFormat.js`);
       if (p.toString() === userId.toString()) {
         return { user: p, role: 'member', joinedAt: new Date(), lastReadMsgId: null };
       }
@@ -118,7 +125,12 @@ async function getChats(req, res) {
         path: 'lastMessage.sender',
         select: 'name username profilePicture'
       })
-      .sort({ 'lastMessage.createdAt': -1, 'createdAt': -1 })  // Sort by last message time, fallback to chat creation time
+      // ✅ FIX (Bug #1): Sort to include empty chats that don't have lastMessage yet
+      // 1. Sort by lastMessage.createdAt (newest messages first)
+      // 2. Then by lastActivityTimestamp (empty chats appear right after last active)
+      // 3. Then by createdAt (fallback for truly new empty chats)
+      // This ensures empty chats appear in the list after being created
+      .sort({ 'lastMessage.createdAt': -1, 'lastActivityTimestamp': -1, 'createdAt': -1 })
       .limit(20);
 
     // Convert to lean objects manually after populate for better control
@@ -135,7 +147,7 @@ async function getChats(req, res) {
       leanChats.map(chat => enrichChatParticipantsIfNeeded(chat))
     );
 
-    // ✅ FIX: Calculate unreadCount and lastReadMsgId for each chat
+    // ✅ FIX (Bug #6): Use stored unreadCount from database for persistence
     const chatsWithUnread = await Promise.all(
       enrichedChats.map(async (chat) => {
         try {
@@ -152,12 +164,21 @@ async function getChats(req, res) {
             p => p.user?._id?.toString() !== userId.toString()
           ) || [];
 
-          // Count unread messages (received by user, not read by user)
-          const unreadCount = await Message.countDocuments({
-            chat: chat._id,
-            sender: { $ne: userId },
-            'readBy.user': { $ne: userId }
-          });
+          // ✅ FIX (Bug #6): Get stored unreadCount from database, fallback to calculation
+          let unreadCount = 0;
+          if (chat.unreadCounts && Array.isArray(chat.unreadCounts)) {
+            const userUnreadRecord = chat.unreadCounts.find(
+              uc => uc.user?.toString?.() === userId.toString() || uc.user === userId.toString()
+            );
+            unreadCount = userUnreadRecord?.count ?? 0;
+          } else {
+            // Fallback: Calculate unread count if not stored (for migration)
+            unreadCount = await Message.countDocuments({
+              chat: chat._id,
+              sender: { $ne: userId },
+              'readBy.user': { $ne: userId }
+            });
+          }
 
           // ✅ FIX: Add otherUser for direct chats (for easy access to the chat partner's info)
           let otherUser = null;
@@ -262,13 +283,19 @@ async function getChatMessages(req, res) {
       }
     }
 
-    // ⚠️ BUG: Frontend scroll logic is inverted - loads older messages at BOTTOM not TOP
-    // Fetch messages in descending order (newest first) so that newest messages appear at the bottom
-    // Client calls fetchMessages when offsetY > maxOffset - 100 (near BOTTOM), but should fetch at TOP (offsetY < 100)
-    // This is backwards: should load older messages when scrolling UP to see history, not DOWN to future
+    // ✅ FIX (Bug #2): Frontend correctly loads older messages when scrolled to TOP (offsetY < 100)
+    // ✅ FIX (Bug #10): Fetch messages in descending order (newest first)
+    // Properly populate quoted message references with full sender details
     const messages = await Message.find(query)
       .populate('sender', 'name username profilePicture isOnline lastSeen bio')
-      .populate('quotedMsgId', 'bodyText sender')
+      .populate({
+        path: 'quotedMsgId',
+        select: 'bodyText sender msgType mediaMime mediaUrl',
+        populate: {
+          path: 'sender',
+          select: 'name username profilePicture'
+        }
+      })
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
@@ -276,13 +303,21 @@ async function getChatMessages(req, res) {
     // Reverse to get chronological order for display
     messages.reverse();
 
-    // ✅ FIX: Apply lazy defaults to sender objects
+    // ✅ FIX (Bug #10): Apply lazy defaults to sender objects and hydrate quoted messages
     const messagesWithDefaults = messages.map(msg => ({
       ...msg,
       sender: msg.sender ? applyUserDefaults(msg.sender) : null,
       quotedMsgId: msg.quotedMsgId ? {
         ...msg.quotedMsgId,
         sender: msg.quotedMsgId.sender ? applyUserDefaults(msg.quotedMsgId.sender) : null
+      } : null,
+      // For backwards compatibility: also include quotedMessage if quotedMsgId is populated
+      quotedMessage: msg.quotedMsgId ? {
+        _id: msg.quotedMsgId._id,
+        bodyText: msg.quotedMsgId.bodyText || '[Media message]',
+        msgType: msg.quotedMsgId.msgType || 'text',
+        sender: msg.quotedMsgId.sender ? applyUserDefaults(msg.quotedMsgId.sender) : { _id: '', username: 'Unknown', profilePicture: '' },
+        mediaUrl: msg.quotedMsgId.mediaUrl
       } : null
     }));
 
@@ -297,12 +332,26 @@ async function getChatMessages(req, res) {
       { $addToSet: { readBy: { user: userId, readAt: new Date() } } }
     );
 
-    // ✅ FIX: Update lastReadMsgId for the participant (track most recent read message)
+    // ✅ FIX (Bug #6): Update lastReadMsgId and reset unreadCount for the participant
     if (messages.length > 0) {
       const mostRecentMessageId = messages[messages.length - 1]._id;  // Last message in chronological order
       await Chat.updateOne(
         { _id: chatId, 'participants.user': userId },
-        { $set: { 'participants.$.lastReadMsgId': mostRecentMessageId } }
+        { 
+          $set: { 
+            'participants.$.lastReadMsgId': mostRecentMessageId,
+            'unreadCounts.$[elem].count': 0  // Reset unread count to 0
+          }
+        },
+        {
+          arrayFilters: [{ 'elem.user': userId }]  // Only update this user's unread count
+        }
+      );
+    } else {
+      // No messages to read, but still reset unread count
+      await Chat.updateOne(
+        { _id: chatId, 'unreadCounts.user': userId },
+        { $set: { 'unreadCounts.$.count': 0 } }
       );
     }
 
@@ -389,6 +438,11 @@ async function createChat(req, res) {
         participants: [
           { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
           { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now }
+        ],
+        // ✅ FIX (Bug #6): Initialize unreadCounts for both participants with 0
+        unreadCounts: [
+          { user: new mongoose.Types.ObjectId(userIds[0]), count: 0 },
+          { user: new mongoose.Types.ObjectId(userIds[1]), count: 0 }
         ],
         lastActivityTimestamp: now,
         // Note: lastMessage is NOT set - chat only appears in list after first message
@@ -582,6 +636,11 @@ async function sendMessage(req, res) {
             { user: new mongoose.Types.ObjectId(userIds[0]), role: 'member', joinedAt: now },
             { user: new mongoose.Types.ObjectId(userIds[1]), role: 'member', joinedAt: now },
           ],
+          // ✅ FIX (Bug #6): Initialize unreadCounts for both participants with 0
+          unreadCounts: [
+            { user: new mongoose.Types.ObjectId(userIds[0]), count: 0 },
+            { user: new mongoose.Types.ObjectId(userIds[1]), count: 0 }
+          ],
           lastActivityTimestamp: now
         });
         await chat.save();
@@ -665,6 +724,12 @@ async function markAllMessagesAsRead(req, res) {
         { $set: { 'participants.$.lastReadMsgId': latestMessage._id } }
       );
     }
+
+    // ✅ FIX (Bug #6): Reset unreadCount to 0 for the current user
+    await Chat.updateOne(
+      { _id: chatId, 'unreadCounts.user': userId },
+      { $set: { 'unreadCounts.$.count': 0 } }
+    );
 
     res.json({ message: 'All messages marked as read' });
   } catch (error) {
@@ -908,17 +973,26 @@ async function createGroupChat(req, res) {
       return res.status(400).json({ message: 'Group name and at least one participant are required' });
     }
 
+    const allParticipants = [
+      { user: creatorId, role: 'admin', joinedAt: new Date() },
+      ...participants.map(id => ({
+        user: new mongoose.Types.ObjectId(id),
+        role: 'member',
+        joinedAt: new Date(),
+      })),
+    ];
+
+    // ✅ FIX (Bug #6): Initialize unreadCounts for all participants with 0
+    const unreadCounts = allParticipants.map(p => ({
+      user: p.user,
+      count: 0
+    }));
+
     const chat = new Chat({
       convoType: 'group',
       title: name,
-      participants: [
-        { user: creatorId, role: 'admin', joinedAt: new Date() },
-        ...participants.map(id => ({
-          user: new mongoose.Types.ObjectId(id),
-          role: 'member',
-          joinedAt: new Date(),
-        })),
-      ],
+      participants: allParticipants,
+      unreadCounts: unreadCounts,
     });
 
     await chat.save();

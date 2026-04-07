@@ -11,7 +11,7 @@ import {
   GestureDetector,
 } from 'react-native-gesture-handler';
 import { MessageItem } from './MessageItem';
-import type { ListItem } from '@/hooks/useChatSocket';
+import type { ListItem } from '@/hooks/useGroupedMessages';
 import type { Message } from '@/hooks/useChatSocket';
 
 interface MessageListProps {
@@ -34,6 +34,7 @@ interface MessageListProps {
   onScroll?: (event: any) => void;
   onLoadMore?: () => void;
   flatListRef?: React.Ref<FlatList>;
+  getItemLayout?: (data: any, index: number) => { length: number; offset: number; index: number };
 }
 
 /**
@@ -62,6 +63,7 @@ export const MessageList = React.forwardRef<FlatList, MessageListProps>(
       onReplyPress,
       onScroll,
       onLoadMore,
+      getItemLayout,
     },
     flatListRef,
   ) => {
@@ -149,6 +151,7 @@ export const MessageList = React.forwardRef<FlatList, MessageListProps>(
             onEndReached={hasMore && !isLoadingMore ? onLoadMore : null}
             onEndReachedThreshold={0.5}
             ListHeaderComponent={renderHeader}
+            getItemLayout={Platform.OS === 'android' ? getItemLayout : undefined}
           />
         </View>
       </GestureDetector>

@@ -1,5 +1,5 @@
 import React, { memo, useRef } from 'react';
-import { View, StyleSheet, PanResponder, Animated } from 'react-native';
+import { View, StyleSheet, PanResponder, Animated, Platform } from 'react-native';
 
 interface SwipeableMessageProps {
   children: React.ReactNode;
@@ -17,24 +17,28 @@ const SwipeableMessage: React.FC<SwipeableMessageProps> = ({
 }) => {
   const translateX = useRef(new Animated.Value(0)).current;
 
-// ✅ FIXED: Production-grade swipe w/ gesture arena + haptic feedback
+// ✅ FIXED: Production-grade swipe w/ gesture arena + haptic feedback + Android optimization
 const panResponder = useRef(
   PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gestureState) => {
+      // FIX: Require more horizontal movement on Android for reliability
+      const minDx = Platform.OS === 'android' ? 12 : 8;
+      const verticalThreshold = Platform.OS === 'android' ? 25 : 20;
+      
       // Priority: Horizontal swipe > vertical scroll (load more)
       return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5 && 
-             Math.abs(gestureState.dx) > 8 && 
-             Math.abs(gestureState.dy) < 20; // Block if vertical > 20px (scroll intent)
+             Math.abs(gestureState.dx) > minDx && 
+             Math.abs(gestureState.dy) < verticalThreshold;
     },
     onPanResponderGrant: () => {
       // Haptic on gesture start (subtle)
-// TODO: Add expo-haptics for native feedback
-// Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      // TODO: Add expo-haptics for native feedback
+      // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
     onPanResponderMove: (_, gestureState) => {
       const dx = gestureState.dx;
-      const maxDrag = 80;
+      const maxDrag = Platform.OS === 'android' ? 100 : 80;
       
       // Direction-aware limits (own: left, other: right)
       const dirLimit = isOwnMessage ? -1 : 1;
@@ -44,9 +48,11 @@ const panResponder = useRef(
     },
     onPanResponderRelease: (_, gestureState) => {
       const dx = gestureState.dx;
-      const threshold = isOwnMessage ? SWIPE_THRESHOLD * -1 : SWIPE_THRESHOLD;
+      // FIX: Higher threshold on Android for more deliberate gesture
+      const threshold = Platform.OS === 'android' ? SWIPE_THRESHOLD + 10 : SWIPE_THRESHOLD;
+      const thresholdValue = isOwnMessage ? threshold * -1 : threshold;
       
-      if (Math.abs(dx) > SWIPE_THRESHOLD && Math.sign(dx) === (isOwnMessage ? -1 : 1)) {
+      if (Math.abs(dx) > threshold && Math.sign(dx) === (isOwnMessage ? -1 : 1)) {
         // Success haptic + reply
         // Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onSwipeReply();

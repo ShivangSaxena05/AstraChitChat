@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
     Alert,
     FlatList,
@@ -11,6 +11,7 @@ import {
     Text,
     TouchableOpacity,
     View,
+    Platform,
 } from "react-native";
 
 // --- IMPORTS ---
@@ -141,18 +142,38 @@ export default function ChatListScreen() {
   const router = useRouter();
   const { showProfile } = useLocalSearchParams<{ showProfile: string }>();
 
+  // ✅ ANDROID FIX: Initialize with error handling and proper async handling
   useEffect(() => {
+    let isMounted = true;
+
     const initialize = async () => {
-      const userId = await AsyncStorage.getItem("userId");
-      setCurrentUserId(userId);
-      // Only fetch if not already connected (SocketContext will fetch on connect)
-      if (!isConnected) {
-        fetchChats();
-      } else {
-        setLoading(false);
+      try {
+        const userId = await AsyncStorage.getItem("userId");
+        if (!isMounted) return;
+        
+        setCurrentUserId(userId);
+        
+        // Only fetch if not already connected (SocketContext will fetch on connect)
+        if (!isConnected) {
+          if (!isMounted) return;
+          await fetchChats();
+        } else {
+          if (isMounted) setLoading(false);
+        }
+      } catch (err) {
+        console.error('[Chat List] Initialization error:', err);
+        if (isMounted) {
+          setError("Failed to initialize chat list");
+          setLoading(false);
+        }
       }
     };
+
     initialize();
+
+    return () => {
+      isMounted = false;
+    };
   }, [isConnected]);
 
   useEffect(() => {
@@ -175,46 +196,58 @@ export default function ChatListScreen() {
 
         // Validate and filter chats
         const validatedChats = uniqueChats.filter((chat: Chat) => {
-          // First check: participants array must exist and be valid
-          if (!chat.participants || !Array.isArray(chat.participants)) {
-            console.warn(`[Chat List] Skipping chat ${chat._id}: invalid participants structure`, chat);
-            return false;
-          }
-
-          // For group chats, just ensure they have participants
-          if (chat.convoType === "group") {
-            if (chat.participants.length === 0) {
-              console.warn(`[Chat List] Skipping group chat ${chat._id}: no participants`, chat);
+          try {
+            // First check: participants array must exist and be valid
+            if (!chat.participants || !Array.isArray(chat.participants)) {
+              console.warn(`[Chat List] Skipping chat ${chat._id}: invalid participants structure`, chat);
               return false;
             }
-            return true;
+
+            // For group chats, just ensure they have participants
+            if (chat.convoType === "group") {
+              if (chat.participants.length === 0) {
+                console.warn(`[Chat List] Skipping group chat ${chat._id}: no participants`, chat);
+                return false;
+              }
+              return true;
+            }
+
+            // For direct messages, ensure we have valid participant data
+            const hasValidParticipants =
+              chat.participants.length > 0 &&
+              chat.participants.some(p => p.user?._id && p.user?.username);
+
+            if (!hasValidParticipants) {
+              console.warn(`[Chat List] Skipping invalid direct message chat: ${chat._id}`, chat);
+            }
+
+            return hasValidParticipants;
+          } catch (filterError) {
+            console.error(`[Chat List] Error filtering chat ${chat._id}:`, filterError);
+            return false;
           }
-
-          // For direct messages, ensure we have valid participant data
-          const hasValidParticipants =
-            chat.participants.length > 0 &&
-            chat.participants.some(p => p.user?._id && p.user?.username);
-
-          if (!hasValidParticipants) {
-            console.warn(`[Chat List] Skipping invalid direct message chat: ${chat._id}`, chat);
-          }
-
-          return hasValidParticipants;
         });
 
         // Sort chats by most recent message
         const sorted = validatedChats.sort((a: Chat, b: Chat) => {
-          const aTime = a.lastMessage?.createdAt
-            ? new Date(a.lastMessage.createdAt).getTime()
-            : 0;
-          const bTime = b.lastMessage?.createdAt
-            ? new Date(b.lastMessage.createdAt).getTime()
-            : 0;
-          return bTime - aTime;
+          try {
+            const aTime = a.lastMessage?.createdAt
+              ? new Date(a.lastMessage.createdAt).getTime()
+              : 0;
+            const bTime = b.lastMessage?.createdAt
+              ? new Date(b.lastMessage.createdAt).getTime()
+              : 0;
+            return bTime - aTime;
+          } catch (sortError) {
+            console.error('[Chat List] Error sorting chats:', sortError);
+            return 0;
+          }
         });
+
         setConversations(sorted);
       } else {
         setError("Invalid data format received from server");
+        console.error('[Chat List] Invalid data format:', typeof data, data);
       }
     } catch (error: any) {
       let errorMsg = "Failed to fetch chats";
@@ -235,104 +268,143 @@ export default function ChatListScreen() {
         errorMsg = error.message;
       }
 
+      console.error('[Chat List] Fetch error:', errorMsg, error);
       setError(errorMsg);
-      Alert.alert("Error", errorMsg);
+      
+      // On Android, delay alert to prevent race conditions
+      if (Platform.OS === 'android') {
+        setTimeout(() => {
+          Alert.alert("Error", errorMsg);
+        }, 100);
+      } else {
+        Alert.alert("Error", errorMsg);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const renderChat = ({ item }: { item: Chat }) => {
-    // Safety check: ensure participants array exists
-    if (!item.participants || !Array.isArray(item.participants)) {
-      console.warn(`[Chat List] Chat ${item._id} has invalid participants:`, item.participants);
-      return null;
-    }
-
-    const otherParticipant = item.participants.find(
-      (p) => p.user?._id !== currentUserId,
-    );
-
-    const participantInfo = getParticipantInfo(otherParticipant);
-    const isFromMe =
-      String(item.lastMessage?.sender?._id) === String(currentUserId);
-    const isGroup = item.convoType === "group";
-
-    const formatLastMessage = () => {
-      if (!item.lastMessage?.text) return "No messages yet";
-      if (!isFromMe && item.lastMessage?.sender && isGroup) {
-        // Prefix with sender's username in group chats
-        return `${item.lastMessage.sender.username || "Unknown"}: ${item.lastMessage.text}`;
+    try {
+      // Safety check: ensure participants array exists
+      if (!item.participants || !Array.isArray(item.participants)) {
+        console.warn(`[Chat List] Chat ${item._id} has invalid participants:`, item.participants);
+        return null;
       }
-      return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
-    };
 
-    // Determine Chat Title - Use helper function
-    const chatTitle =
-      isGroup && item.title
-        ? item.title
-        : participantInfo.username;
+      const otherParticipant = item.participants.find(
+        (p) => p.user?._id !== currentUserId,
+      );
 
-    // Add visual indicator for invalid/incomplete data
-    const hasInvalidData = !participantInfo.isValid && !isGroup;
+      const participantInfo = getParticipantInfo(otherParticipant);
+      const isFromMe =
+        String(item.lastMessage?.sender?._id) === String(currentUserId);
+      const isGroup = item.convoType === "group";
 
-    return (
-      <TouchableOpacity
-        style={[
-          styles.chatItem,
-          {
-            borderBottomColor: colors.border,
-            backgroundColor: hasInvalidData ? colors.card : colors.card,
-            opacity: hasInvalidData ? 0.6 : 1,
-          },
-        ]}
-        onPress={() => {
-          if (!participantInfo.userId && !isGroup) {
-            Alert.alert(
-              "Unable to Open Chat",
-              "This chat has incomplete participant data. Please try again or contact support."
-            );
-            return;
-          }
-          router.push({
-            pathname: "/chat/detail",
-            params: {
-              chatId: item._id,
-              otherUserId: participantInfo.userId || "",
-              otherUsername: participantInfo.username || "",
+      const formatLastMessage = () => {
+        if (!item.lastMessage?.text) return "No messages yet";
+        if (!isFromMe && item.lastMessage?.sender && isGroup) {
+          // Prefix with sender's username in group chats
+          return `${item.lastMessage.sender.username || "Unknown"}: ${item.lastMessage.text}`;
+        }
+        return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
+      };
+
+      // Determine Chat Title - Use helper function
+      const chatTitle =
+        isGroup && item.title
+          ? item.title
+          : participantInfo.username;
+
+      // Add visual indicator for invalid/incomplete data
+      const hasInvalidData = !participantInfo.isValid && !isGroup;
+
+      return (
+        <TouchableOpacity
+          style={[
+            styles.chatItem,
+            {
+              borderBottomColor: colors.border,
+              backgroundColor: hasInvalidData ? colors.card : colors.card,
+              opacity: hasInvalidData ? 0.6 : 1,
             },
-          });
-        }}
-      >
-        <Image source={{ uri: participantInfo.profilePicture }} style={styles.avatar} />
-        <View style={styles.chatContent}>
-          <ThemedText type="subtitle">
-            {chatTitle}
-            {hasInvalidData && " ⚠️"}
-          </ThemedText>
-          <Text
-            style={[
-              styles.lastMessage,
-              { color: colors.textTertiary },
-              getUnreadCount(item.unreadCount, currentUserId) > 0 && {
-                color: colors.text,
-                fontWeight: "bold",
-              },
-            ]}
-            numberOfLines={1}
-          >
-            {formatLastMessage()}
-          </Text>
-        </View>
-        {getUnreadCount(item.unreadCount, currentUserId) > 0 && (
-          <View style={[styles.unreadBadge, { backgroundColor: colors.tint }]}>
-            <Text style={[styles.unreadText, { color: colors.background }]}>
-              {getUnreadCount(item.unreadCount, currentUserId)}
+          ]}
+          onPress={() => {
+            try {
+              if (!participantInfo.userId && !isGroup) {
+                Alert.alert(
+                  "Unable to Open Chat",
+                  "This chat has incomplete participant data. Please try again or contact support."
+                );
+                return;
+              }
+              
+              // ✅ ANDROID FIX: Add delay to prevent navigation race conditions
+              if (Platform.OS === 'android') {
+                setTimeout(() => {
+                  router.push({
+                    pathname: "/chat/detail",
+                    params: {
+                      chatId: item._id,
+                      otherUserId: participantInfo.userId || "",
+                      otherUsername: participantInfo.username || "",
+                    },
+                  });
+                }, 50);
+              } else {
+                router.push({
+                  pathname: "/chat/detail",
+                  params: {
+                    chatId: item._id,
+                    otherUserId: participantInfo.userId || "",
+                    otherUsername: participantInfo.username || "",
+                  },
+                });
+              }
+            } catch (navError) {
+              console.error('[Chat List] Navigation error:', navError);
+              Alert.alert("Error", "Failed to open chat. Please try again.");
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <Image 
+            source={{ uri: participantInfo.profilePicture }} 
+            style={styles.avatar}
+            onError={() => console.warn('[Chat List] Avatar load error for:', item._id)}
+          />
+          <View style={styles.chatContent}>
+            <ThemedText type="subtitle">
+              {chatTitle}
+              {hasInvalidData && " ⚠️"}
+            </ThemedText>
+            <Text
+              style={[
+                styles.lastMessage,
+                { color: colors.textTertiary },
+                getUnreadCount(item.unreadCount, currentUserId) > 0 && {
+                  color: colors.text,
+                  fontWeight: "bold",
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {formatLastMessage()}
             </Text>
           </View>
-        )}
-      </TouchableOpacity>
-    );
+          {getUnreadCount(item.unreadCount, currentUserId) > 0 && (
+            <View style={[styles.unreadBadge, { backgroundColor: colors.tint }]}>
+              <Text style={[styles.unreadText, { color: colors.background }]}>
+                {getUnreadCount(item.unreadCount, currentUserId)}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    } catch (error) {
+      console.error('[Chat List] Error rendering chat item:', error);
+      return null;
+    }
   };
 
   if (loading) {
@@ -420,6 +492,9 @@ export default function ChatListScreen() {
             keyExtractor={(_, i) => `skeleton-${i}`}
             showsVerticalScrollIndicator={false}
             scrollEnabled={true}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={5}
+            updateCellsBatchingPeriod={50}
           />
         </View>
       ) : chats.length === 0 ? (
@@ -439,11 +514,23 @@ export default function ChatListScreen() {
           <FlatList
             data={chats}
             renderItem={(props) => {
-              const result = renderChat(props);
-              return result; // renderChat returns null if chat is invalid
+              try {
+                const result = renderChat(props);
+                return result;
+              } catch (error) {
+                console.error('[Chat List] Error in FlatList render:', error);
+                return null;
+              }
             }}
             keyExtractor={(item) => item._id}
             showsVerticalScrollIndicator={false}
+            // ✅ ANDROID OPTIMIZATION: Memory and performance fixes
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={Platform.OS === 'android' ? 10 : 15}
+            updateCellsBatchingPeriod={Platform.OS === 'android' ? 30 : 50}
+            initialNumToRender={10}
+            scrollEventThrottle={16}
+            onEndReachedThreshold={0.5}
           />
           <TouchableOpacity
             style={[styles.plusButtonBottom, { backgroundColor: colors.tint }]}

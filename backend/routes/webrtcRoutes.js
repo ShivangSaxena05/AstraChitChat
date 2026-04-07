@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const auth = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
 
 /**
  * GET /api/webrtc/ice-config
@@ -9,7 +9,7 @@ const auth = require('../middleware/auth');
  * 
  * ✅ SECURITY: Credentials are now protected server-side and only sent to authenticated clients
  */
-router.get('/ice-config', auth, (req, res) => {
+router.get('/ice-config', protect, (req, res) => {
     try {
         // Get credentials from environment variables (should be in backend .env)
         const turnUsername = process.env.TURN_USERNAME || '97ad50087ca6b88165bd8d66';

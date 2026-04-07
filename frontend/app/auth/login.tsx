@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
-import { useSocket } from '@/contexts/SocketContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { handleErrorResponse } from '@/services/errorHandler';
 import { useTheme } from '@/hooks/use-theme-color';
@@ -19,7 +18,6 @@ export default function LoginScreen() {
   const [mfaToken, setMfaToken] = useState('');
   const [userId, setUserId] = useState('');
   const [mfaTimer, setMfaTimer] = useState(300); // 5 minutes
-  const { connect } = useSocket();
   const { signIn } = useAuth();
   const router = useRouter();
   const colors = useTheme();
@@ -127,8 +125,9 @@ export default function LoginScreen() {
 
       // After storing credentials, trigger signIn() which flips isSignedIn
       // in AuthContext — _layout.tsx re-renders and switches to authenticated routes.
+      // ✅ Socket connection happens automatically in SocketProvider after auth
       console.log('[Login] ✅ Calling signIn() to switch to authenticated routes...');
-      await signIn(connect);
+      await signIn();
     } catch (error: any) {
       console.error('[Login] ❌ Login error:', error);
       Alert.alert('Login Error', error.message || 'Failed to complete login');

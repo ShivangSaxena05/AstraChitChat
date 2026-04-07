@@ -3,7 +3,6 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityInd
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { post } from '@/services/api';
-import { useSocket } from '@/contexts/SocketContext';
 import { handleErrorResponse } from '@/services/errorHandler';
 import { useTheme } from '@/hooks/use-theme-color';
 
@@ -14,7 +13,6 @@ export default function SignupScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { connect } = useSocket();
   const colors = useTheme();
 
   const validateInput = (): boolean => {
@@ -123,20 +121,13 @@ export default function SignupScreen() {
 
       await AsyncStorage.setItem('saved_accounts', JSON.stringify(savedAccounts));
 
-      // ✅ FIX 1.4: Wait for socket connection
-      try {
-        await connect();
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (error) {
-        console.warn('Socket connection failed, proceeding:', error);
-      }
-
       // Clear form and navigate
       setName('');
       setEmail('');
       setPassword('');
       setConfirmPassword('');
 
+      // ✅ FIX: Socket connection happens automatically after auth via AuthContext
       router.replace('/(tabs)' as any);
     } catch (error: any) {
       console.error('❌ Signup error:', error);

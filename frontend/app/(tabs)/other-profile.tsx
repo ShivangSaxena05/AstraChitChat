@@ -15,11 +15,17 @@ interface UserProfile {
   _id: string;
   username: string;
   name?: string;
+  displayName?: string;
   isOnline?: boolean;
   lastSeen?: string;
   profilePicture: string;
-  coverPhoto?: string; // Add coverPhoto property for Bug 4 fix
+  profilePictureUrl?: string;
+  profilePublicId?: string | null;
+  coverPhoto?: string;
   bio: string;
+  location?: string;
+  website?: string;
+  pronouns?: string;
   stats: {
     posts: number;
     followers: number;
@@ -30,6 +36,7 @@ interface UserProfile {
   isBlocked?: boolean;
   isMuted?: boolean;
   isPrivate?: boolean;
+  isTwoFactorEnabled?: boolean;
 }
 
 interface UserPost {

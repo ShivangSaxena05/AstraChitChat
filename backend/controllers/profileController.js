@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Follow = require('../models/Follow');
+const Block = require('../models/Block');
 const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { getUserStats } = require('../services/userStatsService');
 const { applyUserDefaults } = require('../utils/lazyDefaults');
@@ -59,13 +60,13 @@ const getUserProfileById = async (req, res) => {
         const userWithDefaults = applyUserDefaults(user);
 
         // Social relationship checks (run in parallel)
-        const currentUser = await User.findById(req.user._id).select('blockedUsers mutedUsers');
-        const [isFollowing] = await Promise.all([
+        const [isFollowing, blockRecord] = await Promise.all([
             Follow.findOne({ follower: req.user._id, following: userId }).lean(),
+            Block.findOne({ blocker: req.user._id, blocked: userId }).lean(),
         ]);
 
-        const isBlocked  = currentUser?.blockedUsers?.some(id => id.toString() === userId) ?? false;
-        const isMuted    = currentUser?.mutedUsers?.some(id => id.toString() === userId)   ?? false;
+        const isBlocked  = !!blockRecord;
+        const isMuted    = false; // TODO: Implement mute feature with a Mute model if needed
 
         res.json({
             ...serializeProfile(userWithDefaults, userStats),
@@ -73,7 +74,6 @@ const getUserProfileById = async (req, res) => {
             isMuted,
             isFollowing:        !!isFollowing,
             isTwoFactorEnabled: userWithDefaults.isTwoFactorEnabled || false,
-            role:               userWithDefaults.role || 'user',
         });
     } catch (error) {
         console.error('[getUserProfileById]', error);
@@ -185,7 +185,6 @@ function serializeProfile(user, userStats) {
         location:         user.location || '',
         website:          user.website || '',
         pronouns:         user.pronouns || '',
-        encryptionPublicKey: user.encryptionPublicKey || null,
         stats: {
             posts:     userStats?.postsCount     || user.postsCount     || 0,
             followers: userStats?.followersCount || user.followersCount || 0,

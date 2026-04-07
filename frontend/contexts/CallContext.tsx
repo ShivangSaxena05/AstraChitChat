@@ -95,18 +95,16 @@ interface CallContextType extends CallState {
 
 const CallContext = createContext<CallContextType | null>(null);
 
-const configuration = {
+// ✅ SECURITY: ICE configuration is now fetched from backend, not hardcoded
+// This prevents credentials from being exposed in frontend code
+let configuration: any = {
   iceServers: [
-    // Google STUN
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-
-    // Cloudflare STUN (extra reliability)
-    { urls: "stun:stun.cloudflare.com:3478" },
+    {
+      urls: "stun:stun.relay.metered.ca:80",
+    },
   ],
   iceCandidatePoolSize: 10,
-};
+}; // Fallback to STUN-only if fetch fails
 
 export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -150,6 +148,40 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     callStateRef.current = callState;
   }, [callState]);
 
+  // ✅ SECURITY: Fetch ICE configuration from backend
+  useEffect(() => {
+    const fetchIceConfig = async () => {
+      try {
+        // Get token from localStorage (or from your auth context)
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.warn('[WebRTC] No auth token available, using STUN-only fallback');
+          return;
+        }
+
+        const response = await fetch('/api/webrtc/ice-config', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          const config = await response.json();
+          configuration = config;
+          console.log('[WebRTC] ICE configuration fetched from backend');
+        } else {
+          console.warn('[WebRTC] Failed to fetch ICE config from backend, using STUN-only fallback');
+        }
+      } catch (error) {
+        console.warn('[WebRTC] Error fetching ICE config from backend:', error);
+        // Fallback to STUN-only configuration is already set
+      }
+    };
+
+    fetchIceConfig();
+  }, []);
+
   // ✅ FIX #2: Setup connection timeout handler
   const setupConnectionTimeout = () => {
     // Clear any existing timeout
@@ -158,7 +190,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     connectionTimeoutRef.current = setTimeout(() => {
-      if (peerConnectionRef.current && !callState.isConnected) {
+      if (peerConnectionRef.current && !callStateRef.current.isConnected) {
         console.error(
           "[WebRTC] Connection timeout - ICE negotiation taking too long",
         );

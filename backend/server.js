@@ -137,6 +137,7 @@ app.use('/api/report', require('./routes/reportRoutes'));
 app.use('/api/stories', require('./routes/storyRoutes'));
 app.use('/api/e2ee', require('./routes/e2eeRoutes'));
 app.use('/api/e2ee', require('./routes/multiDeviceE2eeRoutes'));
+app.use('/api/webrtc', require('./routes/webrtcRoutes'));
 
 app.get('/', (req, res) => res.send('Hello World'));
 

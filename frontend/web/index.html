@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#E6F4FE">
+    <title>Astra ChitChat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Prevent FOUT (Flash of Unstyled Text) with system font fallback */
+        html, body, #root {
+            width: 100%;
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background-color: #ffffff;
+            color: #000000;
+            overflow: hidden;
+        }
+
+        /* Fallback for loading state */
+        .app-loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background-color: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e0e0e0;
+            border-top-color: #0066cc;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script src="index.js"></script>
+    <script>
+        /**
+         * FontFaceObserver timeout fix
+         * Increases timeout from 6s to 10s and adds fallback handling
+         */
+        (function() {
+            // Store original setTimeout
+            const originalSetTimeout = window.setTimeout;
+
+            // Monkey-patch setTimeout to catch fontfaceobserver timeouts
+            window.setTimeout = function(callback, delay, ...args) {
+                // If it's the fontfaceobserver 6000ms timeout, increase it to 10000ms
+                if (delay === 6000) {
+                    console.log('[Font Loading] Extending font loading timeout from 6s to 10s');
+                    delay = 10000;
+                }
+                return originalSetTimeout.call(this, callback, delay, ...args);
+            };
+
+            // Copy setTimeout properties
+            window.setTimeout.toString = originalSetTimeout.toString.bind(originalSetTimeout);
+
+            // Also handle if fontfaceobserver is already loaded
+            if (window.FontFaceObserver) {
+                const originalLoad = window.FontFaceObserver.prototype.load;
+                window.FontFaceObserver.prototype.load = function(text, timeout) {
+                    console.log('[Font Loading] FontFaceObserver.load called with timeout:', timeout || 3000);
+                    // Use 10 second timeout instead of default 3 seconds
+                    return originalLoad.call(this, text, 10000).catch(error => {
+                        console.warn('[Font Loading] Font loading timeout occurred, continuing with fallback fonts', error);
+                        // Don't throw - let app continue with fallback fonts
+                        return Promise.resolve();
+                    });
+                };
+            }
+        })();
+    </script>
+</body>
+</html>

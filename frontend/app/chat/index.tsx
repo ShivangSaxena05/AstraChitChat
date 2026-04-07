@@ -86,7 +86,23 @@ const ChatItem = memo(({
     return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
   };
 
-  const avatarUri = otherParticipant?.user?.profilePicture || `https://i.pravatar.cc/150?u=${otherParticipant?.user?.username || ''}`;
+  // FIX: Safely construct avatar URI with proper fallback for Android
+  const getAvatarUri = (): string => {
+    const picture = otherParticipant?.user?.profilePicture;
+    const username = otherParticipant?.user?.username;
+    
+    // If we have a valid picture URL, use it
+    if (picture && typeof picture === 'string' && picture.trim().length > 0) {
+      return picture;
+    }
+    
+    // Fallback: construct pravatar URL with username or default
+    const seed = username && username.trim().length > 0 ? username : 'unknown';
+    return `https://i.pravatar.cc/150?u=${seed}`;
+  };
+  
+  const avatarUri = getAvatarUri();
+  
   const formatLastMessagePreview = (text: string) => {
     if (text.length > 60) return text.slice(0, 60) + '…';
     return text;
@@ -99,6 +115,7 @@ const ChatItem = memo(({
         <Image 
           source={{ uri: avatarUri }}
           style={styles.avatar}
+          onError={() => console.warn('❌ Failed to load avatar:', avatarUri)}
         />
         {item.unreadCount > 0 && <View style={styles.unreadDot} />}
       </View>
@@ -239,6 +256,30 @@ export default function ChatListScreen() {
     />
   ), [currentUserId, handlePressChatItem]);
 
+  // Debug: Log data shape for Android crash investigation
+  useEffect(() => {
+    if (chats.length > 0) {
+      console.log('🔍 [CHAT_LIST] Data shape check:');
+      console.log('📦 Total chats:', chats.length);
+      console.log('📄 First chat:', JSON.stringify(chats[0], null, 2));
+      console.log('🖼️ First chat avatar:', chats[0]?.participants?.[0]?.user?.profilePicture);
+      console.log('💬 First chat lastMessage:', chats[0]?.lastMessage);
+      console.log('👤 Current user ID:', currentUserId);
+      
+      // Check for bad data patterns
+      const badChats = chats.filter((chat, idx) => {
+        const hasNullAvatar = !chat.participants?.[0]?.user?.profilePicture;
+        const hasNullMessage = chat.lastMessage === null || chat.lastMessage === undefined;
+        const hasMissingUser = !chat.participants?.[0]?.user?.username;
+        if (hasNullAvatar || hasNullMessage || hasMissingUser) {
+          console.warn(`⚠️ Chat ${idx} has bad data:`, { hasNullAvatar, hasNullMessage, hasMissingUser });
+        }
+        return hasNullAvatar || hasNullMessage || hasMissingUser;
+      });
+      if (badChats.length > 0) console.error('🔴 Found bad chats:', badChats.length);
+    }
+  }, [chats, currentUserId]);
+
   // Render empty state
   const renderEmptyComponent = () => {
     if (loading) return null; // Let the main loader handle it
@@ -263,7 +304,7 @@ export default function ChatListScreen() {
     <ThemedView style={styles.container}>
       <ThemedText type="title" style={styles.title}>Chats</ThemedText>
       <FlatList
-        data={chats}
+        data={Array.isArray(chats) ? chats : []}
         renderItem={renderChat}
         keyExtractor={(item) => String(item._id)}
         showsVerticalScrollIndicator={false}

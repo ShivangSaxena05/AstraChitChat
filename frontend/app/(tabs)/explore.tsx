@@ -197,7 +197,7 @@ const VideoCard = memo(({
 
     <View style={vcStyles.infoRow}>
       <Image
-        source={{ uri: item.user.profilePicture ?? `https://i.pravatar.cc/150?u=${item.user._id}` }}
+        source={{ uri: item.user?.profilePicture ?? `https://i.pravatar.cc/150?u=${item.user?._id ?? 'unknown'}` }}
         style={vcStyles.avatar}
       />
       <View style={vcStyles.textBlock}>
@@ -208,7 +208,7 @@ const VideoCard = memo(({
         >
           {item.caption || 'Untitled'}
         </ThemedText>
-        {item.caption.length > 80 && (
+        {(item.caption?.length ?? 0) > 80 && (
           <TouchableOpacity onPress={onToggleExpand} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
             <Text style={[vcStyles.expandBtn, { color: colors.tint }]}>
               {isExpanded ? 'Show less' : 'Read more'}
@@ -216,7 +216,7 @@ const VideoCard = memo(({
           </TouchableOpacity>
         )}
         <Text style={[vcStyles.channel, { color: colors.textSecondary }]}>
-          {item.user.username}
+          {item.user?.username ?? 'Unknown'}
         </Text>
         <Text style={[vcStyles.meta, { color: colors.textTertiary }]}>
           {formatViewCount(item.likes)} · {formatTimeAgo(item.createdAt)}
@@ -444,6 +444,42 @@ export default function ExploreScreen() {
     search.clearSearch();
   }, [search]);
 
+  // Debug: Log data shape for Android crash investigation
+  useEffect(() => {
+    if (displayData.length > 0) {
+      console.log('🔍 [EXPLORE_FEED] Data shape check:');
+      console.log('📦 Total posts:', displayData.length);
+      console.log('📄 First post:', JSON.stringify(displayData[0], null, 2));
+      console.log('🖼️ First post media:', {
+        mediaUrl: displayData[0]?.mediaUrl,
+        secure_url: displayData[0]?.secure_url,
+        mediaType: displayData[0]?.mediaType,
+      });
+      console.log('👤 First post user:', displayData[0]?.user || displayData[0]?.author);
+      console.log('📝 First post caption:', displayData[0]?.caption?.slice(0, 50));
+      
+      // Check for bad data patterns
+      const badPosts = displayData.filter((post, idx) => {
+        const hasNullMedia = !post.mediaUrl && !post.secure_url;
+        const hasNullUser = !post.user && !post.author;
+        const hasNullCaption = !post.caption || typeof post.caption !== 'string';
+        const hasNullId = !post._id;
+        const hasNullCreatedAt = !post.createdAt;
+        
+        if (hasNullUser || hasNullCaption || hasNullId || hasNullCreatedAt) {
+          console.warn(`⚠️ Post ${idx} missing critical data:`, { 
+            hasNullUser, 
+            hasNullCaption, 
+            hasNullId, 
+            hasNullCreatedAt 
+          });
+        }
+        return hasNullUser || hasNullCaption || hasNullId || hasNullCreatedAt;
+      });
+      if (badPosts.length > 0) console.error('🔴 Found bad posts:', badPosts.length);
+    }
+  }, [displayData]);
+
   // ── Render item ────────────────────────────────────────────────────────────
   const renderItem = useCallback(({ item }: ListRenderItemInfo<ExplorePost>) => {
     // Runtime guard — should already be filtered, but just in case
@@ -605,7 +641,7 @@ export default function ExploreScreen() {
 
       ) : /* Feed / search results */ displayData.length > 0 ? (
         <FlatList
-          data={displayData}
+          data={Array.isArray(displayData) ? displayData : []}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           numColumns={numColumns}

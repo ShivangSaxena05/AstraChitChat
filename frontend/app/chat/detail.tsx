@@ -11,6 +11,8 @@ import {
   StyleSheet,
   View,
   Alert,
+  Text,
+  TouchableOpacity,
 } from 'react-native';
 import {
   GestureHandlerRootView,
@@ -57,10 +59,23 @@ export default function ChatDetailScreen() {
   const inputRef = useRef<any>(null);
   const flatListRef = useRef<any>(null);
 
-  // Route params
+  // Route params with validation
   const chatId = params.chatId as string;
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
+
+  // ✅ SAFETY CHECK: Validate critical route parameters on mount
+  useEffect(() => {
+    if (!chatId || !otherUserId || !otherUsername) {
+      console.error('[ChatDetail] Missing critical route parameters:', {
+        chatId: chatId || 'MISSING',
+        otherUserId: otherUserId || 'MISSING',
+        otherUsername: otherUsername || 'MISSING',
+      });
+      Alert.alert('Error', 'Invalid chat parameters. Returning to chat list.');
+      router.back();
+    }
+  }, [chatId, otherUserId, otherUsername, router]);
 
   // Global state
   const { socket, setConversations, updateConversation, setActiveChatId, onlineUsers } =
@@ -601,6 +616,25 @@ export default function ChatDetailScreen() {
   });
 
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  // ✅ EARLY RETURN: Prevent rendering with invalid parameters
+  if (!chatId || !otherUserId || !currentUserId) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <Text style={{ color: colors.error, fontSize: 16, marginBottom: 20 }}>
+          {loading ? 'Loading chat...' : 'Invalid chat parameters'}
+        </Text>
+        {!loading && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{ paddingVertical: 10, paddingHorizontal: 20, backgroundColor: colors.tint, borderRadius: 8 }}
+          >
+            <Text style={{ color: colors.background, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={[{ flex: 1, backgroundColor: colors.background }]}>

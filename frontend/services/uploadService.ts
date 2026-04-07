@@ -25,14 +25,19 @@ async function uploadToStorageFolder(
   fileName: string,
   endpoint: 'story-image' | 'story-video' | 'image' | 'video'
 ) {
-  try {
+  return uploadWithRetry(async () => {
+    console.log(`[uploadToStorageFolder] Starting upload - endpoint: /api/media/upload/${endpoint}, file: ${fileName}`);
+    
     // Convert URI to File/native object
     const fileData = await uriToFile(fileUri, fileName);
     const formData = new FormData();
     formData.append('file', fileData as any);
 
-    console.log(`[uploadToStorageFolder] Uploading to endpoint: /api/media/upload/${endpoint}`);
+    console.log(`[uploadToStorageFolder] FormData prepared, attempting request to /api/media/upload/${endpoint}`);
+    
     const response = await post(`/api/media/upload/${endpoint}`, formData);
+    
+    console.log(`[uploadToStorageFolder] Response received:`, response);
     
     if (!response.success && !response.url) {
       throw new Error(response.message || `Failed to upload to ${endpoint}`);
@@ -45,10 +50,7 @@ async function uploadToStorageFolder(
       resourceType: response.resourceType,
       duration: (response as any).duration || null,
     };
-  } catch (error) {
-    console.error(`[uploadToStorageFolder] Failed to upload to ${endpoint}:`, error);
-    throw error;
-  }
+  }, 3); // Retry up to 3 times
 }
 
 /**
@@ -80,6 +82,56 @@ async function uriToFile(
       name: fileName,
     };
   }
+}
+
+/**
+ * Retry upload with exponential backoff
+ * Handles temporary network failures and timeouts
+ * 
+ * @param uploadFn Async function that performs the upload
+ * @param maxRetries Maximum number of retry attempts
+ * @returns Upload result
+ */
+async function uploadWithRetry(
+  uploadFn: () => Promise<any>,
+  maxRetries: number = 3
+): Promise<any> {
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[uploadWithRetry] Attempt ${attempt + 1}/${maxRetries + 1}`);
+      return await uploadFn();
+    } catch (error: any) {
+      lastError = error;
+      const isNetworkError = 
+        error?.type === 'NETWORK_ERROR' ||
+        error?.code === 'ECONNABORTED' ||
+        error?.code === 'ENOTFOUND' ||
+        error?.code === 'ECONNREFUSED' ||
+        error?.message?.includes('Network') ||
+        error?.message?.includes('timeout') ||
+        error?.message?.includes('ERR_');
+
+      const isRetryable = isNetworkError && attempt < maxRetries;
+
+      if (isRetryable) {
+        const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000); // Max 30s
+        console.warn(`[uploadWithRetry] Network error on attempt ${attempt + 1}. Retrying in ${delayMs}ms...`, {
+          error: error?.message,
+          type: error?.type,
+        });
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      // Non-retryable or max retries reached
+      console.error(`[uploadWithRetry] Upload failed after ${attempt + 1} attempts:`, error);
+      break;
+    }
+  }
+
+  throw lastError;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

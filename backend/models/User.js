@@ -136,6 +136,14 @@ const userSchema = new mongoose.Schema(
         default: 0
     },
 
+    // 🔐 End-to-End Encryption Public Key
+    // Used for E2EE - base64 encoded curve25519 public key (32 bytes)
+    encryptionPublicKey: {
+        type: String,
+        default: null,
+        select: true
+    },
+
     // 🔐 Two-Factor Authentication
     isTwoFactorEnabled: {
         type: Boolean,

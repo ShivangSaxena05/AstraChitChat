@@ -175,20 +175,28 @@ export default function ChatListScreen() {
 
         // Validate and filter chats
         const validatedChats = uniqueChats.filter((chat: Chat) => {
-          // Always allow group chats
+          // First check: participants array must exist and be valid
+          if (!chat.participants || !Array.isArray(chat.participants)) {
+            console.warn(`[Chat List] Skipping chat ${chat._id}: invalid participants structure`, chat);
+            return false;
+          }
+
+          // For group chats, just ensure they have participants
           if (chat.convoType === "group") {
+            if (chat.participants.length === 0) {
+              console.warn(`[Chat List] Skipping group chat ${chat._id}: no participants`, chat);
+              return false;
+            }
             return true;
           }
 
           // For direct messages, ensure we have valid participant data
           const hasValidParticipants =
-            chat.participants &&
-            Array.isArray(chat.participants) &&
             chat.participants.length > 0 &&
             chat.participants.some(p => p.user?._id && p.user?.username);
 
           if (!hasValidParticipants) {
-            console.warn(`[Chat List] Skipping invalid chat: ${chat._id}`, chat);
+            console.warn(`[Chat List] Skipping invalid direct message chat: ${chat._id}`, chat);
           }
 
           return hasValidParticipants;
@@ -235,6 +243,12 @@ export default function ChatListScreen() {
   };
 
   const renderChat = ({ item }: { item: Chat }) => {
+    // Safety check: ensure participants array exists
+    if (!item.participants || !Array.isArray(item.participants)) {
+      console.warn(`[Chat List] Chat ${item._id} has invalid participants:`, item.participants);
+      return null;
+    }
+
     const otherParticipant = item.participants.find(
       (p) => p.user?._id !== currentUserId,
     );
@@ -424,7 +438,10 @@ export default function ChatListScreen() {
         <View style={styles.chatsContainer}>
           <FlatList
             data={chats}
-            renderItem={renderChat}
+            renderItem={(props) => {
+              const result = renderChat(props);
+              return result; // renderChat returns null if chat is invalid
+            }}
             keyExtractor={(item) => item._id}
             showsVerticalScrollIndicator={false}
           />

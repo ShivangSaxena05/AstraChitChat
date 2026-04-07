@@ -463,6 +463,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onAuth
               secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
             console.log('[Socket] User encryption public key loaded from server');
+          } else {
+            // User hasn't registered an E2EE key yet - this is expected for new users
+            console.log('[Socket] User has not registered E2EE key yet');
           }
         } catch (error) {
           console.warn('[Socket] Non-critical: Could not load public key from server:', error);
@@ -541,6 +544,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onAuth
               secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
             console.log('[Socket] User encryption public key reloaded after reconnect');
+          } else {
+            console.log('[Socket] User has not registered E2EE key yet (reconnect)');
           }
         } catch (error) {
           console.warn('[Socket] Non-critical: Could not reload public key after reconnect:', error);

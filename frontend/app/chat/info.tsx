@@ -63,6 +63,19 @@ export default function ChatInfoScreen() {
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
 
+  // ✅ SAFETY CHECK: Validate critical route parameters
+  useEffect(() => {
+    if (!chatId || !otherUserId || !otherUsername) {
+      console.error('[ChatInfo] Missing critical route parameters:', {
+        chatId: chatId || 'MISSING',
+        otherUserId: otherUserId || 'MISSING',
+        otherUsername: otherUsername || 'MISSING',
+      });
+      Alert.alert('Error', 'Invalid chat parameters. Returning to chat.');
+      router.back();
+    }
+  }, [chatId, otherUserId, otherUsername, router]);
+
   // Call hooks unconditionally - if providers are missing, the error will bubble up properly
   // This follows React's Rules of Hooks
   let socketContext: ReturnType<typeof useSocket> | null = null;

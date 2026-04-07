@@ -8,10 +8,18 @@ const API_URL = BASE_API_URL;
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 30000, // 30 second timeout - increased from 15s to handle slow networks
+  timeout: 120000, // 120 second timeout - increased for large file uploads
   // Do NOT hardcode Content-Type here.
   // Axios will auto-set 'multipart/form-data' for FormData
   // and 'application/json' for plain JS objects.
+  maxContentLength: Infinity,
+  maxBodyLength: Infinity,
+  validateStatus: function (status) {
+    // Accept all status codes; handle errors in interceptor
+    return status <= 500;
+  },
+  httpAgent: undefined, // Disable HTTP agent (using HTTPS)
+  httpsAgent: undefined, // Let axios use default HTTPS agent
 });
 
 // ✅ FIX: Add request interceptor to include JWT token from secure storage
@@ -111,6 +119,36 @@ api.interceptors.response.use(
       // Generic error response from server
       const errorMessage =
         (error.response.data as any)?.message || 'An error occurred';
+
+      // Check if error message indicates missing/invalid token
+      const isMissingTokenError = 
+        errorMessage?.toLowerCase().includes('no token') ||
+        errorMessage?.toLowerCase().includes('not authorized') ||
+        errorMessage?.toLowerCase().includes('invalid token') ||
+        errorMessage?.toLowerCase().includes('token') ||
+        (error.response.data as any)?.error?.toLowerCase().includes('token');
+
+      if (isMissingTokenError && status === 401) {
+        console.log('[API] Missing/invalid token error detected — this is an AUTH_ERROR');
+        try {
+          const hadToken = await secureTokenManager.hasToken();
+          if (hadToken) {
+            console.log('[API] Token found in storage but rejected by server (401)');
+            await secureTokenManager.clearAll();
+          } else {
+            console.log('[API] No token in storage — user is not authenticated');
+          }
+        } catch (e) {
+          console.error('[API] Error checking token state:', e);
+        }
+
+        return Promise.reject({
+          type: 'AUTH_ERROR',
+          isAuthError: true,
+          message: 'Your session has expired. Please log in again.',
+          originalError: error,
+        });
+      }
 
       return Promise.reject({
         type: 'API_ERROR',
@@ -216,6 +254,53 @@ export const del = async (url: string) => {
     console.error('[API] DELETE failed:', url, error);
     throw error;
   }
+};
+
+// ✅ NEW: Create a wrapper that adds global error handling
+// This can be imported by hooks/components to add auth error interception
+export const createApiCallWithErrorHandling = (onAuthError?: () => Promise<void>) => {
+  return {
+    get: async (url: string) => {
+      try {
+        return await get(url);
+      } catch (error: any) {
+        if (error?.isAuthError && onAuthError) {
+          await onAuthError();
+        }
+        throw error;
+      }
+    },
+    post: async (url: string, data: any) => {
+      try {
+        return await post(url, data);
+      } catch (error: any) {
+        if (error?.isAuthError && onAuthError) {
+          await onAuthError();
+        }
+        throw error;
+      }
+    },
+    put: async (url: string, data: any) => {
+      try {
+        return await put(url, data);
+      } catch (error: any) {
+        if (error?.isAuthError && onAuthError) {
+          await onAuthError();
+        }
+        throw error;
+      }
+    },
+    del: async (url: string) => {
+      try {
+        return await del(url);
+      } catch (error: any) {
+        if (error?.isAuthError && onAuthError) {
+          await onAuthError();
+        }
+        throw error;
+      }
+    },
+  };
 };
 
 export default api;

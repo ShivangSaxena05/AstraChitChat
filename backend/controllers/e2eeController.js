@@ -110,9 +110,13 @@ const getOwnPublicKey = asyncHandler(async (req, res) => {
         const user = await User.findById(req.user._id)
             .select('encryptionPublicKey');
 
-        if (!user.encryptionPublicKey) {
-            return res.status(404).json({ 
-                message: 'No encryption key found. Please initialize E2EE on your client.' 
+        // If user hasn't registered an encryption key yet, return empty response
+        // Client will handle this and generate keys if needed
+        if (!user || !user.encryptionPublicKey) {
+            return res.json({
+                publicKey: null,
+                hasKey: false,
+                message: 'No encryption key registered yet. Please initialize E2EE on your client.'
             });
         }
 
@@ -121,7 +125,8 @@ const getOwnPublicKey = asyncHandler(async (req, res) => {
         res.json({
             publicKey: user.encryptionPublicKey,
             fingerprint: fingerprint,
-            algorithm: 'curve25519'
+            algorithm: 'curve25519',
+            hasKey: true
         });
     } catch (error) {
         console.error('getOwnPublicKey error:', error);

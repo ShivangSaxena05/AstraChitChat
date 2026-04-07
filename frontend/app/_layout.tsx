@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -108,6 +108,17 @@ function RootLayoutContent() {
   const colorScheme = useColorScheme();
   const colors = useTheme();
   const { isLoading, isSignedIn } = useAuth();
+  const router = useRouter();
+
+  // ✅ FIX: Force navigation to login if not signed in
+  // This ensures that even if screens were previously rendered, we navigate to login
+  // Must be before the early return to follow React Rules of Hooks
+  useEffect(() => {
+    if (!isSignedIn && !isLoading) {
+      console.log('[RootLayout] isSignedIn changed to false — navigating to login');
+      router.replace('/auth/login');
+    }
+  }, [isSignedIn, isLoading, router]);
 
   // Show splash while auth check runs (happens inside AuthContext on mount)
   if (isLoading) {
@@ -122,7 +133,7 @@ function RootLayoutContent() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <NetworkMonitoringWrapper>
         <View style={styles.appContainer}>
-          <Stack screenOptions={{ headerShown: false }}>
+          <Stack screenOptions={{ headerShown: false }} initialRouteName={isSignedIn ? '(tabs)' : 'auth/login'}>
             {isSignedIn ? (
               <>
                 <Stack.Screen name="(tabs)" />

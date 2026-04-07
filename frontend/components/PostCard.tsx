@@ -153,8 +153,13 @@ const CommentRow = memo(({ comment, colors, onRetry }: {
   return (
     <View style={styles.commentRow}>
       <Image
-        source={{ uri: comment.user?.profilePicture || FALLBACK_AVATAR + comment.user?._id }}
+        source={{ 
+          uri: comment.user?.profilePicture?.trim?.() 
+            ? comment.user.profilePicture 
+            : FALLBACK_AVATAR + (comment.user?._id ?? 'unknown')
+        }}
         style={[styles.commentAvatar, isPending && styles.commentAvatarPending]}
+        onError={() => console.warn('❌ Failed to load comment avatar')}
       />
       <View style={styles.commentBody}>
         <View style={styles.commentMeta}>
@@ -335,6 +340,21 @@ const PostCard = memo(function PostCard({ post, currentUserId, onPress, onLikeCh
   // Helper: get author/user object (supports both old and new API formats)
   const getAuthor = () => post.author || post.user;
 
+  // FIX: Safely construct avatar URI for Android compatibility
+  const getAvatarUri = (): string => {
+    const author = getAuthor();
+    if (!author) return FALLBACK_AVATAR + 'unknown';
+    
+    const picture = author.profilePicture;
+    // If we have a valid picture URL, use it
+    if (picture && typeof picture === 'string' && picture.trim().length > 0) {
+      return picture;
+    }
+    
+    // Fallback: use author ID or 'unknown'
+    return FALLBACK_AVATAR + (author._id || 'unknown');
+  };
+
   return (
     <View
       style={[styles.card, { backgroundColor: colors.card }]}
@@ -367,8 +387,9 @@ const PostCard = memo(function PostCard({ post, currentUserId, onPress, onLikeCh
           accessibilityLabel={`View ${getAuthor()?.username || 'Unknown'}'s profile`}
         >
           <Image
-            source={{ uri: getAuthor()?.profilePicture || FALLBACK_AVATAR + (getAuthor()?._id || 'unknown') }}
+            source={{ uri: getAvatarUri() }}
             style={styles.avatar}
+            onError={() => console.warn('❌ Failed to load author avatar:', getAvatarUri())}
           />
           <View>
             <Text style={[styles.username, { color: colors.text }]} numberOfLines={1}>

@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 interface TextPost {
   _id: string;
   caption: string;
-  user: {
+  user?: {
     _id: string;
     username: string;
     profilePicture?: string;
@@ -69,13 +69,14 @@ export const TextCard = ({ item, colors, onPress }: TextCardProps) => {
       <View style={[styles.userRow, isTablet && styles.userRowTablet]}>
         <Image
           source={{
-            uri: item.user.profilePicture || `https://i.pravatar.cc/150?u=${item.user._id}`,
+            uri: item.user?.profilePicture || `https://i.pravatar.cc/150?u=${item.user?._id ?? 'unknown'}`,
           }}
           style={[styles.avatar, isTablet && styles.avatarTablet]}
+          onError={() => console.warn('❌ Failed to load TextCard avatar')}
         />
         <View style={styles.userInfo}>
           <ThemedText style={[styles.username, { color: colors.text }, isTablet && styles.usernameTablet]}>
-            {item.user.username}
+            {item.user?.username ?? 'Unknown'}
           </ThemedText>
           <Text style={[styles.timeAgo, { color: colors.textTertiary }, isTablet && styles.timeAgoTablet]}>
             {formatTimeAgo(item.createdAt)}

@@ -37,21 +37,33 @@ export const validateToken = async (token?: string): Promise<boolean> => {
   try {
     const tokenToCheck = token ?? (await secureTokenManager.getToken());
     if (!tokenToCheck || typeof tokenToCheck !== 'string' || !tokenToCheck.trim()) {
+      console.warn('[TokenManager] Token validation failed: Token is empty or invalid');
       return false;
     }
 
     const payload = decodeJwtPayload(tokenToCheck);
-    if (!payload) return false;
+    if (!payload) {
+      console.warn('[TokenManager] Token validation failed: Could not decode JWT payload');
+      return false;
+    }
 
     // Check expiration
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) return false;
+    if (payload.exp && payload.exp < now) {
+      console.warn('[TokenManager] Token validation failed: Token has expired (exp:', payload.exp, 'now:', now, ')');
+      return false;
+    }
 
     // Backend signs with { id } — also accept _id/userId for forward compat
-    if (!payload.id && !payload._id && !payload.userId) return false;
+    if (!payload.id && !payload._id && !payload.userId) {
+      console.warn('[TokenManager] Token validation failed: Token missing required ID field (id, _id, or userId)');
+      return false;
+    }
 
+    console.log('[TokenManager] ✅ Token validation passed');
     return true;
-  } catch {
+  } catch (e) {
+    console.error('[TokenManager] Token validation error:', e);
     return false;
   }
 };
@@ -62,9 +74,15 @@ export const validateToken = async (token?: string): Promise<boolean> => {
 export const hasValidToken = async (): Promise<boolean> => {
   try {
     const token = await secureTokenManager.getToken();
-    if (!token) return false;
-    return validateToken(token);
-  } catch {
+    if (!token) {
+      console.log('[TokenManager] hasValidToken: No token found in storage');
+      return false;
+    }
+    const isValid = await validateToken(token);
+    console.log('[TokenManager] hasValidToken result:', isValid);
+    return isValid;
+  } catch (e) {
+    console.error('[TokenManager] hasValidToken error:', e);
     return false;
   }
 };

@@ -51,7 +51,7 @@ export default function ExpandableBio({ text, maxLines = 3 }: ExpandableBioProps
 
   const parseText = (content: string) => {
     const regex = /(https?:\/\/[^\s]+|@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+)/g;
-    const parts = content.split(regex);
+    const parts = content.split(regex).filter(part => part);
 
     return parts.map((part, i) => {
       if (part.match(/^https?:\/\//)) {

@@ -63,25 +63,38 @@ export default function ChatInfoScreen() {
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
 
-  // Safe context usage
-  const safeSocketResult = (() => {
-    try {
-      return useSocket();
-    } catch (e) {
-      console.warn('Socket context unavailable:', e);
-      return { socket: null as any };
+  // ✅ SAFETY CHECK: Validate critical route parameters
+  useEffect(() => {
+    if (!chatId || !otherUserId || !otherUsername) {
+      console.error('[ChatInfo] Missing critical route parameters:', {
+        chatId: chatId || 'MISSING',
+        otherUserId: otherUserId || 'MISSING',
+        otherUsername: otherUsername || 'MISSING',
+      });
+      Alert.alert('Error', 'Invalid chat parameters. Returning to chat.');
+      router.back();
     }
-  })();
-  const safeCallResult = (() => {
-    try {
-      return useCall();
-    } catch (e) {
-      console.warn('Call context unavailable:', e);
-      return { initiateCall: (() => {}) as any };
-    }
-  })();
-  const { socket } = safeSocketResult;
-  const { initiateCall } = safeCallResult;
+  }, [chatId, otherUserId, otherUsername, router]);
+
+  // Call hooks unconditionally - if providers are missing, the error will bubble up properly
+  // This follows React's Rules of Hooks
+  let socketContext: ReturnType<typeof useSocket> | null = null;
+  let callContext: ReturnType<typeof useCall> | null = null;
+  
+  try {
+    socketContext = useSocket();
+  } catch (e) {
+    console.warn('SocketContext: component not wrapped in SocketProvider', e);
+  }
+
+  try {
+    callContext = useCall();
+  } catch (e) {
+    console.warn('CallContext: component not wrapped in CallProvider', e);
+  }
+
+  const socket = socketContext?.socket || null;
+  const initiateCall = callContext?.initiateCall || (() => {});
 
   const fetchChatInfo = useCallback(async () => {
     try {
@@ -199,10 +212,13 @@ export default function ChatInfoScreen() {
     });
   }, [otherUserId, router]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    fetchChatInfo();
-    setRefreshing(false);
+    try {
+      await fetchChatInfo();
+    } finally {
+      setRefreshing(false);
+    }
   }, [fetchChatInfo]);
 
   useEffect(() => {
@@ -226,7 +242,11 @@ export default function ChatInfoScreen() {
     };
 
     socket.on('user online', handleUserStatus);
-    return () => socket.off('user online', handleUserStatus);
+    return () => {
+      if (socket) {
+        socket.off('user online', handleUserStatus);
+      }
+    };
   }, [socket, otherUserId]);
 
   if (loading) {

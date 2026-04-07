@@ -2,8 +2,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { get } from '@/services/api';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useTheme } from '@/hooks/use-theme-color';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, TouchableOpacity, View, useColorScheme, Modal } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, TouchableOpacity, View, Modal } from 'react-native';
 
 interface User {
   _id: string;
@@ -31,7 +32,7 @@ export default function FollowersListScreen() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const router = useRouter();
   const navigation = useNavigation();
-  const colorScheme = useColorScheme();
+  const colors = useTheme();
 
   const listType: ListType = type || 'followers';
 
@@ -89,7 +90,7 @@ export default function FollowersListScreen() {
 
   const renderUserItem = ({ item }: { item: User }) => (
     <TouchableOpacity 
-      style={styles.userItem} 
+      style={[styles.userItem, { borderBottomColor: colors.border }]} 
       onPress={() => handleUserPress(item._id)}
     >
       <Image 

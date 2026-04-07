@@ -18,9 +18,10 @@ const messageSchema = new mongoose.Schema({
     bodyText: {
         type: String
     },
-    content: {
-        type: String
-    },
+    // ✅ FIX: Removed redundant 'content' field - use bodyText as single source of truth
+    // Previously both bodyText and content stored identical message text
+    // Now consolidating to bodyText only for cleaner schema
+    
     msgType: {
         type: String,
         enum: ['text', 'image', 'video', 'file', 'audio'],
@@ -37,20 +38,18 @@ const messageSchema = new mongoose.Schema({
             original_name: String
         }
     ],
-    // For message reactions - Fixed to match controller usage: { emoji, user, reactedAt }
-    reactions: [
-        {
-            emoji: String,
-            user: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'User'
-            },
-            reactedAt: {
-                type: Date,
-                default: Date.now
-            }
-        }
-    ],
+    // ✅ FIX: Reactions now stored in separate MessageReaction collection
+    // (not in embedded array) for better analytics, indexing, and scalability
+    // Query: MessageReaction.find({ message: messageId })
+    // This keeps Message schema lean and allows efficient reaction analytics
+    
+    // ✅ FIX: Consolidated read-tracking to use embedded readBy array only
+    // Previously had both readBy[] (embedded) and MessageReceipt collection
+    // MessageReceipt is unused in main chat flow and creates sync issues
+    // Using embedded readBy array for simplicity and consistency
+    // Single source of truth: Message.readBy[{ user, readAt }]
+    // Query by 'readBy.user' for unread message counts
+    
     // Message read receipts
     readBy: [
         {

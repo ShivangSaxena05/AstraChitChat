@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -153,13 +153,16 @@ function RootLayoutContent() {
   );
 }
 
-// Connects AuthProvider to SocketProvider so signOut can disconnect the socket
-function AuthProviderWithSocket({ children }: { children: React.ReactNode }) {
-  const { disconnect } = useSocket();
+// Inner component that uses useAuth — only rendered AFTER AuthProvider is set up
+function RootLayoutWithProviders() {
+  const { handleAuthError } = useAuth();
+
   return (
-    <AuthProvider socketDisconnect={disconnect}>
-      {children}
-    </AuthProvider>
+    <SocketProvider onAuthError={handleAuthError}>
+      <CallProvider>
+        <RootLayoutContent />
+      </CallProvider>
+    </SocketProvider>
   );
 }
 
@@ -168,13 +171,9 @@ export default function RootLayout() {
     <RootErrorBoundary>
       <CustomThemeProvider>
         <NetworkProvider>
-          <SocketProvider>
-            <AuthProviderWithSocket>
-              <CallProvider>
-                <RootLayoutContent />
-              </CallProvider>
-            </AuthProviderWithSocket>
-          </SocketProvider>
+          <AuthProvider>
+            <RootLayoutWithProviders />
+          </AuthProvider>
         </NetworkProvider>
       </CustomThemeProvider>
     </RootErrorBoundary>

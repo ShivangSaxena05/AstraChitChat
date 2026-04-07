@@ -1,6 +1,7 @@
 import { get } from "@/services/api";
 import { SOCKET_URL } from "@/services/config";
 import secureTokenManager from "@/services/secureTokenManager";
+import { useAuth } from "@/contexts/AuthContext";
 import React, {
     createContext,
     ReactNode,
@@ -88,9 +89,13 @@ export const useSocket = () => {
 
 interface SocketProviderProps {
   children: ReactNode;
+  onAuthError?: () => void;
 }
 
-export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
+export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onAuthError }) => {
+  // ✅ FIX: Gate socket connection on auth state
+  const { isSignedIn } = useAuth();
+
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
@@ -294,6 +299,22 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     setOfflineQueue((prev) => [...prev, queueItem]);
   }, []);
 
+  // ✅ HELPER: Extract duplicate chat loading logic into a reusable function
+  const loadAndSetConversations = useCallback(async () => {
+    try {
+      const data = await get("/chats");
+      if (!data || !Array.isArray(data)) return;
+      const unique = Array.from(new Map(data.map(c => [c._id, c])).values());
+      const valid = unique.filter(c => c.lastMessage?.text || c.lastMessage?.createdAt);
+      setConversations(valid.sort((a: any, b: any) =>
+        new Date(b.lastMessage?.createdAt || b.updatedAt || 0).getTime() -
+        new Date(a.lastMessage?.createdAt || a.updatedAt || 0).getTime()
+      ));
+    } catch (error) {
+      console.error('[Socket] Error loading conversations:', error);
+    }
+  }, []);
+
   const processOfflineQueue = useCallback(async () => {
     if (!socket || !isConnected || offlineQueue.length === 0) {
       return;
@@ -432,44 +453,28 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         newSocket.emit("setup", { _id: userId, isOnline: true });
 
         // ✅ FIX BUG 7: Load user encryption keys on connection
+        // NOTE: Only fetching public key from server. Secret key must be stored locally.
         try {
-          const keysData = await get("/user/encryption-keys");
-          if (keysData && keysData.publicKey && keysData.secretKey) {
+          const keysData = await get("/e2ee/own-key");
+          if (keysData && keysData.publicKey) {
+            // Only store public key from server; secret key should come from local storage
             setUserKeys({
               publicKey: keysData.publicKey,
-              secretKey: keysData.secretKey,
+              secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
-            console.log('[Socket] User encryption keys loaded');
+            console.log('[Socket] User encryption public key loaded from server');
+          } else {
+            // User hasn't registered an E2EE key yet - this is expected for new users
+            console.log('[Socket] User has not registered E2EE key yet');
           }
         } catch (error) {
-          console.warn('[Socket] Error loading encryption keys:', error);
-          // Non-critical, continue without keys
+          console.warn('[Socket] Non-critical: Could not load public key from server:', error);
+          // Non-critical, continue without server keys. Client-side keys take precedence.
         }
 
         // Load initial conversations
         try {
-          const data = await get("/chats");
-          if (data && Array.isArray(data)) {
-            // FIX: Deduplicate chats by ID before sorting
-            const uniqueChats = Array.from(
-              new Map(data.map(chat => [chat._id, chat])).values()
-            );
-            
-            // ✅ PRODUCTION FIX: Double-check filtering on frontend (safety layer)
-            const validChats = uniqueChats.filter(
-              (chat) => chat.lastMessage?.text || chat.lastMessage?.createdAt
-            );
-            
-            setConversations(validChats.sort((a: any, b: any) => {
-              const aTime = a.lastMessage?.createdAt
-                ? new Date(a.lastMessage.createdAt).getTime()
-                : new Date(a.updatedAt || 0).getTime();
-              const bTime = b.lastMessage?.createdAt
-                ? new Date(b.lastMessage.createdAt).getTime()
-                : new Date(b.updatedAt || 0).getTime();
-              return bTime - aTime;
-            }));
-          }
+          await loadAndSetConversations();
         } catch (error) {
           console.error('[Socket] Error loading conversations:', error);
         }
@@ -505,13 +510,13 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         setIsOnline(false);
         initializedRef.current = false;
         
-        // Clear tokens to force re-login
-        secureTokenManager.clearAll().catch((e) => {
-          console.error('[Socket] Error clearing tokens:', e);
-        });
-        
         // Disconnect to stop auto-reconnection attempts
         newSocket.disconnect();
+        
+        // ✅ FIX 3: Call onAuthError callback to redirect to login
+        if (onAuthError) {
+          onAuthError();
+        }
       });
 
       // ✅ ENHANCED: Reconnection attempt handler
@@ -529,39 +534,26 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
         newSocket.emit("setup", { _id: userId, isOnline: true });
         
         // ✅ FIX BUG 7: Reload user encryption keys on reconnect
+        // NOTE: Only fetching public key from server. Secret key must be stored locally.
         try {
-          const keysData = await get("/user/encryption-keys");
-          if (keysData && keysData.publicKey && keysData.secretKey) {
+          const keysData = await get("/e2ee/own-key");
+          if (keysData && keysData.publicKey) {
+            // Only store public key from server; secret key should come from local storage
             setUserKeys({
               publicKey: keysData.publicKey,
-              secretKey: keysData.secretKey,
+              secretKey: keysData.secretKey || '', // Secret key stored locally, not from server
             });
-            console.log('[Socket] User encryption keys reloaded after reconnect');
+            console.log('[Socket] User encryption public key reloaded after reconnect');
+          } else {
+            console.log('[Socket] User has not registered E2EE key yet (reconnect)');
           }
         } catch (error) {
-          console.warn('[Socket] Error reloading encryption keys after reconnect:', error);
+          console.warn('[Socket] Non-critical: Could not reload public key after reconnect:', error);
         }
         
         // Sync state after reconnection
         try {
-          const data = await get("/chats");
-          if (data && Array.isArray(data)) {
-            const uniqueChats = Array.from(
-              new Map(data.map(chat => [chat._id, chat])).values()
-            );
-            const validChats = uniqueChats.filter(
-              (chat) => chat.lastMessage?.text || chat.lastMessage?.createdAt
-            );
-            setConversations(validChats.sort((a: any, b: any) => {
-              const aTime = a.lastMessage?.createdAt
-                ? new Date(a.lastMessage.createdAt).getTime()
-                : new Date(a.updatedAt || 0).getTime();
-              const bTime = b.lastMessage?.createdAt
-                ? new Date(b.lastMessage.createdAt).getTime()
-                : new Date(b.updatedAt || 0).getTime();
-              return bTime - aTime;
-            }));
-          }
+          await loadAndSetConversations();
         } catch (error) {
           console.error('[Socket] Error syncing conversations after reconnect:', error);
         }
@@ -628,12 +620,22 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   useEffect(() => { connectRef.current = connect; }, [connect]);
   useEffect(() => { disconnectRef.current = disconnect; }, [disconnect]);
 
+  // ✅ FIX: Gate auto-connect on isSignedIn to prevent socket connection before auth
+  // - On fresh install (no token): isSignedIn = false, socket doesn't connect, no dangling socket
+  // - On logout → re-login: disconnect fires first (clearing state), then reconnect fires
+  // - This ensures previous socket is fully cleaned up before new one connects
   useEffect(() => {
-    connectRef.current();
-    return () => {
+    if (isSignedIn) {
+      // ✅ Connect when user is authenticated
+      connectRef.current();
+    } else {
+      // ✅ Disconnect when user logs out or is not authenticated
+      // This prevents dangling sockets and clears all socket state
       disconnectRef.current();
-    };
-  }, []); // Empty deps — only run on mount/unmount
+    }
+    // NOTE: We don't include connectRef/disconnectRef in deps because they're stable
+    // The actual dependencies are 'isSignedIn' which controls the flow
+  }, [isSignedIn]);
 
   return (
     <SocketContext.Provider

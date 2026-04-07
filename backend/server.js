@@ -85,11 +85,16 @@ const corsOptions = {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Length'],
+    maxAge: 86400, // 24 hours
 };
 
 app.use(cors(corsOptions));
 
-app.use(express.json({ limit: '10mb' }));
+// ✅ FIX: Support larger file uploads
+// Increased limits for multipart form data (FormData with files)
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // ── Static file serving ───────────────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -137,6 +142,7 @@ app.use('/api/report', require('./routes/reportRoutes'));
 app.use('/api/stories', require('./routes/storyRoutes'));
 app.use('/api/e2ee', require('./routes/e2eeRoutes'));
 app.use('/api/e2ee', require('./routes/multiDeviceE2eeRoutes'));
+app.use('/api/webrtc', require('./routes/webrtcRoutes'));
 
 app.get('/', (req, res) => res.send('Hello World'));
 

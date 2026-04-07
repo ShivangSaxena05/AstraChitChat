@@ -29,6 +29,7 @@ import { useTheme } from '@/hooks/use-theme-color';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { PostSkeleton } from '@/components/PostSkeleton';
 import { FlickSkeleton } from '@/components/FlickSkeleton';
+import { useAuth } from '@/contexts/AuthContext';
 
 const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
@@ -72,6 +73,7 @@ interface SavedAccount {
 export default function HomeScreen() {
   const router = useRouter();
   const { connect } = useSocket();
+  const { handleAuthError } = useAuth();
   const colorScheme = useColorScheme();
 
   // Tab state & User state
@@ -118,7 +120,25 @@ export default function HomeScreen() {
       const data = await get('/posts/flicks');
       setFlicks(data.flicks || []);
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to fetch flicks');
+      // Handle auth errors — redirect to login
+      if (error?.isAuthError || error?.type === 'AUTH_ERROR') {
+        console.log('[HomeScreen] Auth error in fetchFlicks — redirecting to login');
+        await handleAuthError(error?.message || 'Your session has expired. Please log in again.');
+        return;
+      }
+
+      // Handle network errors silently during refresh (show cached data)
+      if (error?.type === 'NETWORK_ERROR' && isRefresh) {
+        console.warn('[HomeScreen] Network error during refresh, will retry later');
+        return;
+      }
+
+      // Show error alert for other errors
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to fetch flicks';
+      console.error('[HomeScreen] Error fetching flicks:', errorMessage);
+      if (!isRefresh) {
+        Alert.alert('Error', errorMessage);
+      }
     } finally {
       setFlicksLoading(false);
       setFlicksRefreshing(false);
@@ -144,7 +164,25 @@ export default function HomeScreen() {
       setHasMore((data.posts || []).length === pageSize);
       setPage(pageNum);
     } catch (error: any) {
-      console.error('API Error:', error.response?.data || error.message);
+      // Handle auth errors — redirect to login
+      if (error?.isAuthError || error?.type === 'AUTH_ERROR') {
+        console.log('[HomeScreen] Auth error in fetchPosts — redirecting to login');
+        await handleAuthError(error?.message || 'Your session has expired. Please log in again.');
+        return;
+      }
+
+      // Handle network errors silently during refresh (show cached data)
+      if (error?.type === 'NETWORK_ERROR' && isRefresh) {
+        console.warn('[HomeScreen] Network error during refresh, will retry later');
+        return;
+      }
+
+      // Log other errors
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to fetch posts';
+      console.error('[HomeScreen] Error fetching posts:', errorMessage);
+      if (!isRefresh) {
+        Alert.alert('Error', errorMessage);
+      }
     } finally {
       setExploreLoading(false);
       setExploreRefreshing(false);

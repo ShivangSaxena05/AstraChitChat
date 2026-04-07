@@ -3,8 +3,8 @@
 // export const PROFILE_API_URL = `${API_URL}/profile`;
 
 // ✅ Use your Windows machine IP for Android device (NOT localhost)
-export const API_URL = 'http://localhost:5000/api';
-export const SOCKET_URL = 'http://localhost:5000/';
+export const API_URL = 'https://astrachitchat.onrender.com/api';
+export const SOCKET_URL = 'https://astrachitchat.onrender.com/';
 export const PROFILE_API_URL = `${API_URL}/profile`;
 
 // When you deploy, you can easily swap these out:

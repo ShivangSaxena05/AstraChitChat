@@ -127,9 +127,9 @@ const getFollowers = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 20;
     const skip = (page - 1) * limit;
 
-    const totalMatch = await Follow.countDocuments({ following: userId });
+    const totalMatch = await Follower.countDocuments({ following: userId, status: 'accepted' });
 
-    const followers = await Follow.find({ following: userId })
+    const followers = await Follower.find({ following: userId, status: 'accepted' })
       .populate('follower', 'name username profilePicture')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -155,9 +155,9 @@ const getFollowing = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 20;
     const skip = (page - 1) * limit;
 
-    const totalMatch = await Follow.countDocuments({ follower: userId });
+    const totalMatch = await Follower.countDocuments({ follower: userId, status: 'accepted' });
 
-    const following = await Follow.find({ follower: userId })
+    const following = await Follower.find({ follower: userId, status: 'accepted' })
       .populate('following', 'name username profilePicture')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -181,14 +181,24 @@ const checkFollowStatus = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
 
-    const follow = await Follow.findOne({ follower: currentUserId, following: userId });
+    // Check if there's an accepted follow
+    const follow = await Follower.findOne({ 
+      follower: currentUserId, 
+      following: userId,
+      status: 'accepted'
+    });
 
-    const userToCheck = await User.findById(userId).select('followRequests');
-    const isRequested = userToCheck?.followRequests?.some(
-      id => id.toString() === currentUserId.toString()
-    );
+    // Check if there's a pending follow request
+    const pendingRequest = await Follower.findOne({
+      follower: currentUserId,
+      following: userId,
+      status: 'pending'
+    });
 
-    res.json({ isFollowing: !!follow, isRequested: !!isRequested });
+    res.json({ 
+      isFollowing: !!follow, 
+      isRequested: !!pendingRequest 
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error: could not check follow status', error: error.message });
   }
@@ -202,21 +212,20 @@ const acceptFollowRequest = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
 
-    const currentUser = await User.findById(currentUserId);
-    const hasRequest = currentUser.followRequests.some(
-      id => id.toString() === userId.toString()
-    );
+    // Find pending follow request from userId to currentUserId
+    const pendingRequest = await Follower.findOne({
+      follower: userId,
+      following: currentUserId,
+      status: 'pending'
+    });
 
-    if (!hasRequest) {
+    if (!pendingRequest) {
       return res.status(400).json({ message: 'No follow request found from this user' });
     }
 
-    currentUser.followRequests = currentUser.followRequests.filter(
-      id => id.toString() !== userId.toString()
-    );
-    await currentUser.save();
-
-    await Follow.create({ follower: userId, following: currentUserId });
+    // Update status to accepted
+    pendingRequest.status = 'accepted';
+    await pendingRequest.save();
     
     // Update stats using UserStats service (consistent with followUser)
     await Promise.all([
@@ -238,19 +247,16 @@ const rejectFollowRequest = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
 
-    const currentUser = await User.findById(currentUserId);
-    const hasRequest = currentUser.followRequests.some(
-      id => id.toString() === userId.toString()
-    );
+    // Find and delete pending follow request from userId to currentUserId
+    const result = await Follower.findOneAndDelete({
+      follower: userId,
+      following: currentUserId,
+      status: 'pending'
+    });
 
-    if (!hasRequest) {
+    if (!result) {
       return res.status(400).json({ message: 'No follow request found from this user' });
     }
-
-    currentUser.followRequests = currentUser.followRequests.filter(
-      id => id.toString() !== userId.toString()
-    );
-    await currentUser.save();
 
     res.json({ message: 'Follow request rejected' });
   } catch (error) {
@@ -264,10 +270,14 @@ const rejectFollowRequest = async (req, res) => {
 const getFollowRequests = async (req, res) => {
   try {
     const currentUserId = req.user._id;
-    const currentUser = await User.findById(currentUserId)
-      .populate('followRequests', 'name username profilePicture');
+    
+    // Fetch all pending follow requests where currentUserId is the target
+    const pendingRequests = await Follower.find({
+      following: currentUserId,
+      status: 'pending'
+    }).populate('follower', 'name username profilePicture');
 
-    res.json({ requests: currentUser.followRequests || [] });
+    res.json({ requests: pendingRequests.map(r => r.follower) || [] });
   } catch (error) {
     res.status(500).json({ message: 'Server error: could not fetch follow requests', error: error.message });
   }

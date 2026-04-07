@@ -46,13 +46,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // Determine if dark mode is active
-  const isDarkMode = 
-    themeMode === 'dark' || 
-    (themeMode === 'system' && systemColorScheme === 'dark');
-
-  if (!isHydrated) {
-    return <>{children}</>;
-  }
+  // During hydration, use system default; after hydration, use saved preference
+  const isDarkMode =
+    !isHydrated
+      ? systemColorScheme === 'dark'          // system default while loading
+      : themeMode === 'dark' || (themeMode === 'system' && systemColorScheme === 'dark');
 
   return (
     <ThemeContext.Provider value={{ themeMode, setThemeMode, isDarkMode }}>

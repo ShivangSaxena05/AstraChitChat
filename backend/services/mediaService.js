@@ -89,7 +89,8 @@ const uploadToCloudinary = (fileBuffer, options) => {
     return new Promise((resolve, reject) => {
         const { folder, ownerId, fileName, resourceType = 'auto' } = options;
         
-        // Validate folder path
+        // Validate folder path — prevents typos and ensures consistent structure
+        // Refer to MEDIA_FOLDERS mapping for valid folder keys
         if (!MEDIA_FOLDERS[folder]) {
             return reject(new Error(`Invalid media folder: "${folder}". Must be one of: ${Object.keys(MEDIA_FOLDERS).join(', ')}`));
         }
@@ -99,6 +100,9 @@ const uploadToCloudinary = (fileBuffer, options) => {
         const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
         const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
         
+        // Upload to Cloudinary using programmatic API (not preset-based)
+        // Folder path: myapp/{folderPath}/{ownerId}/{timestamp}-{safeFileName}
+        // Example for profile: myapp/profile/current/{userId}/{timestamp}-{filename}
         const uploadStream = cloudinary.uploader.upload_stream(
             {
                 folder: `myapp/${folderPath}/${ownerId}`,
@@ -129,28 +133,41 @@ const uploadToCloudinary = (fileBuffer, options) => {
 
 const uploadFileToCloudinary = (file, folder = 'postImage') => {
     return new Promise((resolve, reject) => {
+        // ⚠️ IMPORTANT: Works with multer.memoryStorage()
+        // file.path is undefined with memory storage.
+        // Use file.buffer instead.
+        if (!file.buffer) {
+            return reject(new Error('File buffer is missing. Ensure uploadMiddleware uses multer.memoryStorage()'));
+        }
+
         const folderPath = MEDIA_FOLDERS[folder] || MEDIA_FOLDERS.postImage;
         const timestamp = Date.now();
         const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
         
-        cloudinary.uploader.upload(file.path, {
-            folder: `myapp/${folderPath}`,
-            public_id: `${timestamp}-${safeFileName}`,
-            resource_type: 'auto',
-            transformation: [{ quality: 'auto', fetch_format: 'auto' }]
-        }, (error, result) => {
-            if (error) {
-                reject(error);
-            } else {
-                resolve({
-                    url: result.secure_url,
-                    publicId: result.public_id,
-                    secureUrl: result.secure_url,
-                    resourceType: result.resource_type,
-                    format: result.format
-                });
+        // Use streamifier to convert buffer to stream for Cloudinary
+        const uploadStream = cloudinary.uploader.upload_stream(
+            {
+                folder: `myapp/${folderPath}`,
+                public_id: `${timestamp}-${safeFileName}`,
+                resource_type: 'auto',
+                transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+            },
+            (error, result) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve({
+                        url: result.secure_url,
+                        publicId: result.public_id,
+                        secureUrl: result.secure_url,
+                        resourceType: result.resource_type,
+                        format: result.format
+                    });
+                }
             }
-        });
+        );
+
+        streamifier.createReadStream(file.buffer).pipe(uploadStream);
     });
 };
 
@@ -240,21 +257,31 @@ const getCloudinaryUploadUrl = async (options) => {
 //      ownerId:   userId or chatId — used as subfolder    (required)
 //      fileName:  original file name                      (required)
 //      fileType:  MIME type (e.g. 'image/jpeg')          (required)
+//      fileSize:  file size in bytes (optional)
 //      expiresIn: presigned URL TTL in seconds            (default 300)
 //    }
+//
+//    Example:
+//      const result = await getPresignedUploadUrl({
+//        folder: 'postImage',
+//        ownerId: userId,
+//        fileName: 'photo.jpg',
+//        fileType: 'image/jpeg',
+//        expiresIn: 600
+//      });
 // ─────────────────────────────────────────────────────────────────────────────
 const getPresignedUploadUrl = async (options) => {
-    // Support legacy call signature: (userId, fileName, fileType, expiresIn)
-    let folder, ownerId, fileName, fileType, fileSize, expiresIn;
-    if (typeof options === 'string') {
-        // Legacy: getPresignedUploadUrl(userId, fileName, fileType, expiresIn)
-        ownerId   = options;
-        fileName  = arguments[1];
-        fileType  = arguments[2];
-        expiresIn = arguments[3] || 300;
-        folder    = 'postImage'; // default folder for legacy calls
-    } else {
-        ({ folder, ownerId, fileName, fileType, fileSize, expiresIn = 300 } = options);
+    // ⚠️ IMPORTANT: Must pass options as an object
+    // The arguments object is unreliable in arrow functions and strict mode
+    if (!options || typeof options !== 'object') {
+        throw new Error('getPresignedUploadUrl() requires an options object. Example: { folder, ownerId, fileName, fileType, expiresIn }');
+    }
+
+    const { folder, ownerId, fileName, fileType, fileSize, expiresIn = 300 } = options;
+
+    // Validate required fields
+    if (!folder || !ownerId || !fileName || !fileType) {
+        throw new Error('getPresignedUploadUrl() requires: folder, ownerId, fileName, fileType');
     }
 
     if (!MEDIA_FOLDERS[folder]) {

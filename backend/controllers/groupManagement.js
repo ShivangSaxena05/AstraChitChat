@@ -20,10 +20,18 @@ async function leaveGroup(req, res) {
     const participant = chat.participants.find(p => p.user._id.toString() === userId);
     if (!participant) return res.status(403).json({ message: 'Not a participant' });
 
-    // Admin can leave if >2 members remain
-    const remainingMembers = chat.participants.length - 1;
-    if (participant.role === 'admin' && remainingMembers < 2) {
-      return res.status(400).json({ message: 'Last admin cannot leave group' });
+    // ✅ FIX: Admin can only leave if there are other admins (not based on total member count)
+    // Check if admin is trying to leave
+    if (participant.role === 'admin') {
+      // Count remaining admins after this admin leaves
+      const remainingAdmins = chat.participants.filter(
+        p => p.role === 'admin' && p.user._id.toString() !== userId
+      ).length;
+      
+      // Block if this would be the last admin
+      if (remainingAdmins === 0) {
+        return res.status(400).json({ message: 'Last admin cannot leave group' });
+      }
     }
 
     // Remove participant
@@ -53,13 +61,14 @@ async function addGroupMember(req, res) {
     const chat = await Chat.findById(chatId).populate('participants.user', '_id');
     if (!chat || chat.convoType !== 'group') return res.status(404).json({ message: 'Group chat not found' });
 
-    const adminParticipant = chat.participants.find(p => p.user.toString() === adminId);
+    // ✅ FIX: p.user is populated object, so use p.user._id.toString() not p.user.toString()
+    const adminParticipant = chat.participants.find(p => p.user._id.toString() === adminId);
     if (!adminParticipant || adminParticipant.role !== 'admin') {
       return res.status(403).json({ message: 'Admin only' });
     }
 
     // Check if already member
-    if (chat.participants.some(p => p.user.toString() === newMemberId)) {
+    if (chat.participants.some(p => p.user._id.toString() === newMemberId)) {
       return res.status(400).json({ message: 'User already a member' });
     }
 
@@ -98,25 +107,26 @@ async function removeGroupMember(req, res) {
     const chat = await Chat.findById(chatId).populate('participants.user', '_id role');
     if (!chat || chat.convoType !== 'group') return res.status(404).json({ message: 'Group chat not found' });
 
-    const adminParticipant = chat.participants.find(p => p.user.toString() === adminId);
+    // ✅ FIX: p.user is populated object, so use p.user._id.toString() not p.user.toString()
+    const adminParticipant = chat.participants.find(p => p.user._id.toString() === adminId);
     if (!adminParticipant || adminParticipant.role !== 'admin') {
       return res.status(403).json({ message: 'Admin only' });
     }
 
-    const targetParticipant = chat.participants.find(p => p.user.toString() === targetId);
+    const targetParticipant = chat.participants.find(p => p.user._id.toString() === targetId);
     if (!targetParticipant) return res.status(404).json({ message: 'Member not found' });
 
     // Cannot remove self
     if (targetId === adminId) return res.status(400).json({ message: 'Cannot remove self' });
 
     // Cannot remove last admin
-    const remainingAdmins = chat.participants.filter(p => p.role === 'admin' && p.user.toString() !== targetId).length;
+    const remainingAdmins = chat.participants.filter(p => p.role === 'admin' && p.user._id.toString() !== targetId).length;
     if (targetParticipant.role === 'admin' && remainingAdmins === 0) {
       return res.status(400).json({ message: 'Cannot remove last admin' });
     }
 
     // Remove member
-    chat.participants = chat.participants.filter(p => p.user.toString() !== targetId);
+    chat.participants = chat.participants.filter(p => p.user._id.toString() !== targetId);
     chat.markModified('participants');
     await chat.save();
 

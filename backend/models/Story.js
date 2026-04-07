@@ -22,6 +22,26 @@ const storySchema = new mongoose.Schema(
       },
       required: [true, 'Media is required']
     },
+    textOverlay: [
+      {
+        id: String,
+        text: {
+          type: String,
+          trim: true
+        },
+        fontSize: Number,
+        color: String,
+        // Position and rotation are NOT persisted - only text content matters
+        // Position is ephemeral and should be client-side only
+      }
+    ],
+    drawings: [
+      {
+        // Drawings are typically not persisted in most apps (ephemeral)
+        // If you need them, add fields here
+        // For now, keeping structure but they're optional
+      }
+    ],
     viewedBy: [
       {
         user: {

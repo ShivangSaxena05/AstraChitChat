@@ -203,7 +203,7 @@ export default function ChatScreen() {
         style={styles.messagesList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
       />
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { borderTopColor: colors.border }]}>
         <TextInput
           style={[styles.input, { color: colors.text, borderColor: colors.border }]}
           value={newMessage}
@@ -213,14 +213,18 @@ export default function ChatScreen() {
           editable={!isSending}
         />
         <TouchableOpacity
-          style={[styles.sendButton, { backgroundColor: colors.tint }, isSending && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton, 
+            { backgroundColor: colors.tint }, 
+            isSending && styles.sendButtonDisabled
+          ]}
           onPress={sendMessage}
           disabled={isSending}
         >
           {isSending ? (
             <ActivityIndicator color={colors.card} size="small" />
           ) : (
-            <Text style={styles.sendButtonText}>Send</Text>
+            <Text style={[styles.sendButtonText, { color: colors.card }]}>Send</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -249,18 +253,14 @@ const styles = StyleSheet.create({
   },
   sent: {
     alignSelf: 'flex-end',
-    backgroundColor: '#0a7ea4', // Theme: light.info / primary tint
   },
   received: {
     alignSelf: 'flex-start',
-    backgroundColor: '#e8e8e8', // Theme: light.backgroundTertiary
   },
   messageText: {
-    color: '#1a1a1a', // Theme: light.text
   },
   timestamp: {
     fontSize: 12,
-    color: '#888888', // Theme: light.textTertiary
     marginTop: 5,
   },
   inputContainer: {
@@ -286,7 +286,6 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   sendButtonText: {
-    color: '#ffffff', // Theme: white text
     fontWeight: 'bold',
   },
 });

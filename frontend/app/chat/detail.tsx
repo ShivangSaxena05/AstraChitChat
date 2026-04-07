@@ -11,6 +11,8 @@ import {
   StyleSheet,
   View,
   Alert,
+  Text,
+  TouchableOpacity,
 } from 'react-native';
 import {
   GestureHandlerRootView,
@@ -57,10 +59,23 @@ export default function ChatDetailScreen() {
   const inputRef = useRef<any>(null);
   const flatListRef = useRef<any>(null);
 
-  // Route params
+  // Route params with validation
   const chatId = params.chatId as string;
   const otherUserId = params.otherUserId as string;
   const otherUsername = params.otherUsername as string;
+
+  // ✅ SAFETY CHECK: Validate critical route parameters on mount
+  useEffect(() => {
+    if (!chatId || !otherUserId || !otherUsername) {
+      console.error('[ChatDetail] Missing critical route parameters:', {
+        chatId: chatId || 'MISSING',
+        otherUserId: otherUserId || 'MISSING',
+        otherUsername: otherUsername || 'MISSING',
+      });
+      Alert.alert('Error', 'Invalid chat parameters. Returning to chat list.');
+      router.back();
+    }
+  }, [chatId, otherUserId, otherUsername, router]);
 
   // Global state
   const { socket, setConversations, updateConversation, setActiveChatId, onlineUsers } =
@@ -160,7 +175,8 @@ export default function ChatDetailScreen() {
       try {
         // Get current user ID — /profile/me is the correct endpoint
         const userData = await get('/profile/me');
-        setCurrentUserId(String(userData._id || userData.id));
+        const currentId = String(userData._id || userData.id);
+        setCurrentUserId(currentId);
 
         // Fetch other user status and profile
         const otherUserData = await get(`/profile/${otherUserId}`);
@@ -174,8 +190,9 @@ export default function ChatDetailScreen() {
         setActiveChatId(chatId);
         setLoading(false);
 
-        // Fetch initial messages
-        await fetchMessages(false);
+        // Fetch initial messages with the currentId we just fetched
+        // Pass currentId directly to avoid state update race conditions
+        await fetchMessages(false, currentId);
       } catch (error: any) {
         setError(
           error.response?.data?.message || 'Failed to initialize chat',
@@ -189,7 +206,10 @@ export default function ChatDetailScreen() {
   }, [chatId, otherUserId]);
 
   // Fetch messages from API
-  const fetchMessages = async (isLoadMore = false) => {
+  const fetchMessages = async (isLoadMore = false, userIdParam?: string) => {
+    // Use userIdParam if provided, otherwise fall back to state (for subsequent calls)
+    const effectiveUserId = userIdParam || currentUserId;
+    
     try {
       if (!isLoadMore) {
         if (messages.length === 0) setLoading(true);
@@ -265,20 +285,21 @@ export default function ChatDetailScreen() {
 
         setMessages(hydratedMessages);
 
-        if (chatId && currentUserId) {
-          markAllAsRead();
+        // ✅ FIX: Use effectiveUserId instead of relying on state variable
+        if (chatId && effectiveUserId) {
+          markAllAsRead(effectiveUserId);
           if (data.messages && data.messages.length > 0) {
             data.messages.forEach((msg: Message) => {
               if (
-                String(msg.sender._id) !== String(currentUserId) &&
+                String(msg.sender._id) !== String(effectiveUserId) &&
                 (!msg.deliveredTo ||
-                  !msg.deliveredTo.includes(currentUserId))
+                  !msg.deliveredTo.includes(effectiveUserId))
               ) {
                 socket?.emit('message delivered', {
                   messageId: msg._id,
                   chatId: chatId,
                   senderId: msg.sender._id,
-                  receiverId: currentUserId,
+                  receiverId: effectiveUserId,
                 });
               }
             });
@@ -304,7 +325,11 @@ export default function ChatDetailScreen() {
     }
   };
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = async (userIdParam?: string) => {
+    // Use provided userId or fall back to state
+    const effectiveUserId = userIdParam || currentUserId;
+    if (!effectiveUserId) return;
+
     try {
       await post('/chats/read-all', { chatId });
       if (socket) {
@@ -313,10 +338,10 @@ export default function ChatDetailScreen() {
 
       setMessages((prev) =>
         prev.map((m) => {
-          if (String(m.sender._id) !== String(currentUserId)) {
+          if (String(m.sender._id) !== String(effectiveUserId)) {
             return {
               ...m,
-              readBy: [...(m.readBy || []), String(currentUserId)],
+              readBy: [...(m.readBy || []), String(effectiveUserId)],
             };
           }
           return m;
@@ -494,7 +519,7 @@ export default function ChatDetailScreen() {
     const layoutHeight = event.nativeEvent.layoutMeasurement.height;
     const maxOffset = contentHeight - layoutHeight;
 
-    if (offsetY > maxOffset - 100 && hasMore && !loadingMore) {
+    if (offsetY < 100 && hasMore && !loadingMore) {
       fetchMessages(true);
     }
   }, [hasMore, loadingMore]);
@@ -591,6 +616,25 @@ export default function ChatDetailScreen() {
   });
 
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  // ✅ EARLY RETURN: Prevent rendering with invalid parameters
+  if (!chatId || !otherUserId || !currentUserId) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <Text style={{ color: colors.error, fontSize: 16, marginBottom: 20 }}>
+          {loading ? 'Loading chat...' : 'Invalid chat parameters'}
+        </Text>
+        {!loading && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{ paddingVertical: 10, paddingHorizontal: 20, backgroundColor: colors.tint, borderRadius: 8 }}
+          >
+            <Text style={{ color: colors.background, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={[{ flex: 1, backgroundColor: colors.background }]}>

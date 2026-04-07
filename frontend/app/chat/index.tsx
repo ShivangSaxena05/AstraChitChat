@@ -9,12 +9,22 @@ import { useTheme } from '@/hooks/use-theme-color';
 
 interface Chat {
   _id: string;
+  convoType: 'direct' | 'group';
   participants: {
-    _id: string;
-    username: string;
-    profilePicture: string;
+    user: {
+      _id: string;
+      username: string;
+      profilePicture: string;
+      name: string;
+      isOnline: boolean;
+      lastSeen: string;
+      bio: string;
+    };
+    role: string;
+    joinedAt: string;
+    lastReadMsgId: string | null;
   }[];
-  lastMessage: {
+  lastMessage?: {
     text: string;
     createdAt: string;
     sender: {
@@ -24,8 +34,16 @@ interface Chat {
     };
   };
   unreadCount: number;
-  lastReadMsgId: string;
+  lastReadMsgId: string | null;
+  lastActivityTimestamp: string;
   updatedAt: string;
+  createdAt: string;
+  otherUser?: {
+    _id: string;
+    username: string;
+    profilePicture: string;
+    name: string;
+  };
 }
 
 const formatRelativeTime = (dateString: string) => {
@@ -57,7 +75,7 @@ const ChatItem = memo(({
   currentUserId: string | null;
 }) => {
   const colors = useTheme();
-  const otherParticipant = item.participants.find(p => String(p._id) !== String(currentUserId));
+  const otherParticipant = item.participants.find(p => String(p.user._id) !== String(currentUserId));
   const isFromMe = String(item.lastMessage?.sender?._id) === String(currentUserId);
 
   const formatLastMessage = () => {
@@ -68,7 +86,7 @@ const ChatItem = memo(({
     return isFromMe ? `You: ${item.lastMessage.text}` : item.lastMessage.text;
   };
 
-  const avatarUri = otherParticipant?.profilePicture || `https://i.pravatar.cc/150?u=${otherParticipant?.username || ''}`;
+  const avatarUri = otherParticipant?.user?.profilePicture || `https://i.pravatar.cc/150?u=${otherParticipant?.user?.username || ''}`;
   const formatLastMessagePreview = (text: string) => {
     if (text.length > 60) return text.slice(0, 60) + '…';
     return text;
@@ -89,7 +107,7 @@ const ChatItem = memo(({
       <View style={styles.chatInfo}>
         <View style={styles.chatHeader}>
           <ThemedText type="subtitle" style={styles.username} numberOfLines={1} ellipsizeMode="tail">
-            {otherParticipant?.username || 'Unknown User'}
+            {otherParticipant?.user?.username || 'Unknown User'}
           </ThemedText>
           <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
             {formatRelativeTime(item.updatedAt)}
@@ -163,23 +181,27 @@ export default function ChatListScreen() {
       }
       
       const data = await get('/chats');
-      if (data) {
+      if (data && Array.isArray(data)) {
         // FIX: Deduplicate chats by ID before sorting
         const uniqueChats = Array.from(
           new Map(data.map((chat: Chat) => [chat._id, chat])).values()
         ) as Chat[];
 
-        // Sort chats by most recent message (lastMessage.createdAt or updatedAt)
+        // Sort chats by most recent message (lastMessage.createdAt or lastActivityTimestamp)
         const sorted = uniqueChats.sort((a: Chat, b: Chat) => {
-          const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.updatedAt).getTime();
-          const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.updatedAt).getTime();
+          const aTime = a.lastMessage?.createdAt 
+            ? new Date(a.lastMessage.createdAt).getTime() 
+            : new Date(a.lastActivityTimestamp || a.updatedAt).getTime();
+          const bTime = b.lastMessage?.createdAt 
+            ? new Date(b.lastMessage.createdAt).getTime() 
+            : new Date(b.lastActivityTimestamp || b.updatedAt).getTime();
           return bTime - aTime;
         });
-        setConversations(sorted);
+        setConversations(sorted as any); // Cast to any to handle SocketContext Conversation type
       }
     } catch (error: any) {
       console.error('Error fetching chats:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to fetch chats');
+      Alert.alert('Error', error.message || 'Failed to fetch chats');
     } finally {
       if (showLoading) {
         setLoading(false);
@@ -195,13 +217,13 @@ export default function ChatListScreen() {
 
   // Handle navigation centrally
   const handlePressChat = useCallback((item: Chat) => {
-    const otherParticipant = item.participants.find(p => String(p._id) !== String(currentUserId));
+    const otherParticipant = item.participants.find(p => String(p.user._id) !== String(currentUserId));
     router.push({
       pathname: '/chat/detail',
       params: {
         chatId: item._id,
-        otherUserId: otherParticipant?._id || '',
-        otherUsername: otherParticipant?.username || ''
+        otherUserId: otherParticipant?.user?._id || '',
+        otherUsername: otherParticipant?.user?.username || ''
       }
     });
   }, [currentUserId, router]);

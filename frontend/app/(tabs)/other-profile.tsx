@@ -692,23 +692,18 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
         }}
       />
 
-      {/* Cover Photo Section */}
       <View style={[styles.coverSection, { backgroundColor: colors.backgroundTertiary }]}>
-        {/* 🐛 Bug 4 Fix: Actually render the cover photo if it exists */}
         {user.coverPhoto ? (
           <Image source={{ uri: user.coverPhoto }} style={styles.coverPhoto} />
         ) : (
           <View style={[styles.coverPhoto, { backgroundColor: colors.backgroundTertiary }]} />
         )}
-        {/* Menu Button */}
         <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
           <Ionicons name="ellipsis-horizontal" size={24} color={colors.background} />
         </TouchableOpacity>
       </View>
 
-      {/* Profile Header Card - Modern Style */}
       <View style={[styles.headerCard, { backgroundColor: colors.card, shadowColor: colors.shadow }]}>
-        {/* Avatar */}
         <TouchableOpacity 
           activeOpacity={0.8} 
           onPress={() => setProfileModalVisible(true)}
@@ -726,12 +721,10 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           </View>
         </TouchableOpacity>
 
-        {/* User Info */}
         <View style={styles.userInfoSection}>
           <ThemedText style={[styles.username, { color: colors.text }]}>{user.name}</ThemedText>
           <ThemedText style={[styles.displayName, { color: colors.textSecondary }]}>@{user.username}</ThemedText>
           
-          {/* Online Status */}
           <View style={styles.statusContainer}>
             <View style={[
               styles.statusIndicator,
@@ -745,7 +738,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           {user.bio && <ExpandableBio text={user.bio} maxLines={3} />}
         </View>
 
-        {/* Stats Section */}
         <View style={[styles.statsSection, { borderColor: colors.border }]}>
           <TouchableOpacity style={styles.statItem} activeOpacity={0.7}>
             <ThemedText style={[styles.statNumber, { color: colors.text }]}>{userStats.posts}</ThemedText>
@@ -775,7 +767,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
           </TouchableOpacity>
         </View>
 
-        {/* Action Buttons */}
         <View style={styles.actionButtonsSection}>
           {isFollowing ? (
             <>
@@ -833,7 +824,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
         </View>
       </View>
 
-      {/* Tab Container */}
       <View style={[styles.tabContainer, { backgroundColor: colors.background }]}>
         <TouchableOpacity
           style={[styles.tab, { backgroundColor: colors.backgroundSecondary }, activeTab === 'posts' && { backgroundColor: colors.tint }]}
@@ -855,7 +845,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
         </TouchableOpacity>
       </View>
 
-      {/* Post Grid */}
       <FlatList
         data={getFilteredPosts()}
         renderItem={renderPostItem}
@@ -872,7 +861,6 @@ export default function OtherProfileScreen({ userId, onMessage }: OtherProfileSc
         onClose={() => setProfileModalVisible(false)}
       />
 
-      {/* Action Menu Modal */}
       <Modal
         visible={menuVisible}
         transparent={true}

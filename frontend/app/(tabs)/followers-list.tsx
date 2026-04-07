@@ -140,7 +140,6 @@ export default function FollowersListScreen() {
         contentContainerStyle={users.length === 0 ? styles.emptyList : undefined}
       />
       
-      {/* Profile Modal */}
       <Modal
         visible={profileModalVisible}
         animationType="slide"
@@ -162,7 +161,6 @@ export default function FollowersListScreen() {
   );
 }
 
-// Wrapper component for OtherProfileScreen
 import OtherProfileScreen from './other-profile';
 
 function OtherProfileScreenWrapper({ userId, onClose }: { userId: string; onClose: () => void }) {

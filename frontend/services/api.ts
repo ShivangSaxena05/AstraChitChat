@@ -14,10 +14,6 @@ const api = axios.create({
   // and 'application/json' for plain JS objects.
   maxContentLength: Infinity,
   maxBodyLength: Infinity,
-  validateStatus: function (status) {
-    // Accept all status codes; handle errors in interceptor
-    return status <= 500;
-  },
   httpAgent: undefined, // Disable HTTP agent (using HTTPS)
   httpsAgent: undefined, // Let axios use default HTTPS agent
 });

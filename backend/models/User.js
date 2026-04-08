@@ -136,6 +136,20 @@ const userSchema = new mongoose.Schema(
         default: 0
     },
 
+    blockedUsers: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }
+    ],
+
+    mutedUsers: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }
+    ],
+
     // 🔐 End-to-End Encryption Public Key
     // Used for E2EE - base64 encoded curve25519 public key (32 bytes)
     encryptionPublicKey: {

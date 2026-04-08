@@ -113,6 +113,10 @@ const toggleMuteUser = async (req, res) => {
     const targetUser = await User.findById(targetUserId);
     if (!targetUser) return res.status(404).json({ message: 'User not found' });
 
+    if (!currentUser.mutedUsers) {
+      currentUser.mutedUsers = [];
+    }
+
     const isMuted = currentUser.mutedUsers.some(
       id => id.toString() === targetUserId
     );

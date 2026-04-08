@@ -45,8 +45,8 @@ export default function SettingsScreen() {
         get('/users/muted'),
         get('/profile/me'),
       ]);
-      setBlockedUsers(blockedRes);
-      setMutedUsers(mutedRes);
+      setBlockedUsers(Array.isArray(blockedRes) ? blockedRes : []);
+      setMutedUsers(Array.isArray(mutedRes) ? mutedRes : []);
       setIsPrivate(profileRes.isPrivate || false);
       setIsAdmin(profileRes.role === 'admin');
       setIs2FAEnabled(profileRes.isTwoFactorEnabled || false);

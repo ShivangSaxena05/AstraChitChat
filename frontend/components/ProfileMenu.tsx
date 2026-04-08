@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, View, Text, StyleSheet, useColorScheme, TouchableOpacity, Alert } from 'react-native';
+import { Modal, Pressable, View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { ThemedText } from './themed-text';
-import { ThemedView } from './themed-view';
 import { useSocket } from '@/contexts/SocketContext';
 import { post } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme-color';
@@ -17,7 +16,6 @@ interface ProfileMenuProps {
 export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
-  const colorScheme = useColorScheme();
   const colors = useTheme();
   const { disconnect } = useSocket();
   const iconColor = colors.icon;
@@ -107,6 +105,13 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
           {/* Handle bar */}
           <View style={[styles.handleBar, { backgroundColor: colors.border }]} />
 
+          <View style={styles.titleWrap}>
+            <ThemedText style={[styles.menuTitle, { color: colors.text }]}>Profile Hub</ThemedText>
+            <ThemedText style={[styles.menuSubtitle, { color: colors.textSecondary }]}>Control your account and privacy</ThemedText>
+          </View>
+
+          <ThemedText style={[styles.sectionLabel, { color: colors.textSecondary }]}>Account</ThemedText>
+
           <TouchableOpacity style={styles.menuItem} onPress={handleSettings}>
             <Ionicons name="settings-outline" size={24} color={iconColor} />
             <ThemedText style={styles.menuText}>Settings</ThemedText>
@@ -124,6 +129,8 @@ export default function ProfileMenu({ visible, onClose }: ProfileMenuProps) {
             <ThemedText style={styles.menuText}>Blocked Contacts</ThemedText>
             <Ionicons name="chevron-forward" size={20} color={colors.icon} style={styles.chevron} />
           </TouchableOpacity>
+
+          <ThemedText style={[styles.sectionLabel, { color: colors.textSecondary }]}>Library</ThemedText>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => handleOption('Archive')}>
             <Ionicons name="archive-outline" size={24} color={iconColor} />
@@ -166,34 +173,62 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
   menuContainer: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 40,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 18,
+    paddingBottom: 34,
     maxHeight: '80%',
+    borderWidth: 1,
+    borderColor: 'rgba(200, 169, 107, 0.28)',
   },
   handleBar: {
-    width: 40,
+    width: 44,
     height: 4,
     backgroundColor: '#666',
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
+  },
+  titleWrap: {
+    marginBottom: 10,
+    paddingHorizontal: 6,
+  },
+  menuTitle: {
+    fontSize: 21,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  menuSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 10,
+    marginBottom: 6,
+    paddingHorizontal: 10,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    marginBottom: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(128, 128, 128, 0.3)',
   },
   menuText: {
-    fontSize: 16,
-    marginLeft: 15,
+    fontSize: 15,
+    marginLeft: 14,
+    fontWeight: '600',
     flex: 1,
   },
   chevron: {

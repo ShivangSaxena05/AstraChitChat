@@ -5,7 +5,7 @@ import { get } from '@/services/api';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme-color';
 import { useErrorHandler } from '@/hooks/useErrorHandler';
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Share, StyleSheet, TouchableOpacity, View, useColorScheme, Animated, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ProfilePictureModal from '@/components/ProfilePictureModal';
@@ -13,6 +13,7 @@ import ExpandableBio from '@/components/ExpandableBio';
 import { useSocket } from '@/contexts/SocketContext';
 import ProfileMenu from '@/components/ProfileMenu';
 import ProfileSkeleton from '@/components/ProfileSkeleton';
+import { Fonts } from '@/constants/theme';
 
 interface UserProfile {
   _id: string;
@@ -53,102 +54,33 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
-// Animated Stat Card Component
-const StatCard = ({
-  value,
-  label,
-  icon,
+function PressScaleCard({
+  children,
   onPress,
-  delay = 0
+  style,
+  activeOpacity = 0.9,
 }: {
-  value: number;
-  label: string;
-  icon: string;
+  children: React.ReactNode;
   onPress?: () => void;
-  delay?: number;
-}) => {
-  const colors = useTheme();
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.sequence([
-      Animated.delay(delay),
-      Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacityAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
-  }, []);
-
-  const cardStyle = {
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-  };
-
-  const iconBgStyle = {
-    backgroundColor: `${colors.tint}15`,
-  };
+  style?: any;
+  activeOpacity?: number;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
 
   return (
-    <Animated.View style={{
-      transform: [{ scale: scaleAnim }],
-      opacity: opacityAnim,
-      flex: 1,
-      marginHorizontal: 4,
-    }}>
+    <Animated.View style={{ transform: [{ scale }] }}>
       <TouchableOpacity
+        activeOpacity={activeOpacity}
         onPress={onPress}
-        activeOpacity={onPress ? 0.7 : 1}
-        style={[{
-          alignItems: 'center',
-          paddingVertical: 16,
-          paddingHorizontal: 8,
-          borderRadius: 20,
-          borderWidth: 1,
-        }, cardStyle]}
+        onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 18, bounciness: 0 }).start()}
+        onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 0 }).start()}
+        style={style}
       >
-        <View style={[{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginBottom: 8,
-        }, iconBgStyle]}>
-          <Ionicons name={icon as any} size={18} color={colors.tint} />
-        </View>
-        <ThemedText style={{
-          fontSize: 22,
-          fontWeight: '800',
-          letterSpacing: -0.5,
-          color: colors.text,
-        }}>
-          {formatNumber(value)}
-        </ThemedText>
-        <ThemedText style={{
-          fontSize: 11,
-          fontWeight: '600',
-          color: colors.textSecondary,
-          marginTop: 2,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        }}>
-          {label}
-        </ThemedText>
+        {children}
       </TouchableOpacity>
     </Animated.View>
   );
-};
+}
 
 export default function ProfileScreen() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -158,11 +90,25 @@ export default function ProfileScreen() {
   const [isProfileModalVisible, setProfileModalVisible] = useState(false);
   const [isMenuVisible, setMenuVisible] = useState(false);
   const scrollY = React.useRef(new Animated.Value(0)).current;
+  const heroReveal = useRef(new Animated.Value(0)).current;
+  const statsReveal = useRef(new Animated.Value(0)).current;
+  const aboutReveal = useRef(new Animated.Value(0)).current;
+  const actionReveal = useRef(new Animated.Value(0)).current;
+  const glowFloat = useRef(new Animated.Value(0)).current;
+  const avatarPulse = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = useTheme();
   const { socket } = useSocket();
   const { handleError } = useErrorHandler();
+  const isDark = colorScheme === 'dark';
+  const luxuryPalette = useMemo(() => ({
+    heroBase: isDark ? '#0f1620' : '#e9edf4',
+    heroGlowPrimary: isDark ? 'rgba(0, 212, 255, 0.20)' : 'rgba(10, 126, 164, 0.18)',
+    heroGlowSecondary: isDark ? 'rgba(81, 207, 102, 0.10)' : 'rgba(56, 142, 60, 0.10)',
+    gold: '#c8a96b',
+    deep: isDark ? '#0c1118' : '#f7f8fb',
+  }), [isDark]);
 
 
   useFocusEffect(
@@ -213,6 +159,61 @@ export default function ProfileScreen() {
       socket.off('profileStatsUpdated', handleStatsUpdate);
     };
   }, [socket, user?._id]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    heroReveal.setValue(0);
+    statsReveal.setValue(0);
+    aboutReveal.setValue(0);
+    actionReveal.setValue(0);
+
+    const revealSequence = Animated.sequence([
+      Animated.timing(heroReveal, {
+        toValue: 1,
+        duration: 450,
+        useNativeDriver: true,
+      }),
+      Animated.timing(statsReveal, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+      Animated.timing(aboutReveal, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+      Animated.timing(actionReveal, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]);
+
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowFloat, { toValue: 1, duration: 5200, useNativeDriver: true }),
+        Animated.timing(glowFloat, { toValue: 0, duration: 5200, useNativeDriver: true }),
+      ])
+    );
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(avatarPulse, { toValue: 1, duration: 1600, useNativeDriver: true }),
+        Animated.timing(avatarPulse, { toValue: 0, duration: 1600, useNativeDriver: true }),
+      ])
+    );
+
+    revealSequence.start();
+    glowLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      glowLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [user, heroReveal, statsReveal, aboutReveal, actionReveal, glowFloat, avatarPulse]);
 
   const handleShareProfile = async () => {
     if (!user) return;
@@ -308,18 +309,43 @@ export default function ProfileScreen() {
   );
 
   const HEADER_MAX_HEIGHT = 180;
-  const HEADER_MIN_HEIGHT = 100;
 
-  const headerTranslateY = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT],
-    outputRange: [0, -HEADER_MAX_HEIGHT + HEADER_MIN_HEIGHT],
+  const heroCardTranslateY = scrollY.interpolate({
+    inputRange: [0, 160],
+    outputRange: [0, -16],
     extrapolate: 'clamp',
   });
 
-  const imageScale = scrollY.interpolate({
-    inputRange: [-180, 0, HEADER_MAX_HEIGHT],
-    outputRange: [1.5, 1, 1],
+  const heroCardScale = scrollY.interpolate({
+    inputRange: [0, 180],
+    outputRange: [1, 0.985],
     extrapolate: 'clamp',
+  });
+
+  const heroBackdropShift = scrollY.interpolate({
+    inputRange: [0, 200],
+    outputRange: [0, -24],
+    extrapolate: 'clamp',
+  });
+
+  const floatingGlowY = glowFloat.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-4, 6],
+  });
+
+  const floatingGlowX = glowFloat.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 10],
+  });
+
+  const pulseScale = avatarPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.06],
+  });
+
+  const pulseOpacity = avatarPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.35, 0.12],
   });
 
   const openWebsite = (url: string) => {
@@ -331,16 +357,21 @@ export default function ProfileScreen() {
   };
 
   const styles = useMemo(() => StyleSheet.create({
-    container: { flex: 1 },
+    container: { flex: 1, backgroundColor: colors.background },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { alignItems: 'center', paddingHorizontal: 16, marginTop: -55 },
+    header: { alignItems: 'center', paddingHorizontal: 16 },
 
     // Enhanced Profile Picture with ring
     profileImageContainer: {
       position: 'relative',
       padding: 4,
-      borderRadius: 60,
+      borderRadius: 56,
       backgroundColor: colors.card,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: isDark ? 0.45 : 0.16,
+      shadowRadius: 14,
+      elevation: 8,
     },
     profileImageRing: {
       position: 'absolute',
@@ -348,14 +379,24 @@ export default function ProfileScreen() {
       left: 0,
       right: 0,
       bottom: 0,
-      borderRadius: 60,
+      borderRadius: 56,
       borderWidth: 3,
-      borderColor: colors.tint,
+      borderColor: luxuryPalette.gold,
+    },
+    profileImagePulseRing: {
+      position: 'absolute',
+      top: -3,
+      left: -3,
+      right: -3,
+      bottom: -3,
+      borderRadius: 58,
+      borderWidth: 2,
+      borderColor: luxuryPalette.gold,
     },
     profileImage: {
-      width: 110,
-      height: 110,
-      borderRadius: 55,
+      width: 102,
+      height: 102,
+      borderRadius: 51,
       borderWidth: 4,
       borderColor: colors.card,
       backgroundColor: colors.backgroundSecondary,
@@ -372,32 +413,37 @@ export default function ProfileScreen() {
       borderColor: colors.card,
     },
 
-    // Stats Container - Updated
-    statsContainer: {
+    heroCard: {
+      marginHorizontal: 16,
+      marginTop: -22,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 14,
       flexDirection: 'row',
-      justifyContent: 'space-around',
-      width: '100%',
-      marginTop: 24,
-      paddingHorizontal: 8,
-    },
-
-    // Bio Container
-    bioContainer: {
       alignItems: 'center',
-      paddingHorizontal: 24,
-      marginTop: 24,
-      marginBottom: 20,
+      gap: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: isDark ? 0.3 : 0.08,
+      shadowRadius: 14,
+      elevation: 4,
+    },
+    identityColumn: {
+      flex: 1,
+      minWidth: 0,
     },
     nameRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
       marginBottom: 4,
     },
     nameText: {
-      fontSize: 22,
+      fontSize: 20,
       fontWeight: '800',
       letterSpacing: -0.3,
+      fontFamily: Fonts.serif,
     },
     verifiedBadge: {
       marginLeft: 6,
@@ -415,28 +461,123 @@ export default function ProfileScreen() {
       color: colors.tint,
     },
     username: {
-      fontSize: 14,
-      fontWeight: '500',
+      fontSize: 13,
+      fontWeight: '600',
       color: colors.textSecondary,
-      marginBottom: 12,
+      marginBottom: 10,
+      letterSpacing: 0.4,
+    },
+    profileTagRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
     },
 
-    // Metadata Row
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: luxuryPalette.deep,
+    },
+    statusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: 6,
+    },
+    statusText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    quickActionsColumn: {
+      gap: 8,
+    },
+    quickActionButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: luxuryPalette.deep,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+
+    statsGrid: {
+      marginTop: 12,
+      marginHorizontal: 16,
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+      gap: 8,
+    },
+    statTile: {
+      flex: 1,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: 12,
+      paddingHorizontal: 10,
+      backgroundColor: colors.card,
+    },
+    statValue: {
+      fontSize: 18,
+      fontWeight: '800',
+      letterSpacing: -0.4,
+      color: colors.text,
+    },
+    statLabel: {
+      marginTop: 2,
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+
+    aboutCard: {
+      marginTop: 12,
+      marginHorizontal: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 14,
+    },
+    sectionTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      color: colors.textSecondary,
+      marginBottom: 10,
+    },
+    emptyAboutText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
     metadataRow: {
       flexDirection: 'row',
-      justifyContent: 'center',
+      justifyContent: 'flex-start',
       flexWrap: 'wrap',
-      gap: 16,
+      gap: 10,
       marginTop: 12,
     },
     metadataItem: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: colors.backgroundSecondary,
+      backgroundColor: luxuryPalette.deep,
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     metadataText: {
       fontSize: 12,
@@ -444,25 +585,33 @@ export default function ProfileScreen() {
       color: colors.textSecondary,
     },
 
-    // Enhanced Buttons
     buttonContainer: {
       flexDirection: 'row',
+      flexWrap: 'nowrap',
       justifyContent: 'space-between',
-      paddingHorizontal: 20,
-      marginVertical: 16,
-      gap: 12,
+      paddingHorizontal: 16,
+      marginTop: 12,
+      marginBottom: 10,
+      gap: 10,
     },
     button: {
-      flex: 1,
+      flexGrow: 1,
+      flexBasis: 0,
+      minWidth: 0,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.backgroundSecondary,
       paddingVertical: 12,
-      borderRadius: 14,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,
       gap: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: isDark ? 0.25 : 0.08,
+      shadowRadius: 8,
+      elevation: 3,
     },
     primaryButton: {
       backgroundColor: colors.tint,
@@ -477,15 +626,16 @@ export default function ProfileScreen() {
       color: colors.background,
     },
 
-    // Enhanced Tab Container
     tabContainer: {
       flexDirection: 'row',
-      marginHorizontal: 20,
-      marginTop: 8,
+      marginHorizontal: 16,
+      marginTop: 2,
       marginBottom: 8,
-      backgroundColor: colors.backgroundSecondary,
+      backgroundColor: luxuryPalette.deep,
       borderRadius: 14,
       padding: 4,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     tab: {
       flex: 1,
@@ -520,7 +670,7 @@ export default function ProfileScreen() {
       width: GRID_ITEM_SIZE,
       height: GRID_ITEM_SIZE,
       margin: 1,
-      borderRadius: 4,
+      borderRadius: 8,
       overflow: 'hidden',
     },
     gridImage: {
@@ -576,20 +726,68 @@ export default function ProfileScreen() {
       textAlign: 'center',
     },
 
-    // Header Content Wrapper
     headerContentWrapper: {
       backgroundColor: colors.background,
       borderTopLeftRadius: 32,
       borderTopRightRadius: 32,
-      marginTop: -28,
-      paddingTop: 16,
+      marginTop: -18,
+      paddingTop: 8,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: -6 },
       shadowOpacity: 0.15,
       shadowRadius: 12,
       elevation: 8,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.border,
     },
-  }), [colorScheme, colors]);
+    heroBackdrop: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 170,
+      backgroundColor: luxuryPalette.heroBase,
+    },
+    heroGlowPrimary: {
+      position: 'absolute',
+      width: 220,
+      height: 220,
+      borderRadius: 110,
+      top: -96,
+      right: -42,
+      backgroundColor: luxuryPalette.heroGlowPrimary,
+    },
+    heroGlowSecondary: {
+      position: 'absolute',
+      width: 170,
+      height: 170,
+      borderRadius: 85,
+      top: -60,
+      left: -48,
+      backgroundColor: luxuryPalette.heroGlowSecondary,
+    },
+    brandTopRow: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      alignItems: 'flex-end',
+      marginBottom: 8,
+    },
+    signaturePill: {
+      borderWidth: 1,
+      borderColor: luxuryPalette.gold,
+      backgroundColor: isDark ? 'rgba(12, 17, 24, 0.82)' : 'rgba(255,255,255,0.85)',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 999,
+    },
+    signatureText: {
+      fontSize: 10,
+      letterSpacing: 1.3,
+      color: luxuryPalette.gold,
+      fontWeight: '700',
+    },
+  }), [colorScheme, colors, isDark, luxuryPalette]);
 
   if (loading) {
     return <ProfileSkeleton />;
@@ -601,14 +799,50 @@ export default function ProfileScreen() {
 
   const renderHeader = () => (
     <View style={styles.headerContentWrapper}>
-      <View style={styles.header}>
-        {/* Enhanced Profile Picture with Ring */}
+      <Animated.View pointerEvents="none" style={[styles.heroBackdrop, { transform: [{ translateY: heroBackdropShift }] }]}>
+        <Animated.View style={[styles.heroGlowPrimary, { transform: [{ translateY: floatingGlowY }, { translateX: floatingGlowX }] }]} />
+        <Animated.View style={[styles.heroGlowSecondary, { transform: [{ translateY: Animated.multiply(floatingGlowY, -0.7) }] }]} />
+      </Animated.View>
+      <View style={styles.brandTopRow}>
+        <View style={styles.signaturePill}>
+          <ThemedText style={styles.signatureText}>ASTRA PREMIERE</ThemedText>
+        </View>
+      </View>
+
+      <Animated.View
+        style={[
+          styles.heroCard,
+          {
+            opacity: heroReveal,
+            transform: [
+              {
+                translateY: heroReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [26, 0],
+                }),
+              },
+              { translateY: heroCardTranslateY },
+              { scale: heroCardScale },
+            ],
+          },
+        ]}
+      >
         <TouchableOpacity activeOpacity={0.9} onPress={() => setProfileModalVisible(true)}>
           <View style={styles.profileImageContainer}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.profileImagePulseRing,
+                {
+                  opacity: pulseOpacity,
+                  transform: [{ scale: pulseScale }],
+                },
+              ]}
+            />
             <View style={styles.profileImageRing} />
             {!user.profilePicture || user.profilePicture.includes('anonymous-avatar-icon') || user.profilePicture.includes('pravatar.cc') ? (
               <View style={[styles.profileImage, { justifyContent: 'center', alignItems: 'center' }]}>
-                <Ionicons name="person" size={60} color={colors.iconSecondary} />
+                <Ionicons name="person" size={54} color={colors.iconSecondary} />
               </View>
             ) : (
               <Image source={{ uri: user.profilePicture }} style={styles.profileImage} />
@@ -617,54 +851,107 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Enhanced Stats with Cards */}
-        <View style={styles.statsContainer}>
-          <StatCard
-            value={user.stats.posts}
-            label="Posts"
-            icon="grid-outline"
-            delay={0}
-          />
-          <StatCard
-            value={user.stats.followers}
-            label="Followers"
-            icon="people-outline"
-            delay={100}
-            onPress={() => router.push({
-              pathname: '/followers-list' as any,
-              params: { userId: user._id, username: user.username, type: 'followers' }
-            })}
-          />
-          <StatCard
-            value={user.stats.following}
-            label="Following"
-            icon="person-add-outline"
-            delay={200}
-            onPress={() => router.push({
-              pathname: '/followers-list' as any,
-              params: { userId: user._id, username: user.username, type: 'following' }
-            })}
-          />
-        </View>
-      </View>
+        <View style={styles.identityColumn}>
+          <View style={styles.nameRow}>
+            <ThemedText style={styles.nameText}>{user.name || user.username}</ThemedText>
+            <Ionicons name="checkmark-circle" size={20} color={luxuryPalette.gold} style={styles.verifiedBadge} />
+          </View>
+          <ThemedText style={styles.username}>@{user.username}</ThemedText>
 
-      {/* Bio Section */}
-      <View style={styles.bioContainer}>
-        <View style={styles.nameRow}>
-          <ThemedText style={styles.nameText}>{user.name || user.username}</ThemedText>
-          <Ionicons name="checkmark-circle" size={20} color={colors.tint} style={styles.verifiedBadge} />
-          {user.pronouns ? (
-            <View style={styles.pronounBadge}>
-              <ThemedText style={styles.pronounText}>{user.pronouns}</ThemedText>
+          <View style={styles.profileTagRow}>
+            {user.pronouns ? (
+              <View style={styles.pronounBadge}>
+                <ThemedText style={styles.pronounText}>{user.pronouns}</ThemedText>
+              </View>
+            ) : null}
+            <View style={styles.statusBadge}>
+              <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
+              <ThemedText style={styles.statusText}>Active</ThemedText>
             </View>
-          ) : null}
+          </View>
         </View>
 
-        {user.name ? <ThemedText style={styles.username}>@{user.username}</ThemedText> : null}
+        <View style={styles.quickActionsColumn}>
+          <PressScaleCard
+            style={styles.quickActionButton}
+            onPress={() => router.push('/profile/edit' as any)}
+          >
+            <Ionicons name="pencil" size={16} color={colors.text} />
+          </PressScaleCard>
+          <PressScaleCard
+            style={styles.quickActionButton}
+            onPress={handleShareProfile}
+          >
+            <Ionicons name="share-social-outline" size={16} color={colors.text} />
+          </PressScaleCard>
+        </View>
+      </Animated.View>
 
-        {user.bio ? <ExpandableBio text={user.bio} maxLines={3} /> : null}
+      <Animated.View
+        style={[
+          styles.statsGrid,
+          {
+            opacity: statsReveal,
+            transform: [
+              {
+                translateY: statsReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [20, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <PressScaleCard style={styles.statTile} activeOpacity={0.95}>
+          <ThemedText style={styles.statValue}>{formatNumber(user.stats.posts)}</ThemedText>
+          <ThemedText style={styles.statLabel}>Posts</ThemedText>
+        </PressScaleCard>
+        <PressScaleCard
+          style={styles.statTile}
+          onPress={() => router.push({
+            pathname: '/followers-list' as any,
+            params: { userId: user._id, username: user.username, type: 'followers' }
+          })}
+        >
+          <ThemedText style={styles.statValue}>{formatNumber(user.stats.followers)}</ThemedText>
+          <ThemedText style={styles.statLabel}>Followers</ThemedText>
+        </PressScaleCard>
+        <PressScaleCard
+          style={styles.statTile}
+          onPress={() => router.push({
+            pathname: '/followers-list' as any,
+            params: { userId: user._id, username: user.username, type: 'following' }
+          })}
+        >
+          <ThemedText style={styles.statValue}>{formatNumber(user.stats.following)}</ThemedText>
+          <ThemedText style={styles.statLabel}>Following</ThemedText>
+        </PressScaleCard>
+        <PressScaleCard style={styles.statTile} activeOpacity={0.95}>
+          <ThemedText style={styles.statValue}>{formatNumber(user.stats.likes)}</ThemedText>
+          <ThemedText style={styles.statLabel}>Likes</ThemedText>
+        </PressScaleCard>
+      </Animated.View>
 
-        {/* Enhanced Metadata */}
+      <Animated.View
+        style={[
+          styles.aboutCard,
+          {
+            opacity: aboutReveal,
+            transform: [
+              {
+                translateY: aboutReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [16, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <ThemedText style={styles.sectionTitle}>About</ThemedText>
+        {user.bio ? <ExpandableBio text={user.bio} maxLines={3} /> : <ThemedText style={styles.emptyAboutText}>Add a short bio to make your profile stand out.</ThemedText>}
+
         <View style={styles.metadataRow}>
           {user.location ? (
             <View style={styles.metadataItem}>
@@ -681,38 +968,57 @@ export default function ProfileScreen() {
               </ThemedText>
             </TouchableOpacity>
           ) : null}
-
-          {user.stats.likes > 0 && (
-            <View style={styles.metadataItem}>
-              <Ionicons name="heart" size={14} color={colors.error} />
-              <ThemedText style={styles.metadataText}>{formatNumber(user.stats.likes)} likes</ThemedText>
-            </View>
-          )}
         </View>
-      </View>
+      </Animated.View>
 
-      {/* Enhanced Buttons */}
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity
+      <Animated.View
+        style={[
+          styles.buttonContainer,
+          {
+            opacity: actionReveal,
+            transform: [
+              {
+                translateY: actionReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <PressScaleCard
           style={[styles.button, styles.primaryButton]}
           onPress={() => router.push('/profile/edit' as any)}
-          activeOpacity={0.8}
         >
           <Ionicons name="pencil" size={16} color={colors.background} />
           <ThemedText style={[styles.buttonText, styles.primaryButtonText]}>Edit Profile</ThemedText>
-        </TouchableOpacity>
-        <TouchableOpacity
+        </PressScaleCard>
+        <PressScaleCard
           style={styles.button}
           onPress={handleShareProfile}
-          activeOpacity={0.8}
         >
           <Ionicons name="share-outline" size={16} color={colors.icon} />
           <ThemedText style={styles.buttonText}>Share</ThemedText>
-        </TouchableOpacity>
-      </View>
+        </PressScaleCard>
+      </Animated.View>
 
-      {/* Enhanced Tabs with Icons */}
-      <View style={styles.tabContainer}>
+      <Animated.View
+        style={[
+          styles.tabContainer,
+          {
+            opacity: actionReveal,
+            transform: [
+              {
+                translateY: actionReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[styles.tab, activeTab === 'posts' && styles.activeTab]}
           onPress={() => setActiveTab('posts')}
@@ -749,7 +1055,7 @@ export default function ProfileScreen() {
           />
           <ThemedText style={[styles.tabText, activeTab === 'reels' && styles.activeTabText]}>Reels</ThemedText>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 
@@ -767,7 +1073,7 @@ export default function ProfileScreen() {
         keyExtractor={(item: UserPost) => item._id}
         numColumns={3}
         style={styles.grid}
-        contentContainerStyle={{ paddingTop: HEADER_MAX_HEIGHT + 60, paddingBottom: 20 }}
+        contentContainerStyle={{ paddingTop: 8, paddingBottom: 20 }}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
         scrollEventThrottle={16}

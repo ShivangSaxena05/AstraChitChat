@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, Dimensions, Animated } from 'react-native';
+import { View, TouchableOpacity, Text, StyleSheet, Dimensions, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme-color';
@@ -56,7 +56,18 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
   }, [currentIndex, tabAnimations]);
 
   const handleTabPress = (tabName: string) => {
-    navigation.navigate(tabName);
+    try {
+      // ✅ ANDROID FIX: Add delay to prevent navigation race conditions
+      if (Platform.OS === 'android') {
+        setTimeout(() => {
+          navigation.navigate(tabName);
+        }, 50);
+      } else {
+        navigation.navigate(tabName);
+      }
+    } catch (error) {
+      console.error('[BottomTabBar] Navigation error:', error);
+    }
   };
 
   const handleCreatePress = () => {
@@ -83,7 +94,13 @@ export default function BottomTabBarComponent({ navigation, state }: BottomTabBa
             <TouchableOpacity
               key={tab.name}
               style={styles.tab}
-              onPress={() => handleTabPress(tab.name)}
+              onPress={() => {
+                try {
+                  handleTabPress(tab.name);
+                } catch (error) {
+                  console.error(`[BottomTabBar] Error pressing tab ${tab.name}:`, error);
+                }
+              }}
               activeOpacity={0.7}
             >
               <Animated.View

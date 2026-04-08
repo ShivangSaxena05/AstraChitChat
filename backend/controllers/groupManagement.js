@@ -36,7 +36,14 @@ async function leaveGroup(req, res) {
 
     // Remove participant
     chat.participants = chat.participants.filter(p => p.user.toString() !== userId);
+    
+    // ✅ FIX (Bug #6): Also remove unreadCount entry for this user
+    chat.unreadCounts = chat.unreadCounts?.filter(
+      uc => uc.user.toString() !== userId
+    ) || [];
+    
     chat.markModified('participants');
+    chat.markModified('unreadCounts');
     await chat.save();
 
     return res.json({ message: 'Left group successfully' });
@@ -82,7 +89,18 @@ async function addGroupMember(req, res) {
       role: 'member',
       joinedAt: new Date()
     });
+    
+    // ✅ FIX (Bug #6): Initialize unreadCount for new member with 0
+    if (!chat.unreadCounts) {
+      chat.unreadCounts = [];
+    }
+    chat.unreadCounts.push({
+      user: toObjectId(newMemberId),
+      count: 0
+    });
+    
     chat.markModified('participants');
+    chat.markModified('unreadCounts');
     await chat.save();
 
     return res.json({ message: 'Member added successfully' });
@@ -127,7 +145,14 @@ async function removeGroupMember(req, res) {
 
     // Remove member
     chat.participants = chat.participants.filter(p => p.user._id.toString() !== targetId);
+    
+    // ✅ FIX (Bug #6): Also remove unreadCount entry for this user
+    chat.unreadCounts = chat.unreadCounts?.filter(
+      uc => uc.user.toString() !== targetId
+    ) || [];
+    
     chat.markModified('participants');
+    chat.markModified('unreadCounts');
     await chat.save();
 
     return res.json({ message: 'Member removed successfully' });

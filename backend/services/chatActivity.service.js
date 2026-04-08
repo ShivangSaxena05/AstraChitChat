@@ -21,6 +21,7 @@ function validateId(id, name = 'ID') {
 
 /**
  * Update chat activity when a new message is sent
+ * ✅ FIX (Bug #6): Also increments unread count for all participants except sender
  * @param {string} chatId - The chat ID
  * @param {string} messageId - The message ID
  * @param {string} senderId - The sender's user ID
@@ -33,15 +34,32 @@ async function updateChatOnNewMessage(chatId, messageId, senderId, messageText =
     validateId(senderId, 'senderId');
 
     const now = new Date();
-    const updated = await Chat.findByIdAndUpdate(chatId, {
-        lastMessage: {
-            messageId,
-            text: messageText,
-            createdAt: now,
-            sender: senderId
+    
+    // ✅ FIX (Bug #6): Update chat activity and increment unread count for all participants except sender
+    const updated = await Chat.findByIdAndUpdate(
+        chatId,
+        {
+            $set: {
+                lastMessage: {
+                    messageId,
+                    text: messageText,
+                    createdAt: now,
+                    sender: new mongoose.Types.ObjectId(senderId)
+                },
+                lastActivityTimestamp: now
+            },
+            // Increment unread count for all participants except the sender
+            $inc: {
+                'unreadCounts.$[elem].count': 1
+            }
         },
-        lastActivityTimestamp: now
-    });
+        {
+            arrayFilters: [
+                { 'elem.user': { $ne: new mongoose.Types.ObjectId(senderId) } }
+            ],
+            new: true
+        }
+    );
 
     if (!updated) {
         throw new Error(`Chat not found: ${chatId}`);

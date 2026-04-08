@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   View,
   Text,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '@/hooks/useChatSocket';
@@ -193,9 +194,10 @@ const createStyles = (colors: any) =>
     container: {
       flexDirection: 'column',
       paddingHorizontal: 12,
-      paddingVertical: 12,
+      paddingVertical: 8,
       borderTopWidth: 1,
-      borderTopColor: colors.border,
+      borderTopColor: '#e0e0e0',
+      minHeight: Platform.OS === 'android' ? 60 : 56,
       backgroundColor: colors.background,
       width: '100%',
     },
@@ -204,14 +206,15 @@ const createStyles = (colors: any) =>
     },
     inputRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: Platform.OS === 'android' ? 'flex-end' : 'center',
       gap: 8,
     },
     input: {
       flex: 1,
       borderRadius: 24,
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingVertical: Platform.OS === 'android' ? 10 : 12,
+      minHeight: Platform.OS === 'android' ? 40 : 36,
       maxHeight: 120,
       color: colors.text,
       backgroundColor: colors.card,

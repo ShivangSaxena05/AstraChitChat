@@ -30,6 +30,15 @@ import TopHeaderComponent from '@/components/TopHeaderComponent';
 import { get as apiGet } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme-color';
 import PostCard, { Post } from '@/components/PostCard';
+import {
+  getPostImageUrl,
+  getPostMediaType,
+  getPostCaption,
+  getPostAuthor,
+  getPostStats,
+  getPostTimeAgo,
+  formatPostForDisplay,
+} from '@/utils/postDataHelpers';
 
 interface ExplorePost extends Post {
   duration?: number | null;
@@ -91,16 +100,15 @@ const isVideoPost = (item: ExplorePost): boolean =>
 const isTextOnlyPost = (item: ExplorePost): boolean =>
   item.mediaType === 'text' || (!item.mediaUrl && !!item.caption);
 
-/** Runtime guard — keeps bad API data from crashing the UI */
+/** Runtime guard — backend sanitizer ensures these, but validate at render time */
 const isValidPost = (p: unknown): p is ExplorePost => {
   if (!p || typeof p !== 'object') return false;
   const post = p as Record<string, unknown>;
+  // Backend sanitizer ensures: _id, caption, createdAt, author with username
   return (
-    typeof post._id      === 'string' &&
-    typeof post.caption  === 'string' &&
-    typeof post.createdAt === 'string' &&
-    !!post.user &&
-    typeof (post.user as any).username === 'string'
+    typeof post._id === 'string' &&
+    typeof post.caption === 'string' &&
+    typeof post.createdAt === 'string'
   );
 };
 
@@ -167,71 +175,76 @@ const VideoCard = memo(({
   onPress: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
-}) => (
-  <TouchableOpacity
-    style={[vcStyles.card, { backgroundColor: colors.card }]}
-    activeOpacity={0.85}
-    onPress={onPress}
-    accessibilityRole="button"
-    accessibilityLabel={`Video by ${item.user?.username || 'Unknown'}: ${item.caption}`}
-  >
-    <View style={vcStyles.thumbnailOuter}>
-      <Image
-        source={{ uri: item.mediaUrl ?? `https://picsum.photos/seed/${item._id}/320/180` }}
-        style={vcStyles.thumbnailInner}
-        resizeMode="cover"
-      />
-      <View style={vcStyles.playOverlay}>
-        <View style={vcStyles.playButtonCircle}>
-          <Ionicons name="play-circle-sharp" size={60} color="rgba(255,255,255,1)" />
+}) => {
+  const postData = formatPostForDisplay(item);
+  const stats = getPostStats(item);
+  
+  return (
+    <TouchableOpacity
+      style={[vcStyles.card, { backgroundColor: colors.card }]}
+      activeOpacity={0.85}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Video by ${postData.author.username}: ${postData.caption}`}
+    >
+      <View style={vcStyles.thumbnailOuter}>
+        <Image
+          source={{ uri: getPostImageUrl(item) }}
+          style={vcStyles.thumbnailInner}
+          resizeMode="cover"
+        />
+        <View style={vcStyles.playOverlay}>
+          <View style={vcStyles.playButtonCircle}>
+            <Ionicons name="play-circle-sharp" size={60} color="rgba(255,255,255,1)" />
+          </View>
         </View>
+        {item.duration != null && (
+          <View style={vcStyles.durationBadge}>
+            <Text style={vcStyles.durationText}>
+              {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
+            </Text>
+          </View>
+        )}
       </View>
-      {item.duration != null && (
-        <View style={vcStyles.durationBadge}>
-          <Text style={vcStyles.durationText}>
-            {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
+
+      <View style={vcStyles.infoRow}>
+        <Image
+          source={{ uri: postData.author.avatar }}
+          style={vcStyles.avatar}
+        />
+        <View style={vcStyles.textBlock}>
+          <ThemedText
+            numberOfLines={isExpanded ? 0 : 2}
+            ellipsizeMode="tail"
+            style={[vcStyles.title, { color: colors.text }]}
+          >
+            {postData.caption}
+          </ThemedText>
+          {(postData.caption?.length ?? 0) > 80 && (
+            <TouchableOpacity onPress={onToggleExpand} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
+              <Text style={[vcStyles.expandBtn, { color: colors.tint }]}>
+                {isExpanded ? 'Show less' : 'Read more'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[vcStyles.channel, { color: colors.textSecondary }]}>
+            {postData.author.username}
+          </Text>
+          <Text style={[vcStyles.meta, { color: colors.textTertiary }]}>
+            {formatViewCount(stats.likes)} · {getPostTimeAgo(item)}
           </Text>
         </View>
-      )}
-    </View>
-
-    <View style={vcStyles.infoRow}>
-      <Image
-        source={{ uri: item.user?.profilePicture ?? `https://i.pravatar.cc/150?u=${item.user?._id ?? 'unknown'}` }}
-        style={vcStyles.avatar}
-      />
-      <View style={vcStyles.textBlock}>
-        <ThemedText
-          numberOfLines={isExpanded ? 0 : 2}
-          ellipsizeMode="tail"
-          style={[vcStyles.title, { color: colors.text }]}
+        <TouchableOpacity
+          style={vcStyles.menuBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Video options"
         >
-          {item.caption || 'Untitled'}
-        </ThemedText>
-        {(item.caption?.length ?? 0) > 80 && (
-          <TouchableOpacity onPress={onToggleExpand} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-            <Text style={[vcStyles.expandBtn, { color: colors.tint }]}>
-              {isExpanded ? 'Show less' : 'Read more'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        <Text style={[vcStyles.channel, { color: colors.textSecondary }]}>
-          {item.user?.username ?? 'Unknown'}
-        </Text>
-        <Text style={[vcStyles.meta, { color: colors.textTertiary }]}>
-          {formatViewCount(item.likes)} · {formatTimeAgo(item.createdAt)}
-        </Text>
+          <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={vcStyles.menuBtn}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        accessibilityLabel="Video options"
-      >
-        <Ionicons name="ellipsis-vertical" size={18} color={colors.textSecondary} />
-      </TouchableOpacity>
-    </View>
-  </TouchableOpacity>
-));
+    </TouchableOpacity>
+  );
+});
 
 const vcStyles = StyleSheet.create({
   card:           { borderRadius: 14, overflow: 'hidden', marginBottom: 2 },
@@ -447,36 +460,20 @@ export default function ExploreScreen() {
   // Debug: Log data shape for Android crash investigation
   useEffect(() => {
     if (displayData.length > 0) {
-      console.log('🔍 [EXPLORE_FEED] Data shape check:');
+      console.log('🔍 [EXPLORE_FEED] Backend sanitizer output check:');
       console.log('📦 Total posts:', displayData.length);
-      console.log('📄 First post:', JSON.stringify(displayData[0], null, 2));
-      console.log('🖼️ First post media:', {
-        mediaUrl: displayData[0]?.mediaUrl,
-        secure_url: displayData[0]?.secure_url,
-        mediaType: displayData[0]?.mediaType,
-      });
-      console.log('👤 First post user:', displayData[0]?.user || displayData[0]?.author);
-      console.log('📝 First post caption:', displayData[0]?.caption?.slice(0, 50));
       
-      // Check for bad data patterns
-      const badPosts = displayData.filter((post, idx) => {
-        const hasNullMedia = !post.mediaUrl && !post.secure_url;
-        const hasNullUser = !post.user && !post.author;
-        const hasNullCaption = !post.caption || typeof post.caption !== 'string';
-        const hasNullId = !post._id;
-        const hasNullCreatedAt = !post.createdAt;
-        
-        if (hasNullUser || hasNullCaption || hasNullId || hasNullCreatedAt) {
-          console.warn(`⚠️ Post ${idx} missing critical data:`, { 
-            hasNullUser, 
-            hasNullCaption, 
-            hasNullId, 
-            hasNullCreatedAt 
-          });
-        }
-        return hasNullUser || hasNullCaption || hasNullId || hasNullCreatedAt;
-      });
-      if (badPosts.length > 0) console.error('🔴 Found bad posts:', badPosts.length);
+      const first = displayData[0];
+      if (first) {
+        const postData = formatPostForDisplay(first);
+        console.log('📄 First post formatted:', {
+          id: first._id,
+          caption: postData.caption.substring(0, 50),
+          author: postData.author.username,
+          imageUrl: postData.imageUrl,
+          mediaType: getPostMediaType(first),
+        });
+      }
     }
   }, [displayData]);
 

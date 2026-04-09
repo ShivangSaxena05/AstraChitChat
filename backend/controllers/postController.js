@@ -4,6 +4,7 @@ const Like = require('../models/Like');
 const User = require('../models/User');
 const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { incrementStat, decrementStat } = require('../services/userStatsService');
+const { sanitizePostForResponse, sanitizePostsForResponse } = require('../utils/postSanitizer');
 
 // ─── Create Post ──────────────────────────────────────────────────────────────
 // @route   POST /api/posts/upload
@@ -30,8 +31,12 @@ const createPost = async (req, res) => {
         });
 
         await incrementStat(req.user._id, 'postsCount', 1);
+        
+        // ✅ FIX: Populate author and sanitize before responding
+        const populatedPost = await post.populate('author', 'name username profilePicture');
+        const sanitized = sanitizePostForResponse(populatedPost, req.user._id);
 
-        res.status(201).json({ message: 'Post created successfully', post });
+        res.status(201).json({ message: 'Post created successfully', post: sanitized });
     } catch (error) {
         console.error('[createPost]', error);
         res.status(500).json({ message: 'Server error: could not create post', error: error.message });
@@ -196,7 +201,7 @@ const getFeedPosts = async (req, res) => {
         const hasMore = postsWithAuthor.length > pageSize;
         const data = postsWithAuthor.slice(0, pageSize);
 
-        const sanitized = data.map(post => sanitizePost(post, userId));
+        const sanitized = data.map(post => sanitizePostForResponse(post, userId));
 
         res.json({ posts: sanitized, page, hasMore, category });
     } catch (error) {
@@ -240,7 +245,7 @@ const getShortVideos = async (req, res) => {
         const data = postsWithAuthor.slice(0, pageSize);
 
         res.json({
-            posts:    data.map(post => sanitizePost(post, userId)),
+            posts:    data.map(post => sanitizePostForResponse(post, userId)),
             page,
             hasMore,
             category: 'flicks',
@@ -268,7 +273,7 @@ const getUserPostsById = async (req, res) => {
             .populate('author', 'name username profilePicture')
             .lean();
 
-        res.json({ posts: posts.map(p => sanitizePost(p, requesterId)) });
+        res.json({ posts: posts.map(p => sanitizePostForResponse(p, requesterId)) });
     } catch (error) {
         res.status(500).json({ message: 'Server error: could not fetch user posts', error: error.message });
     }
@@ -285,7 +290,7 @@ const getUserPosts = async (req, res) => {
             .populate('author', 'name username profilePicture')
             .lean();
 
-        res.json({ posts: posts.map(p => sanitizePost(p, userId)) });
+        res.json({ posts: posts.map(p => sanitizePostForResponse(p, userId)) });
     } catch (error) {
         res.status(500).json({ message: 'Server error: could not fetch user posts', error: error.message });
     }
@@ -326,7 +331,7 @@ const searchPosts = async (req, res) => {
             .populate('author', 'name username profilePicture')
             .lean();
 
-        res.json({ posts: posts.map(p => sanitizePost(p, userId)) });
+        res.json({ posts: posts.map(p => sanitizePostForResponse(p, userId)) });
     } catch (error) {
         console.error('[searchPosts]', error);
         res.status(500).json({
@@ -335,33 +340,6 @@ const searchPosts = async (req, res) => {
         });
     }
 };
-
-// ─── Shared sanitizer (keeps all handlers consistent) ────────────────────────
-function sanitizePost(post, requesterId) {
-    const primaryMedia = post.media && post.media.length > 0 ? post.media[0] : {};
-    
-    return {
-        _id:          post._id || '',
-        secure_url:   primaryMedia.secure_url || '',
-        resource_type: primaryMedia.resource_type || 'image',
-        caption:      post.caption || '',
-        hashtags:     Array.isArray(post.hashtags) ? post.hashtags : [],
-        type:         primaryMedia.resource_type === 'video' ? 'video' : 'photo',
-        author: {
-            _id:            post.author?._id || '',
-            username:       post.author?.username || 'unknown',
-            profilePicture: post.author?.profilePicture || '',
-            name:           post.author?.name || '',
-        },
-        createdAt: post.createdAt?.toISOString() || new Date().toISOString(),
-        likes:     post.likesCount || 0,
-        isLiked:   false, // Will be determined by frontend based on Like collection
-        comments:  post.commentsCount || 0,
-        shares:    post.sharesCount || 0,
-        visibility: post.visibility || 'public',
-        location:  post.location || null,
-    };
-}
 
 module.exports = {
     createPost,

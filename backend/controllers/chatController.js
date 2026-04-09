@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const { deleteCloudinaryAsset } = require('../services/mediaService');
 const { applyUserDefaults } = require('../utils/lazyDefaults');
 const { updateChatOnNewMessage } = require('../services/chatActivity.service');
+const { sanitizeChatForResponse, sanitizeChatsForResponse, ensureMessageSenderPopulated } = require('../utils/chatSanitizer');
 
 // Helper to convert MessageReaction collection format to frontend format
 // Frontend expects: { emoji, users: [userId, ...] }
@@ -147,98 +148,10 @@ async function getChats(req, res) {
       leanChats.map(chat => enrichChatParticipantsIfNeeded(chat))
     );
 
-    // ✅ FIX (Bug #6): Use stored unreadCount from database for persistence
-    const chatsWithUnread = await Promise.all(
-      enrichedChats.map(async (chat) => {
-        try {
-          // Normalize participants to handle both old and new format
-          const normalizedParticipants = normalizeParticipants(chat.participants);
-          
-          // Find the current user's participant record
-          const currentUserParticipant = normalizedParticipants?.find(
-            p => p.user?._id?.toString() === userId.toString()
-          );
+    // ✅ FIX: Use sanitizer to ensure all chats are normalized before sending
+    const sanitizedChats = leanChats.map(chat => sanitizeChatForResponse(chat, userId));
 
-          // Find the other participant(s) - for direct chats this is the other user, for groups it's all others
-          const otherParticipants = normalizedParticipants?.filter(
-            p => p.user?._id?.toString() !== userId.toString()
-          ) || [];
-
-          // ✅ FIX (Bug #6): Get stored unreadCount from database, fallback to calculation
-          let unreadCount = 0;
-          if (chat.unreadCounts && Array.isArray(chat.unreadCounts)) {
-            const userUnreadRecord = chat.unreadCounts.find(
-              uc => uc.user?.toString?.() === userId.toString() || uc.user === userId.toString()
-            );
-            unreadCount = userUnreadRecord?.count ?? 0;
-          } else {
-            // Fallback: Calculate unread count if not stored (for migration)
-            unreadCount = await Message.countDocuments({
-              chat: chat._id,
-              sender: { $ne: userId },
-              'readBy.user': { $ne: userId }
-            });
-          }
-
-          // ✅ FIX: Add otherUser for direct chats (for easy access to the chat partner's info)
-          let otherUser = null;
-          if (chat.convoType === 'direct' && otherParticipants.length > 0) {
-            otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
-          }
-
-          return {
-            ...chat,
-            unreadCount,
-            otherUser,  // ✅ NEW: Direct access to other user in direct chats
-            lastReadMsgId: currentUserParticipant?.lastReadMsgId || null,
-            lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
-            participants: normalizedParticipants.map(p => ({
-              ...p,
-              user: p.user ? applyUserDefaults(p.user) : null,
-              role: p.role || 'member',
-              joinedAt: p.joinedAt || new Date(),
-            })) || [],
-            // ✅ NEW: Include lastMessage sender with full user info
-            lastMessage: {
-              ...chat.lastMessage,
-              sender: chat.lastMessage?.sender ? applyUserDefaults(chat.lastMessage.sender) : null
-            }
-          };
-        } catch (err) {
-          console.error('Error calculating unread for chat:', chat._id, err);
-          // Return chat without unread count if calculation fails
-          const normalizedParticipants = normalizeParticipants(chat.participants);
-          const otherParticipants = normalizedParticipants?.filter(
-            p => p.user?._id?.toString() !== userId.toString()
-          ) || [];
-          
-          let otherUser = null;
-          if (chat.convoType === 'direct' && otherParticipants.length > 0) {
-            otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
-          }
-
-          return {
-            ...chat,
-            unreadCount: 0,
-            otherUser,
-            lastReadMsgId: normalizeParticipants(chat.participants).find(p => p.user?._id?.toString() === userId.toString())?.lastReadMsgId || null,
-            lastActivityTimestamp: chat.lastActivityTimestamp || new Date(),
-            participants: normalizedParticipants.map(p => ({
-              ...p,
-              user: p.user ? applyUserDefaults(p.user) : null,
-              role: p.role || 'member',
-              joinedAt: p.joinedAt || new Date(),
-            })) || [],
-            lastMessage: {
-              ...chat.lastMessage,
-              sender: chat.lastMessage?.sender ? applyUserDefaults(chat.lastMessage.sender) : null
-            }
-          };
-        }
-      })
-    );
-
-    res.json(chatsWithUnread);
+    res.json(sanitizedChats);
   } catch (error) {
     console.error('getChats error:', error);
     res.status(500).json({ message: 'Failed to get chats', error: process.env.NODE_ENV === 'production' ? {} : error.message });
@@ -383,28 +296,9 @@ async function findChat(req, res) {
       return res.status(404).json({ message: 'Chat not found' });
     }
 
-    // ✅ FIX: Apply lazy defaults and add otherUser for direct chats
-    const chatObj = chat.toObject();
-    const normalizedParticipants = normalizeParticipants(chatObj.participants);
-    const otherParticipants = normalizedParticipants?.filter(
-      p => p.user?._id?.toString() !== currentUser.toString()
-    ) || [];
-    
-    let otherUser = null;
-    if (otherParticipants.length > 0) {
-      otherUser = otherParticipants[0].user ? applyUserDefaults(otherParticipants[0].user) : null;
-    }
-
-    res.json({
-      ...chatObj,
-      otherUser,
-      participants: normalizedParticipants.map(p => ({
-        ...p,
-        user: p.user ? applyUserDefaults(p.user) : null,
-        role: p.role || 'member',
-        joinedAt: p.joinedAt || new Date(),
-      })) || [],
-    });
+    // ✅ FIX: Use sanitizer to ensure all fields are properly set
+    const sanitized = sanitizeChatForResponse(chat, currentUser);
+    res.json(sanitized);
   } catch (error) {
     res.status(500).json({ message: 'Failed to find chat', error: error.message });
   }
@@ -452,18 +346,9 @@ async function createChat(req, res) {
 
     chat = await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
     
-    // Apply lazy defaults to participants
-    const chatWithDefaults = {
-      ...chat.toObject(),
-      participants: chat.participants?.map(p => ({
-        ...p,
-        user: p.user ? applyUserDefaults(p.user) : null,
-        role: p.role || 'member',
-        joinedAt: p.joinedAt || new Date(),
-      })) || [],
-    };
-    
-    res.json(chatWithDefaults);
+    // ✅ FIX: Use sanitizer to ensure all fields are properly set
+    const sanitized = sanitizeChatForResponse(chat, currentUser);
+    res.json(sanitized);
   } catch (error) {
     res.status(500).json({ message: 'Failed to create chat', error: error.message });
   }
@@ -990,7 +875,7 @@ async function createGroupChat(req, res) {
 
     const chat = new Chat({
       convoType: 'group',
-      title: name,
+      groupName: name,
       participants: allParticipants,
       unreadCounts: unreadCounts,
     });
@@ -998,17 +883,9 @@ async function createGroupChat(req, res) {
     await chat.save();
     await chat.populate('participants.user', 'name username profilePicture isOnline lastSeen bio');
     
-    // ✅ FIX: Apply lazy defaults to participants
-    const chatObj = chat.toObject();
-    res.status(201).json({
-      ...chatObj,
-      participants: chatObj.participants?.map(p => ({
-        ...p,
-        user: p.user ? applyUserDefaults(p.user) : null,
-        role: p.role || 'member',
-        joinedAt: p.joinedAt || new Date(),
-      })) || [],
-    });
+    // ✅ FIX: Use sanitizer to ensure all fields are properly set
+    const sanitized = sanitizeChatForResponse(chat, creatorId);
+    res.status(201).json(sanitized);
   } catch (error) {
     res.status(500).json({ message: 'Failed to create group', error: error.message });
   }
@@ -1027,17 +904,9 @@ async function getChatInfo(req, res) {
 
     if (!chat) return res.status(403).json({ message: 'Chat not found or access denied' });
 
-    // ✅ FIX: Apply lazy defaults to participants
-    const chatObj = chat.toObject();
-    res.json({
-      ...chatObj,
-      participants: chatObj.participants?.map(p => ({
-        ...p,
-        user: p.user ? applyUserDefaults(p.user) : null,
-        role: p.role || 'member',
-        joinedAt: p.joinedAt || new Date(),
-      })) || [],
-    });
+    // ✅ FIX: Use sanitizer to ensure all fields are properly set
+    const sanitized = sanitizeChatForResponse(chat, userId);
+    res.json(sanitized);
   } catch (error) {
     res.status(500).json({ message: 'Failed to get chat info', error: error.message });
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
 import { get } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme-color';
 
@@ -17,6 +18,7 @@ const mockStories: Story[] = [
 
 export default function StoriesReelsComponent() {
   const colors = useTheme();
+  const router = useRouter();
   const [stories, setStories] = useState<Story[]>(mockStories);
   const [loading, setLoading] = useState(true);
 
@@ -50,6 +52,7 @@ export default function StoriesReelsComponent() {
   const handleStoryPress = (storyId: string) => {
     if (storyId === 'add') {
       console.log('Create story tapped');
+      router.push('/story/create');
     } else {
       console.log('Story pressed:', storyId);
     }

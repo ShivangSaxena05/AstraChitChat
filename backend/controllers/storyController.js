@@ -18,7 +18,7 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         mediaPublicId,      // Cloudinary public_id — required for deletion
         mediaType,          // 'image' | 'video'
         thumbnailUrl,       // optional: for video stories
-        duration,           // optional: video duration
+        duration,           // REQUIRED for videos: duration in seconds
         textOverlay,        // optional: text overlays
         drawings,           // optional: drawing overlays
     } = req.body;
@@ -40,6 +40,20 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         });
     }
 
+    // ✅ CRITICAL FIX: Validate video duration
+    // Video stories MUST have a duration (in seconds)
+    // This allows downstream services to differentiate between:
+    // - Flicks (duration <= 60 seconds, 9:16 aspect ratio)
+    // - Long videos (duration > 60 seconds, variable aspect ratio)
+    if (mediaType === 'video') {
+        if (!duration || typeof duration !== 'number' || duration <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Duration is required for video stories and must be a positive number (in seconds)'
+            });
+        }
+    }
+
     // Build media object matching Story schema
     const media = {
         public_id: mediaPublicId,
@@ -47,7 +61,7 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         resource_type: mediaType,
         format: mediaType === 'video' ? 'mp4' : 'jpg',
         thumbnail_url: thumbnailUrl || null,
-        duration: mediaType === 'video' ? (duration || null) : null
+        duration: mediaType === 'video' ? duration : null  // Only for videos
     };
 
     // Sanitize text overlays — only keep text content, not position
@@ -177,15 +191,18 @@ exports.viewStory = asyncHandler(async (req, res) => {
     // Respond immediately — don't make client wait
     res.json({ success: true, message: 'Story view recorded.' });
 
+    // ✅ FIX: Use correct schema field names
+    // Schema uses viewedBy array (not viewers)
+    // Each entry has 'user' field (not 'userId')
     // Update in background
     Story.findOneAndUpdate(
         {
             _id: storyId,
             expiresAt: { $gt: new Date() },
-            'viewers.userId': { $ne: viewerId },   // only add if not already viewed
+            'viewedBy.user': { $ne: viewerId },   // only add if not already viewed
         },
         {
-            $push: { viewers: { userId: viewerId, viewedAt: new Date() } },
+            $push: { viewedBy: { user: viewerId, viewedAt: new Date() } },
         }
     ).catch(err => console.error('[viewStory] update failed:', err.message));
 });
@@ -203,14 +220,16 @@ exports.deleteStory = asyncHandler(async (req, res) => {
         return res.status(404).json({ success: false, message: 'Story not found.' });
     }
 
-    if (story.user.toString() !== userId.toString()) {
+    // ✅ FIX: Use 'author' field (not 'user')
+    if (story.author.toString() !== userId.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorized to delete this story.' });
     }
 
-    // Delete from Cloudinary (best-effort)
-    if (story.mediaPublicId) {
-        const resourceType = story.mediaType === 'video' ? 'video' : 'image';
-        deleteCloudinaryAsset(story.mediaPublicId, resourceType)
+    // ✅ FIX: Delete from Cloudinary using correct media object structure
+    // media.public_id (not mediaPublicId) and media.resource_type (not mediaType)
+    if (story.media?.public_id) {
+        const resourceType = story.media.resource_type === 'video' ? 'video' : 'image';
+        deleteCloudinaryAsset(story.media.public_id, resourceType)
             .catch(err => console.error('[deleteStory] Cloudinary delete failed:', err.message));
     }
 
@@ -226,36 +245,42 @@ exports.getStoryViewers = asyncHandler(async (req, res) => {
     const { storyId } = req.params;
     const userId      = req.user._id;
 
+    // ✅ FIX: Select 'author' field (not 'user')
     const story = await Story.findById(storyId)
-        .populate('viewers.userId', 'name username profilePicture')
-        .select('user viewers');
+        .populate('viewedBy.user', 'name username profilePicture')
+        .select('author viewedBy');
 
     if (!story) {
         return res.status(404).json({ success: false, message: 'Story not found.' });
     }
 
-    if (story.user.toString() !== userId.toString()) {
+    // ✅ FIX: Use 'author' field (not 'user')
+    if (story.author.toString() !== userId.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorized to view story viewers.' });
     }
 
-    res.json({ success: true, data: story.viewers });
+    res.json({ success: true, data: story.viewedBy });
 });
 
 // ─── Helper: group stories by user for feed ring UI ──────────────────────────
+// ✅ FIXED: Uses 'author' field instead of 'user'
 function groupStoriesByUser(stories, requesterId) {
     const map = new Map();
 
     for (const story of stories) {
-        const uid = story.user._id.toString();
+        // ✅ FIX: Use 'author' field (not 'user')
+        const uid = story.author._id.toString();
         if (!map.has(uid)) {
             map.set(uid, {
-                user:    story.user,
+                // ✅ FIX: Reference author (not user)
+                user:    story.author,
                 stories: [],
                 hasUnseen: false,
             });
         }
         const entry = map.get(uid);
-        const isSeen = story.viewers.some(v => v.userId.toString() === requesterId);
+        // ✅ FIX: Use correct 'viewedBy' array structure
+        const isSeen = story.viewedBy && story.viewedBy.some(v => v.user.toString() === requesterId);
         entry.stories.push({ ...story, isSeen });
         if (!isSeen) entry.hasUnseen = true;
     }

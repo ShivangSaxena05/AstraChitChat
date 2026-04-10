@@ -1,5 +1,5 @@
 /**
- * uploadMiddleware.js (v2.0)
+ * uploadMiddleware.js (v2.0) — OFFICIAL STANDARD
  * 
  * ✅ MEMORY BUFFER STORAGE: Stores uploaded files in memory (Buffer objects)
  * 
@@ -14,6 +14,23 @@
  * - Single point of file handling for all storage backends
  * - Consistent behavior across all upload endpoints
  * - Better error handling in route handlers
+ * - Prevents 500 errors caused by undefined req.file.buffer
+ * 
+ * ⚠️ DEPRECATED: Do NOT use multer-storage-cloudinary (CloudinaryStorage)
+ * 
+ * WHY:
+ * - multer-storage-cloudinary uploads directly to Cloudinary DURING multipart parsing
+ * - It sets req.file.path and req.file.filename but does NOT populate req.file.buffer
+ * - If a route handler tries to access req.file.buffer, it gets undefined → CRASH with 500
+ * 
+ * OLD CONFLICTING SYSTEM (REMOVED):
+ * - multerCloudinary.js — used CloudinaryStorage (DO NOT USE)
+ * - multer.js — re-exported multerCloudinary (DO NOT USE)
+ * 
+ * MIGRATION NOTES:
+ * - All routes must use uploadMiddleware (this file) for multipart/form-data
+ * - All routes must then call uploadToCloudinary(req.file.buffer, {...}) from mediaService.js
+ * - See mediaRoutes.js for reference implementation
  */
 
 const multer = require('multer');

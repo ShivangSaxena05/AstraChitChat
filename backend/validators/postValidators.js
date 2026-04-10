@@ -1,31 +1,121 @@
 const Joi = require('joi');
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Create post validator
+// 
+// Expected request body structure:
+// {
+//   media: [
+//     {
+//       url: 'https://...',
+//       publicId: 'myapp/...',
+//       resourceType: 'image' | 'video',
+//       width: 1920 (optional),
+//       height: 1080 (optional),
+//       duration: 120 (optional, for videos)
+//     }
+//   ],
+//   caption: 'Post text...' (optional),
+//   hashtags: ['tag1', 'tag2'] (optional),
+//   visibility: 'public' | 'followers' | 'private' (optional),
+//   location: 'City, Country' (optional)
+// }
+// ─────────────────────────────────────────────────────────────────────────────
 exports.createPostValidator = Joi.object({
-  mediaUrl: Joi.string()
-    .uri()
+  media: Joi.array()
+    .items(
+      Joi.object({
+        url: Joi.string()
+          .uri()
+          .required()
+          .messages({
+            'string.uri': 'Media URL must be a valid URI',
+            'any.required': 'Media URL is required for each media item',
+          }),
+        publicId: Joi.string()
+          .required()
+          .messages({
+            'string.base': 'Media publicId must be a string',
+            'any.required': 'Media publicId is required for each media item',
+          }),
+        resourceType: Joi.string()
+          .valid('image', 'video')
+          .required()
+          .messages({
+            'any.only': 'Resource type must be either "image" or "video"',
+            'any.required': 'Resource type is required for each media item',
+          }),
+        width: Joi.number()
+          .integer()
+          .positive()
+          .optional()
+          .messages({
+            'number.base': 'Width must be a number',
+            'number.positive': 'Width must be a positive number',
+          }),
+        height: Joi.number()
+          .integer()
+          .positive()
+          .optional()
+          .messages({
+            'number.base': 'Height must be a number',
+            'number.positive': 'Height must be a positive number',
+          }),
+        duration: Joi.number()
+          .positive()
+          .optional()
+          .messages({
+            'number.base': 'Duration must be a number',
+            'number.positive': 'Duration must be a positive number',
+          }),
+      })
+    )
+    .min(1)
+    .max(10)
     .required()
     .messages({
-      'string.uri': 'Media URL must be a valid URI',
-      'any.required': 'Media URL is required',
-    }),
-  mediaKey: Joi.string()
-    .optional()
-    .messages({
-      'string.base': 'Media key must be a string',
-    }),
-  mediaType: Joi.string()
-    .valid('image', 'video')
-    .required()
-    .messages({
-      'any.only': 'Media type must be either "image" or "video"',
-      'any.required': 'Media type is required',
+      'array.base': 'Media must be an array',
+      'array.min': 'At least one media item is required',
+      'array.max': 'Maximum 10 media items allowed per post',
+      'any.required': 'Media array is required',
     }),
   caption: Joi.string()
     .max(2000)
     .optional()
+    .trim()
     .messages({
       'string.max': 'Caption must not exceed 2000 characters',
+    }),
+  hashtags: Joi.array()
+    .items(
+      Joi.string()
+        .trim()
+        .min(1)
+        .max(50)
+        .messages({
+          'string.min': 'Each hashtag must have at least 1 character',
+          'string.max': 'Each hashtag must not exceed 50 characters',
+        })
+    )
+    .max(30)
+    .optional()
+    .messages({
+      'array.base': 'Hashtags must be an array',
+      'array.max': 'Maximum 30 hashtags allowed per post',
+    }),
+  visibility: Joi.string()
+    .valid('public', 'followers', 'private')
+    .optional()
+    .default('public')
+    .messages({
+      'any.only': 'Visibility must be one of: public, followers, private',
+    }),
+  location: Joi.string()
+    .max(200)
+    .optional()
+    .trim()
+    .messages({
+      'string.max': 'Location must not exceed 200 characters',
     }),
 }).unknown(false);
 

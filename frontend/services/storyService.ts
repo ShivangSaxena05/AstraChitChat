@@ -14,7 +14,7 @@ interface UploadStoryPayload {
   mediaPublicId: string;               // Cloudinary public_id for deletion
   mediaType: 'image' | 'video';
   thumbnailUrl?: string;               // Optional: for videos
-  duration?: number;                   // Optional: video duration in ms
+  duration?: number;                   // ✅ FIXED: video duration in SECONDS (not ms)
   textOverlay?: TextOverlayData[];      // Sanitized text overlays (text content only)
   drawings?: Array<any>;                // Optional: ephemeral drawing data
 }

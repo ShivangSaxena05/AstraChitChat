@@ -21,6 +21,17 @@ const {
  */
 const createUploadHandler = (folder) => {
     return async (req, res, next) => {
+        // ✅ CRITICAL FIX: Validate req.user before processing upload
+        // This prevents 500 errors when auth middleware fails silently
+        if (!req.user || !req.user._id) {
+            console.error(`[mediaRoutes] Missing req.user for ${folder}:`, {
+                hasUser: !!req.user,
+                hasUserId: !!req.user?._id,
+                userId: req.user?._id
+            });
+            return res.status(401).json({ success: false, message: 'Not authenticated' });
+        }
+
         try {
             // Parse multipart/form-data
             upload.single('file')(req, res, async (err) => {
@@ -72,11 +83,15 @@ const createUploadHandler = (folder) => {
                         code: uploadErr?.code,
                         status: uploadErr?.status,
                         http_code: uploadErr?.http_code,
+                        statusCode: uploadErr?.statusCode,
+                        response: uploadErr?.response?.data || uploadErr?.response,
+                        stack: uploadErr?.stack
                     });
                     return res.status(500).json({
                         success: false,
                         message: 'Failed to upload to Cloudinary',
                         error: uploadErr.message,
+                        code: uploadErr?.http_code || uploadErr?.code
                     });
                 }
             });

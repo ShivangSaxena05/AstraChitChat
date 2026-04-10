@@ -98,6 +98,20 @@ const uploadToCloudinary = (fileBuffer, options) => {
     return new Promise((resolve, reject) => {
         const { folder, ownerId, fileName, resourceType = 'auto' } = options;
         
+        // ✅ CRITICAL FIX: Validate all required parameters
+        if (!fileBuffer) {
+            return reject(new Error('fileBuffer is required'));
+        }
+        if (!folder) {
+            return reject(new Error('folder is required'));
+        }
+        if (!ownerId) {
+            return reject(new Error('ownerId is required'));
+        }
+        if (!fileName) {
+            return reject(new Error('fileName is required'));
+        }
+
         // Validate folder path — prevents typos and ensures consistent structure
         // Refer to MEDIA_FOLDERS mapping for valid folder keys
         if (!MEDIA_FOLDERS[folder]) {
@@ -110,7 +124,9 @@ const uploadToCloudinary = (fileBuffer, options) => {
         // This matches getCloudinaryUploadUrl() implementation
         const timestamp = Math.floor(Date.now() / 1000);
         const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
-        const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
+        // ✅ FIX: Properly construct publicId to match what Cloudinary will return
+        // When folder contains full path, don't include myapp prefix again
+        const publicIdSuffix = `${timestamp}-${safeFileName}`;
         
         // Upload to Cloudinary using programmatic API (not preset-based)
         // Folder path: myapp/{folderPath}/{ownerId}/{timestamp}-{safeFileName}
@@ -118,17 +134,26 @@ const uploadToCloudinary = (fileBuffer, options) => {
         const uploadStream = cloudinary.uploader.upload_stream(
             {
                 folder: `myapp/${folderPath}/${ownerId}`,
-                public_id: `${timestamp}-${safeFileName}`,
+                public_id: publicIdSuffix,
                 resource_type: resourceType,
                 transformation: [{ quality: 'auto', fetch_format: 'auto' }]
             },
             (error, result) => {
                 if (error) {
+                    console.error('[uploadToCloudinary] Cloudinary upload failed:', {
+                        folder,
+                        ownerId,
+                        fileName,
+                        error: error.message,
+                        http_code: error.http_code
+                    });
                     reject(error);
                 } else {
+                    // ✅ FIX: Use the actual public_id from Cloudinary response
+                    // This ensures we have the correct ID for future deletion
                     resolve({
                         url: result.secure_url,
-                        publicId: result.public_id,
+                        publicId: result.public_id,  // Use Cloudinary's returned public_id
                         secureUrl: result.secure_url,
                         resourceType: result.resource_type,
                         format: result.format,
@@ -139,7 +164,24 @@ const uploadToCloudinary = (fileBuffer, options) => {
             }
         );
 
-        streamifier.createReadStream(fileBuffer).pipe(uploadStream);
+        // ✅ CRITICAL FIX: Add error handlers to the stream
+        // Without these, promise will hang if stream fails
+        const readStream = streamifier.createReadStream(fileBuffer);
+        
+        // Handle read stream errors
+        readStream.on('error', (error) => {
+            console.error('[uploadToCloudinary] Read stream error:', error.message);
+            reject(new Error(`Failed to read file: ${error.message}`));
+        });
+        
+        // Handle upload stream errors
+        uploadStream.on('error', (error) => {
+            console.error('[uploadToCloudinary] Upload stream error:', error.message);
+            reject(new Error(`Upload stream error: ${error.message}`));
+        });
+        
+        // Pipe the file to Cloudinary
+        readStream.pipe(uploadStream);
     });
 };
 

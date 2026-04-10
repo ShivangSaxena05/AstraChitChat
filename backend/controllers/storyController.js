@@ -18,7 +18,7 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         mediaPublicId,      // Cloudinary public_id — required for deletion
         mediaType,          // 'image' | 'video'
         thumbnailUrl,       // optional: for video stories
-        duration,           // optional: video duration
+        duration,           // REQUIRED for videos: duration in seconds
         textOverlay,        // optional: text overlays
         drawings,           // optional: drawing overlays
     } = req.body;
@@ -40,6 +40,20 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         });
     }
 
+    // ✅ CRITICAL FIX: Validate video duration
+    // Video stories MUST have a duration (in seconds)
+    // This allows downstream services to differentiate between:
+    // - Flicks (duration <= 60 seconds, 9:16 aspect ratio)
+    // - Long videos (duration > 60 seconds, variable aspect ratio)
+    if (mediaType === 'video') {
+        if (!duration || typeof duration !== 'number' || duration <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Duration is required for video stories and must be a positive number (in seconds)'
+            });
+        }
+    }
+
     // Build media object matching Story schema
     const media = {
         public_id: mediaPublicId,
@@ -47,7 +61,7 @@ exports.uploadStory = asyncHandler(async (req, res) => {
         resource_type: mediaType,
         format: mediaType === 'video' ? 'mp4' : 'jpg',
         thumbnail_url: thumbnailUrl || null,
-        duration: mediaType === 'video' ? (duration || null) : null
+        duration: mediaType === 'video' ? duration : null  // Only for videos
     };
 
     // Sanitize text overlays — only keep text content, not position

@@ -31,16 +31,25 @@
  *
  * Exports:
  *   uploadToCloudinary(fileBuffer, options)
- *     → { url, publicId, secure_url }
+ *     → { url, publicId, secureUrl, resourceType, format, width, height }
+ *
+ *   deleteCloudinaryAsset(publicId, resourceType)
+ *     → void
  *
  *   deleteFromCloudinary(publicId)
  *     → void
+ *
+ *   getCloudinaryUploadUrl(options)
+ *     → { uploadUrl, cloudName, uploadPreset, folder, publicId, uploadType }
  *
  *   getPresignedUploadUrl(options) - S3 only
  *     → { presignedUrl, key, cloudfrontUrl }
  *
  *   deleteS3Object(key) - S3 only
  *     → void
+ *
+ *   getSignedCloudfrontUrl(s3Key, expiresInSeconds)
+ *     → signed URL string
  */
 
 const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
@@ -96,7 +105,10 @@ const uploadToCloudinary = (fileBuffer, options) => {
         }
 
         const folderPath = MEDIA_FOLDERS[folder];
-        const timestamp = Date.now();
+        // ✅ FIX: Use SECONDS consistently across all functions
+        // Cloudinary API expects timestamps in SECONDS for consistency
+        // This matches getCloudinaryUploadUrl() implementation
+        const timestamp = Math.floor(Date.now() / 1000);
         const safeFileName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
         const publicId = `myapp/${folderPath}/${ownerId}/${timestamp}-${safeFileName}`;
         
@@ -131,45 +143,7 @@ const uploadToCloudinary = (fileBuffer, options) => {
     });
 };
 
-const uploadFileToCloudinary = (file, folder = 'postImage') => {
-    return new Promise((resolve, reject) => {
-        // ⚠️ IMPORTANT: Works with multer.memoryStorage()
-        // file.path is undefined with memory storage.
-        // Use file.buffer instead.
-        if (!file.buffer) {
-            return reject(new Error('File buffer is missing. Ensure uploadMiddleware uses multer.memoryStorage()'));
-        }
 
-        const folderPath = MEDIA_FOLDERS[folder] || MEDIA_FOLDERS.postImage;
-        const timestamp = Date.now();
-        const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
-        
-        // Use streamifier to convert buffer to stream for Cloudinary
-        const uploadStream = cloudinary.uploader.upload_stream(
-            {
-                folder: `myapp/${folderPath}`,
-                public_id: `${timestamp}-${safeFileName}`,
-                resource_type: 'auto',
-                transformation: [{ quality: 'auto', fetch_format: 'auto' }]
-            },
-            (error, result) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve({
-                        url: result.secure_url,
-                        publicId: result.public_id,
-                        secureUrl: result.secure_url,
-                        resourceType: result.resource_type,
-                        format: result.format
-                    });
-                }
-            }
-        );
-
-        streamifier.createReadStream(file.buffer).pipe(uploadStream);
-    });
-};
 
 const deleteCloudinaryAsset = async (publicId, resourceType = 'image') => {
     return new Promise((resolve, reject) => {
@@ -357,7 +331,6 @@ const getSignedCloudfrontUrl = (s3Key, expiresInSeconds = 3600) => {
 
 module.exports = { 
     uploadToCloudinary,
-    uploadFileToCloudinary,
     deleteCloudinaryAsset,
     deleteFromCloudinary,
     getCloudinaryUploadUrl,

@@ -107,7 +107,12 @@ const mongoOptions = {
 };
 
 mongoose.connect(process.env.MONGO_URI, mongoOptions)
-    .then(() => console.log('MongoDB Atlas connected'))
+    .then(() => {
+        console.log('MongoDB Atlas connected');
+        // ✅ Start cleanup scheduler after database connection is established
+        const { startCleanupScheduler } = require('./services/cleanupService');
+        startCleanupScheduler();
+    })
     .catch(err => console.error('MongoDB connection error:', err));
 
 // ── Test DB endpoint (non-production only) ────────────────────────────────────

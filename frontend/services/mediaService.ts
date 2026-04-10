@@ -64,7 +64,7 @@ export function getMimeType(uri: string): string {
  * 
  * @param fileUri   File URI from image/video picker (e.g. "file://..." or "data://...")
  * @param fileName  File name (e.g. "photo.jpg")
- * @returns File object (web) or { uri, type, name } object (native)
+ * @returns File object (web) or { uri, type, name: string } object (native)
  */
 async function uriToFile(
   fileUri: string,
@@ -478,4 +478,294 @@ export const uploadMedia = async (
     url: result.url,
     key: result.publicId,
   };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VALIDATED UPLOAD FUNCTIONS (WITH PRE-UPLOAD VALIDATION)
+//
+// These functions perform file validation BEFORE upload, catching errors early
+// and providing better user experience with instant feedback.
+// Use these instead of the raw upload functions for user-facing features.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upload an image with pre-upload validation.
+ * Validates file type, size, and dimensions BEFORE sending to server.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "photo.jpg")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadImageWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    // Import validation service
+    const { validateImageFile, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    // Validate before upload
+    console.log('[uploadImageWithValidation] Validating image:', { fileName });
+    const validation = await validateImageFile(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadImageWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Image validation failed');
+    }
+
+    console.log('[uploadImageWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+      dimensions: `${validation.imageData?.width}x${validation.imageData?.height}`,
+    });
+
+    // Proceed with upload
+    const result = await uploadImage(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadImageWithValidation:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a video with pre-upload validation.
+ * Validates file type, size, and duration BEFORE sending to server.
+ * 
+ * @param fileUri  Local file URI from video picker
+ * @param fileName Original file name (e.g. "video.mp4")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadVideoWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    // Import validation service
+    const { validateVideoFile, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    // Validate before upload
+    console.log('[uploadVideoWithValidation] Validating video:', { fileName });
+    const validation = await validateVideoFile(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadVideoWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Video validation failed');
+    }
+
+    console.log('[uploadVideoWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+      duration: `${(validation.videoData?.duration || 0) / 1000}s`,
+      dimensions: `${validation.videoData?.width}x${validation.videoData?.height}`,
+    });
+
+    // Proceed with upload
+    const result = await uploadVideo(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadVideoWithValidation:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a profile picture with pre-upload validation.
+ * Validates file type, size, and dimensions BEFORE sending to server.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "avatar.jpg")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadProfilePictureWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    // Import validation service
+    const { validateProfilePicture, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    // Validate before upload
+    console.log('[uploadProfilePictureWithValidation] Validating profile picture:', {
+      fileName,
+    });
+    const validation = await validateProfilePicture(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadProfilePictureWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Profile picture validation failed');
+    }
+
+    console.log('[uploadProfilePictureWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+      dimensions: `${validation.imageData?.width}x${validation.imageData?.height}`,
+    });
+
+    // Proceed with upload
+    const result = await uploadProfilePicture(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadProfilePictureWithValidation:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a cover photo with pre-upload validation.
+ * Validates file type, size, and dimensions BEFORE sending to server.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "cover.jpg")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadCoverPhotoWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    // Import validation service
+    const { validateCoverPhoto, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    // Validate before upload
+    console.log('[uploadCoverPhotoWithValidation] Validating cover photo:', {
+      fileName,
+    });
+    const validation = await validateCoverPhoto(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadCoverPhotoWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Cover photo validation failed');
+    }
+
+    console.log('[uploadCoverPhotoWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+      dimensions: `${validation.imageData?.width}x${validation.imageData?.height}`,
+    });
+
+    // Proceed with upload
+    const result = await uploadCoverPhoto(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadCoverPhotoWithValidation:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a story image with pre-upload validation.
+ * 
+ * @param fileUri  Local file URI from image picker
+ * @param fileName Original file name (e.g. "story.jpg")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadStoryImageWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    const { validateStoryImage, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    console.log('[uploadStoryImageWithValidation] Validating story image:', {
+      fileName,
+    });
+    const validation = await validateStoryImage(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadStoryImageWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Story image validation failed');
+    }
+
+    console.log('[uploadStoryImageWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+    });
+
+    const result = await uploadStoryImage(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadStoryImageWithValidation:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a story video with pre-upload validation.
+ * 
+ * @param fileUri  Local file URI from video picker
+ * @param fileName Original file name (e.g. "story-video.mp4")
+ * @returns        { url, publicId, validationPassed: true }
+ * @throws         Error with validation details if validation fails
+ */
+export const uploadStoryVideoWithValidation = async (
+  fileUri: string,
+  fileName: string
+): Promise<UploadResult & { validationPassed: boolean }> => {
+  try {
+    const { validateStoryVideo, getValidationErrorMessage } = await import(
+      './fileValidationService'
+    );
+
+    console.log('[uploadStoryVideoWithValidation] Validating story video:', {
+      fileName,
+    });
+    const validation = await validateStoryVideo(fileUri);
+
+    if (!validation.valid) {
+      const errorMessage = getValidationErrorMessage(validation);
+      console.error('[uploadStoryVideoWithValidation] Validation failed:', {
+        fileName,
+        errors: validation.errors,
+      });
+      throw new Error(errorMessage || 'Story video validation failed');
+    }
+
+    console.log('[uploadStoryVideoWithValidation] Validation passed, uploading:', {
+      fileName,
+      size: `${validation.fileSizeMB.toFixed(2)}MB`,
+      duration: `${(validation.videoData?.duration || 0) / 1000}s`,
+    });
+
+    const result = await uploadStoryVideo(fileUri, fileName);
+    return { ...result, validationPassed: true };
+  } catch (error) {
+    console.error('Error in uploadStoryVideoWithValidation:', error);
+    throw error;
+  }
 };

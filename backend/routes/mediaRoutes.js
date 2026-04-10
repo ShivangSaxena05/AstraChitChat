@@ -40,12 +40,20 @@ const createUploadHandler = (folder) => {
                 try {
                     console.log(`[mediaRoutes] Processing file upload - folder: ${folder}, file: ${req.file.originalname}, size: ${req.file.size} bytes, user: ${req.user._id}`);
                     
+                    // Determine correct resource type for Cloudinary
+                    // ⚠️ IMPORTANT: Cloudinary treats audio as 'video' resource_type
+                    // 'auto' is used for images and generic files
+                    let resourceType = 'auto';  // Default for images and other files
+                    if (folder.includes('video') || folder.includes('audio')) {
+                        resourceType = 'video';  // Both video and audio use 'video' resource_type in Cloudinary
+                    }
+                    
                     // Upload to Cloudinary or S3
                     const result = await uploadToCloudinary(req.file.buffer, {
                         folder,
                         ownerId: req.user._id.toString(),
                         fileName: req.file.originalname,
-                        resourceType: folder.includes('video') || folder.includes('audio') ? 'video' : 'auto',
+                        resourceType,
                     });
 
                     console.log(`[mediaRoutes] Upload successful - folder: ${folder}, url: ${result.url}`);
@@ -170,16 +178,26 @@ router.post('/upload/profile-picture', protect, async (req, res, next) => {
             }
 
             // Delete old profile picture if it exists
-            // ✅ IMPORTANT: This happens immediately after new upload succeeds
-            // Ensures old picture is cleaned up before saving new reference
+            // ⚠️ IMPORTANT: Deletion is best-effort (non-blocking)
+            // Tries to clean up Cloudinary asset, but doesn't fail the response if deletion fails
+            // This prevents orphaned assets from accumulating
+            // TODO: Consider queueing failed deletions to a background cleanup service
             if (user.profilePublicId) {
                 try {
                     await deleteFromCloudinary(user.profilePublicId);
-                    console.log(`[mediaRoutes] Deleted old profile picture: ${user.profilePublicId}`);
-                } catch (e) {
-                    console.warn('[mediaRoutes] Could not delete old profile picture:', e.message);
-                    // Non-blocking: continue even if deletion fails
-                    // New picture is already uploaded, user should see it
+                    console.log(`[mediaRoutes] ✅ Deleted old profile picture: ${user.profilePublicId}`);
+                } catch (deleteErr) {
+                    // Non-blocking cleanup failure — log but don't fail the request
+                    // User has already uploaded new picture successfully
+                    // This asset may be orphaned if deletion never succeeds
+                    console.error('[mediaRoutes] ❌ Failed to delete old profile picture:', {
+                        publicId: user.profilePublicId,
+                        error: deleteErr?.message,
+                        code: deleteErr?.http_code,
+                        status: deleteErr?.status,
+                    });
+                    // TODO: Queue for background cleanup service to retry later
+                    // Example: await queueCloudinaryDeletion(user.profilePublicId);
                 }
             }
 
@@ -239,11 +257,26 @@ router.post('/upload/cover-photo', protect, async (req, res, next) => {
             }
 
             // Delete old cover photo if it exists
+            // ⚠️ IMPORTANT: Deletion is best-effort (non-blocking)
+            // Tries to clean up Cloudinary asset, but doesn't fail the response if deletion fails
+            // This prevents orphaned assets from accumulating
+            // TODO: Consider queueing failed deletions to a background cleanup service
             if (user.coverPhotoPublicId) {
                 try {
                     await deleteFromCloudinary(user.coverPhotoPublicId);
-                } catch (e) {
-                    console.warn('Could not delete old cover photo:', e.message);
+                    console.log(`[mediaRoutes] ✅ Deleted old cover photo: ${user.coverPhotoPublicId}`);
+                } catch (deleteErr) {
+                    // Non-blocking cleanup failure — log but don't fail the request
+                    // User has already uploaded new cover successfully
+                    // This asset may be orphaned if deletion never succeeds
+                    console.error('[mediaRoutes] ❌ Failed to delete old cover photo:', {
+                        publicId: user.coverPhotoPublicId,
+                        error: deleteErr?.message,
+                        code: deleteErr?.http_code,
+                        status: deleteErr?.status,
+                    });
+                    // TODO: Queue for background cleanup service to retry later
+                    // Example: await queueCloudinaryDeletion(user.coverPhotoPublicId);
                 }
             }
 

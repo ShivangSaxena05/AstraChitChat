@@ -9,17 +9,56 @@ const { sanitizePostForResponse, sanitizePostsForResponse } = require('../utils/
 // ─── Create Post ──────────────────────────────────────────────────────────────
 // @route   POST /api/posts/upload
 // @access  Private
+// @body    {
+//            media: [{ url, publicId, resourceType, width?, height?, duration? }],
+//            caption?: string,
+//            hashtags?: string[],
+//            visibility?: 'public' | 'followers' | 'private',
+//            location?: string
+//          }
 const createPost = async (req, res) => {
     const { media, caption, hashtags, visibility, location } = req.body;
 
+    // Validate media array is present and non-empty
     if (!media || !Array.isArray(media) || media.length === 0) {
-        return res.status(400).json({ message: 'media array is required.' });
+        return res.status(400).json({
+            success: false,
+            message: 'Media array is required and must contain at least one item'
+        });
+    }
+
+    // ✅ CRITICAL FIX: Validate each media object has required fields
+    // Media objects must have url and publicId to be deletable and retrievable
+    for (let i = 0; i < media.length; i++) {
+        const mediaItem = media[i];
+        
+        if (!mediaItem.url || typeof mediaItem.url !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: `Media item ${i + 1}: URL is required and must be a string`
+            });
+        }
+
+        if (!mediaItem.publicId || typeof mediaItem.publicId !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: `Media item ${i + 1}: publicId is required and must be a string`
+            });
+        }
+
+        if (!mediaItem.resourceType || !['image', 'video'].includes(mediaItem.resourceType)) {
+            return res.status(400).json({
+                success: false,
+                message: `Media item ${i + 1}: resourceType must be 'image' or 'video'`
+            });
+        }
     }
 
     try {
+        // Create post with validated media
         const post = await Post.create({
             author:       req.user._id,
-            media:        media,  // Array of Cloudinary objects
+            media:        media,  // Array of validated Cloudinary objects
             caption:      caption || '',
             hashtags:     Array.isArray(hashtags) ? hashtags : [],
             visibility:   visibility || 'public',
@@ -30,16 +69,74 @@ const createPost = async (req, res) => {
             savedCount:   0,
         });
 
-        await incrementStat(req.user._id, 'postsCount', 1);
-        
-        // ✅ FIX: Populate author and sanitize before responding
+        // ✅ CRITICAL FIX: Handle stat increment failure gracefully
+        // Stats should update, but shouldn't block post creation if they fail
+        // This prevents orphaned posts in the database
+        let statError = null;
+        try {
+            await incrementStat(req.user._id, 'postsCount', 1);
+            console.log(`[createPost] Stat incremented for user ${req.user._id}`);
+        } catch (statErr) {
+            statError = statErr;
+            console.error('[createPost] ⚠️ Stat increment failed:', {
+                userId: req.user._id,
+                error: statErr?.message,
+                code: statErr?.code,
+            });
+            // Continue anyway - post was successfully created
+            // TODO: Queue this stat update for background retry job
+            // Example: await queueStatSync(req.user._id, 'postsCount', 1);
+        }
+
+        // Populate author and sanitize before responding
         const populatedPost = await post.populate('author', 'name username profilePicture');
         const sanitized = sanitizePostForResponse(populatedPost, req.user._id);
 
-        res.status(201).json({ message: 'Post created successfully', post: sanitized });
+        // Return success response
+        // Include warning if stats weren't updated
+        return res.status(201).json({
+            success: true,
+            message: 'Post created successfully',
+            post: sanitized,
+            _warnings: statError ? ['Post created but stats may not have updated. Please refresh your profile.'] : undefined,
+        });
+
     } catch (error) {
-        console.error('[createPost]', error);
-        res.status(500).json({ message: 'Server error: could not create post', error: error.message });
+        // Provide specific error messages for different failure types
+        console.error('[createPost] Post creation failed:', {
+            error: error?.message,
+            code: error?.code,
+            name: error?.name,
+            userId: req.user._id,
+        });
+
+        // Handle validation errors from MongoDB schema
+        if (error.name === 'ValidationError') {
+            const details = Object.entries(error.errors)
+                .map(([field, err]) => `${field}: ${err.message}`)
+                .join('; ');
+            
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid post data',
+                details
+            });
+        }
+
+        // Handle duplicate key errors
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                message: 'Post already exists (duplicate)'
+            });
+        }
+
+        // Generic server error with safe error message
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create post. Please try again later.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 };
 

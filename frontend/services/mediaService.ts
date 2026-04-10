@@ -14,10 +14,32 @@ import { Platform } from 'react-native';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type MediaFolder = 
+  // Legacy support (backward compatibility)
   | 'profile'
   | 'cover'
   | 'post'
-  | 'chat';
+  | 'chat'
+  // Stories (24-hour expiry)
+  | 'storyImage'
+  | 'storyVideo'
+  // Videos (long-form)
+  | 'videoOriginal'
+  | 'videoThumbnail'
+  | 'videoHLS360p'
+  | 'videoHLS720p'
+  | 'videoHLS1080p'
+  | 'videoHLS4K'
+  // Profile variants
+  | 'profileCurrent'
+  | 'profileHistory'
+  // Post images
+  | 'postImage'
+  // Flick (short vertical videos)
+  | 'flickOriginal'
+  | 'flickProcessed480p'
+  | 'flickProcessed720p'
+  | 'flickProcessed1080p'
+  | 'flickCover';
 
 interface UploadResult {
   success: boolean;

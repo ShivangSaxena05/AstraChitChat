@@ -145,6 +145,12 @@ router.post('/upload/image', protect, createUploadHandler('postImage'));
 // @access  Private
 // @body    FormData { file: File }
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// @route   POST /api/media/upload/story-image
+// @desc    Upload story image — handled server-side with correct folder mapping
+// @access  Private
+// @body    FormData { file: File }
+// ─────────────────────────────────────────────────────────────────────────────
 router.post('/upload/story-image', protect, createUploadHandler('storyImage'));
 
 // ─────────────────────────────────────────────────────────────────────────────

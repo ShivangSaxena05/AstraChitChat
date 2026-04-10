@@ -1,3 +1,30 @@
+/**
+ * ⚠️ DEPRECATED FILE — DO NOT USE
+ * 
+ * This file uses multer-storage-cloudinary which uploads directly to Cloudinary
+ * during the multipart parsing phase. This creates a critical bug:
+ * 
+ * PROBLEM:
+ * - CloudinaryStorage sets req.file.path and req.file.filename
+ * - But req.file.buffer remains UNDEFINED
+ * - When route handlers call uploadToCloudinary(req.file.buffer, ...) → CRASH
+ * - Results in 500 errors for all affected endpoints
+ * 
+ * SOLUTION:
+ * - Use middleware/uploadMiddleware.js instead (uses memory storage)
+ * - This populates req.file.buffer with file contents
+ * - mediaService.js then uploads the buffer to Cloudinary
+ * - Cleaner architecture with proper separation of concerns
+ * 
+ * MIGRATION:
+ * 1. Check if any routes import from this file
+ * 2. Replace with: const upload = require('../middleware/uploadMiddleware');
+ * 3. Verify route handler calls: uploadToCloudinary(req.file.buffer, {...})
+ * 4. See mediaRoutes.js for reference implementation
+ * 
+ * TODO: Remove this file and multer.js after migration is complete
+ */
+
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('./cloudinary');
@@ -11,7 +38,7 @@ const createCloudinaryStorage = (folder) => {
             const safeFileName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
             
             cb(null, {
-                folder: `myapp/${folder}/${userId}`,
+                folder: `astrachat/${folder}/${userId}`,
                 allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi', 'mp3', 'm4a', 'wav', 'ogg'],
                 resource_type: 'auto',
                 public_id: `${timestamp}-${safeFileName}`,

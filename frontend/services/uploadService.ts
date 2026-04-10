@@ -323,12 +323,15 @@ export const uploadStory = async (
     console.log('[uploadStory] Media uploaded successfully:', { url: uploadResult.url });
 
     // Step 2: Create story in database
+    // ✅ FIX: Convert duration from milliseconds (from media picker) to seconds (backend expects)
+    // The media picker returns duration in ms, but backend validation expects seconds
+    // Example: 5000ms → 5 seconds
     const storyPayload = {
       mediaUrl: uploadResult.url,
       mediaPublicId: uploadResult.publicId,
       mediaType,
       thumbnailUrl: uploadResult.secureUrl || null,
-      duration: (uploadResult as any).duration || null,
+      duration: (uploadResult as any).duration ? Math.round((uploadResult as any).duration / 1000) : undefined,
       textOverlay: [],
       drawings: [],
     };
